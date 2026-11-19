@@ -41,8 +41,10 @@
 		BillingSubscriptionResponse
 	} from '#lib/types/billing.ts';
 	import { rebateMeterGroups } from '#lib/types/billing.ts';
-	import { formatDate } from '#lib/utils/time.ts';
+	import { formatDate, formatPeriod } from '#lib/utils/time.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { PLAN_FEATURES, isPlanFeature, planFeatureLabelKey } from '#lib/types/planFeatures.ts';
 
 	// RBAC: the backend gates `GET /api/billing/subscription` to admin / cfo and
 	// 403s everyone else. `isAdmin` covers admin; `isCfo` = admin|cfo, so the
@@ -76,7 +78,7 @@
 		try {
 			data = await getBillingSubscription();
 		} catch (e) {
-			error = e instanceof Error ? e.message : m('billing.error.load');
+			error = errorMessage(e, m('billing.error.load'));
 		} finally {
 			loading = false;
 		}
@@ -88,7 +90,7 @@
 		try {
 			invoices = (await getBillingInvoices()).invoices;
 		} catch (e) {
-			invoicesError = e instanceof Error ? e.message : m('billing.error.loadInvoices');
+			invoicesError = errorMessage(e, m('billing.error.loadInvoices'));
 		} finally {
 			invoicesLoading = false;
 		}
@@ -119,7 +121,7 @@
 		try {
 			paymentMethods = (await getBillingPaymentMethods()).payment_methods;
 		} catch (e) {
-			pmError = e instanceof Error ? e.message : m('billing.error.loadPaymentMethods');
+			pmError = errorMessage(e, m('billing.error.loadPaymentMethods'));
 		} finally {
 			pmLoading = false;
 		}
@@ -151,7 +153,7 @@
 		} catch (e) {
 			cardSetup = {
 				state: 'error',
-				message: e instanceof Error ? e.message : m('billing.card.startError')
+				message: errorMessage(e, m('billing.card.startError'))
 			};
 		} finally {
 			addingCard = false;
@@ -183,7 +185,7 @@
 		try {
 			availablePlans = (await getBillingPlans()).plans;
 		} catch (e) {
-			plansError = e instanceof Error ? e.message : m('billing.plan.changeModal.loadError');
+			plansError = errorMessage(e, m('billing.plan.changeModal.loadError'));
 		} finally {
 			plansLoading = false;
 		}
@@ -211,7 +213,7 @@
 			// new plan by the time the user closes the dialog.
 			await load();
 		} catch (e) {
-			changeError = e instanceof Error ? e.message : m('billing.plan.changeModal.changeFailed');
+			changeError = errorMessage(e, m('billing.plan.changeModal.changeFailed'));
 		} finally {
 			changingPlan = false;
 		}
@@ -247,10 +249,11 @@
 		});
 	}
 
+	// No actions column: nothing acts on a single saved card (Add / replace
+	// works on the set), and an empty, unlabelled column was dead width.
 	const PAYMENT_METHOD_COLUMNS = $derived([
 		{ label: m('billing.pm.colCard') },
-		{ label: m('billing.pm.colExpiry') },
-		{ label: '', class: 'actions-col' }
+		{ label: m('billing.pm.colExpiry') }
 	]);
 
 	const plan = $derived(data?.plan ?? null);
@@ -273,11 +276,24 @@
 		return Number.isFinite(v) ? v.toLocaleString(getActiveFormatLocale()) : n;
 	}
 
-	/** Period window label, e.g. "Jun 1 – Jul 1, 2026". */
+	/** Period window label, e.g. "Jun 1, 2026 – Jul 1, 2026". */
 	const periodWindow = $derived(
 		subscription
-			? `${formatDate(subscription.current_period_start)} → ${formatDate(subscription.current_period_end)}`
+			? `${formatDate(subscription.current_period_start)} – ${formatDate(subscription.current_period_end)}`
 			: '—'
+	);
+
+	/** The usage month as a reader says it ("Nov 26"), not the `YYYY-MM` key. */
+	const usagePeriod = $derived(data?.period ? formatPeriod(data.period) : null);
+
+	// Who bills the subscription. The adapter code (`stripe_billing`) is a
+	// config value, not a name; a provider brand is a proper noun and stays
+	// untranslated. An adapter not listed here falls back to the generic word.
+	const PROVIDER_NAMES: Record<string, string> = { stripe_billing: 'Stripe' };
+	const managedBy = $derived(
+		subscription?.externally_managed
+			? (PROVIDER_NAMES[data?.provider ?? ''] ?? m('billing.plan.provider'))
+			: m('billing.plan.selfServe')
 	);
 
 	/** Human label for an invoice settlement state. */
@@ -308,190 +324,222 @@
 		{ label: '', class: 'actions-col' }
 	]);
 
-	/** Pretty list of granted entitlement flags (truthy boolean keys). */
-	const entitlementFlags = $derived(
-		plan
-			? Object.entries(plan.entitlements)
-					.filter(([, v]) => v === true)
-					.map(([k]) => k)
-			: []
-	);
+	/**
+	 * Granted features, named as the pricing page names them (`planFeature.*`)
+	 * and in catalogue order. The raw key (`public_api`) used to be the label.
+	 * A key the client does not know yet (an operator-negotiated grant) still
+	 * shows, de-snaked, after the known ones rather than vanishing.
+	 */
+	const entitlementLabels = $derived.by(() => {
+		if (!plan) return [] as { key: string; label: string }[];
+		const granted = Object.entries(plan.entitlements)
+			.filter(([, v]) => v === true)
+			.map(([k]) => k);
+		const known = PLAN_FEATURES.filter((f) => granted.includes(f)).map((f) => ({
+			key: f,
+			label: m(planFeatureLabelKey(f))
+		}));
+		const unknown = granted
+			.filter((k) => !isPlanFeature(k))
+			.map((k) => ({ key: k, label: k.replace(/_/g, ' ') }));
+		return [...known, ...unknown];
+	});
 </script>
 
 <PageHeader title={m('billing.title')}>
-	{#if error}
-		<LoadError message={error} onretry={load} testId="billing-error" />
-	{:else}
-		{#if loading}
-			<p class="state" data-testid="billing-loading">{m('billing.loading')}</p>
-		{:else if !hasSubscription}
-			<!-- Friendly empty state — the org has no live subscription yet. -->
-			<div class="empty" data-testid="billing-empty">
-				<h2>{m('billing.empty.heading')}</h2>
-				<p>{m('billing.empty.body')}</p>
-				<!-- Labelled "Contact sales": the org has no subscription yet. -->
-				<a class="btn primary" href="mailto:{CONTACT.sales}"
-					>{m('billing.empty.contactSales')}</a
-				>
-			</div>
-		{:else if plan && subscription}
-			<!-- Active subscription detail. -->
-			<section class="plan-card" aria-label={m('billing.plan.aria')} data-testid="billing-plan">
-				<div class="plan-head">
-					<div>
-						<span class="eyebrow">{m('billing.plan.current')}</span>
-						<h2 class="plan-name">{plan.name}</h2>
-					</div>
-					<SubscriptionBadge status={subscription.status} />
-				</div>
-
-				<div class="plan-meta">
-					<div class="meta-item">
-						<span class="meta-label">{m('billing.plan.price')}</span>
-						<span class="meta-value">
-							<Money amount={plan.monthly_price} currency={plan.currency} />
-							<span class="per">{m('billing.plan.perMonth')}</span>
-						</span>
-					</div>
-					<div class="meta-item">
-						<span class="meta-label">{m('billing.plan.period')}</span>
-						<span class="meta-value">{periodWindow}</span>
-					</div>
-					{#if subscription.status === 'trialing'}
-						<div class="meta-item">
-							<span class="meta-label">{m('billing.plan.trialEnds')}</span>
-							<span class="meta-value">{formatDate(subscription.trial_end)}</span>
-						</div>
-					{/if}
-					<div class="meta-item">
-						<span class="meta-label">{m('billing.plan.managedBy')}</span>
-						<span class="meta-value">
-							{subscription.externally_managed ? data?.provider ?? m('billing.plan.provider') : m('billing.plan.selfServe')}
-						</span>
-					</div>
-				</div>
-
-				{#if entitlementFlags.length > 0}
-					<div class="entitlements">
-						<span class="meta-label">{m('billing.plan.included')}</span>
-						<ul>
-							{#each entitlementFlags as flag (flag)}
-								<li>{flag.replace(/_/g, ' ')}</li>
-							{/each}
-						</ul>
+	<!-- One reading column, top to bottom in the order the reader asks the
+	     questions: what am I on and is it healthy (plan), how much have I used
+	     against it (usage), how do I pay (payment method), what have I paid
+	     (invoices). Every section shares the column's width, so the edges line
+	     up instead of the plan card stopping at 720px under a full-width meter. -->
+	<div class="billing">
+		{#if error}
+			<LoadError message={error} onretry={load} testId="billing-error" />
+		{:else}
+			{#if loading}
+				<!-- The plan card's slot, held from first paint so the sections
+				     below (which load on their own) do not jump when it lands. -->
+				<section class="panel plan-card plan-pending" aria-busy="true" data-testid="billing-loading">
+					<p class="state">{m('billing.loading')}</p>
+				</section>
+			{:else if !hasSubscription}
+				<!-- The org has no live subscription yet. Not `<EmptyState>`: its
+				     title is a paragraph, and this one is the page's section heading. -->
+				<section class="panel empty" data-testid="billing-empty">
+					<h2>{m('billing.empty.heading')}</h2>
+					<p>{m('billing.empty.body')}</p>
+					<!-- Labelled "Contact sales": the org has no subscription yet. -->
+					<a class="btn-primary btn-link" href="mailto:{CONTACT.sales}"
+						>{m('billing.empty.contactSales')}</a
+					>
+				</section>
+			{:else if plan && subscription}
+				{#if subscription.status === 'past_due'}
+					<!-- The one state that needs the reader to act before the dunning
+					     sweep cancels them; it says what to do and takes them to where
+					     they do it. (`canceled` never reaches this page: the endpoint
+					     reports only a live subscription, so that is the empty state.) -->
+					<div class="callout tone-danger" role="status" data-testid="billing-status-callout">
+						<strong>{m('billing.status.pastDue.title')}</strong>
+						<p>{m('billing.status.pastDue.body')}</p>
+						<a href="#billing-payment-methods">{m('billing.status.pastDue.action')}</a>
 					</div>
 				{/if}
 
-				<div class="actions">
-					<button
-						type="button"
-						class="btn"
-						onclick={openChangePlan}
-						data-testid="billing-change-plan"
-					>
-						{m('billing.plan.changePlan')}
-					</button>
-					<!-- "Need a plan change?" is a commercial ask, so it goes to sales. -->
-					<a class="link" href="mailto:{CONTACT.sales}">{m('billing.plan.changeContact')}</a>
+				<section class="panel plan-card" aria-label={m('billing.plan.aria')} data-testid="billing-plan">
+					<div class="plan-head">
+						<div class="plan-title">
+							<span class="eyebrow">{m('billing.plan.current')}</span>
+							<div class="plan-name-row">
+								<h2 class="plan-name">{plan.name}</h2>
+								<SubscriptionBadge status={subscription.status} />
+							</div>
+						</div>
+						<p class="plan-price">
+							<span class="price-figure"><Money amount={plan.monthly_price} currency={plan.currency} /></span>
+							<span class="per">{m('billing.plan.perMonth')}</span>
+						</p>
+					</div>
+
+					<dl class="plan-meta">
+						<div class="meta-item">
+							<dt>{m('billing.plan.period')}</dt>
+							<dd>{periodWindow}</dd>
+						</div>
+						{#if subscription.status === 'trialing'}
+							<div class="meta-item">
+								<dt>{m('billing.plan.trialEnds')}</dt>
+								<dd>{formatDate(subscription.trial_end)}</dd>
+							</div>
+						{/if}
+						<div class="meta-item">
+							<dt>{m('billing.plan.managedBy')}</dt>
+							<dd>{managedBy}</dd>
+						</div>
+					</dl>
+
+					{#if entitlementLabels.length > 0}
+						<div class="entitlements">
+							<h3 class="meta-label">{m('billing.plan.included')}</h3>
+							<ul>
+								{#each entitlementLabels as f (f.key)}
+									<li>
+										<svg class="check" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+											<path d="M3.5 8.5l3 3 6-7" />
+										</svg>
+										<span>{f.label}</span>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
+
+					<div class="plan-actions">
+						<button
+							type="button"
+							class="btn-primary"
+							onclick={openChangePlan}
+							data-testid="billing-change-plan"
+						>
+							{m('billing.plan.changePlan')}
+						</button>
+						<!-- "Need a plan change?" is a commercial ask, so it goes to sales. -->
+						<a class="link" href="mailto:{CONTACT.sales}">{m('billing.plan.changeContact')}</a>
+					</div>
+				</section>
+			{/if}
+
+			<!-- Usage — ONE section, rendered on every non-error state rather than
+			     a copy inside each branch of the chain above (decisions §125, §143: a KPI
+			     row is never gated on its own response, and which branch would own
+			     it is the question still in flight). `asCount` coerces a missing
+			     count to `'0'`, so the guard is on `data`, not on the field.
+
+			     The priced meter leads (decisions §253): AI-read invoices against
+			     the allowance, overage, cap and pause state. It renders for an org
+			     with no subscription too — that org is on the Free allowance. Only
+			     an admin edits the cap (the endpoint is admin-only). The raw
+			     extraction counters follow as activity, not as the bill. -->
+			<section class="usage" aria-label={m('billing.usage.aria')}>
+				<h2 class="section-title">
+					{m('billing.usage.heading')}
+					{#if usagePeriod}<span class="period">· {usagePeriod}</span>{/if}
+				</h2>
+
+				<div class="panel">
+					<AiUsagePanel
+						usage={data?.ai_usage ?? null}
+						pending={loading}
+						canEditCap={auth.isAdmin}
+						onUsageChange={(ai) => {
+							if (data) data = { ...data, ai_usage: ai };
+						}}
+					/>
+				</div>
+
+				<div class="usage-counts" data-testid="billing-usage-counts">
+					<div class="help-row usage-title">
+						<h3>{m('billing.usage.activity')}</h3>
+						<HelpTip term="extraction" />
+					</div>
+					<div class="kpi-row">
+						<KpiCard
+							value={data ? asCount(data.usage.extractions) : null}
+							label={m('billing.usage.extractions')}
+							pending={loading}
+						/>
+						<KpiCard
+							value={data ? asCount(data.usage.extractions_platform) : null}
+							label={m('billing.usage.billableExtractions')}
+							pending={loading}
+						/>
+						<!-- One card PER CURRENCY, never a cross-currency sum. No
+						     rebates → no card, rather than a $0.00 in a currency the
+						     page picked. `rebateGroups` is empty while `data` is null,
+						     so these appear with the response and never as a dash.
+						     An org with no subscription gets them IN the row; one
+						     with a plan gets the note below it. -->
+						{#if !hasSubscription}
+							{#each rebateGroups as group (group.currency)}
+								<KpiCard
+									value={formatMoney(group.total, { currency: group.currency })}
+									label={rebateGroups.length > 1
+										? `${m('billing.usage.cardRebates')} (${group.currency})`
+										: m('billing.usage.cardRebates')}
+									highlight="green"
+								/>
+							{/each}
+						{/if}
+					</div>
+					{#if hasSubscription && rebateGroups.length > 0}
+						<p class="note">
+							{m('billing.usage.cardRebatesNote')}
+							{#each rebateGroups as group, i (group.currency)}{i > 0
+									? ', '
+									: ''}<Money amount={group.total} currency={group.currency} />{/each}
+							{m('billing.usage.informational')}
+							<HelpTip term="card-rebate" />
+						</p>
+					{/if}
 				</div>
 			</section>
 		{/if}
 
-		<!-- Usage meters — ONE section, rendered on every non-error state rather
-		     than a copy inside each branch of the chain above.
-
-		     It used to be two, both gated on `{#if loading}` having already
-		     resolved, so the meters collapsed to nothing while the subscription
-		     was in flight (`docs/decisions.md` §125 — a KPI row is never gated on
-		     its own response). They could not simply each take `pending`: which
-		     branch owns the row is decided by `hasSubscription`, and while the
-		     response is out there is no answer to that — the row has to live
-		     outside the question. Two copies also could not BOTH be brought onto
-		     the convention without a third for the loading state.
-
-		     `asCount` coerces a missing count to `'0'`, so the guard is on `data`
-		     rather than on the field: a `'0'` is a figure as far as `KpiCard` is
-		     concerned, and `pending` would have had nothing to do. Every settled
-		     figure is unchanged.
-
-		     The two presentations the branches carried are preserved exactly: an
-		     org with no subscription gets its per-currency rebate cards IN the
-		     row, one with a plan gets the note below it. -->
-		<section class="usage-section" aria-label={m('billing.usage.aria')}>
-			<div class="help-row usage-title">
-				<h3>{m('billing.usage.heading')} <span class="period">({data?.period ?? '—'})</span></h3>
-				<HelpTip term="extraction" />
-			</div>
-			<div class="kpi-row">
-				<KpiCard
-					value={data ? asCount(data.usage.extractions) : null}
-					label={m('billing.usage.extractions')}
-					pending={loading}
-				/>
-				<KpiCard
-					value={data ? asCount(data.usage.extractions_platform) : null}
-					label={m('billing.usage.billableExtractions')}
-					pending={loading}
-				/>
-				<!-- One card PER CURRENCY. The meter used to be a single
-				     cross-currency sum rendered with no currency at all, so a
-				     tenant accruing EUR rebates read them as dollars. No
-				     rebates → no card, rather than a $0.00 in a currency the
-				     page picked. `rebateGroups` is empty while `data` is null,
-				     so these appear with the response and never as a dash. -->
-				{#if !hasSubscription}
-					{#each rebateGroups as group (group.currency)}
-						<KpiCard
-							value={formatMoney(group.total, { currency: group.currency })}
-							label={rebateGroups.length > 1
-								? `${m('billing.usage.cardRebates')} (${group.currency})`
-								: m('billing.usage.cardRebates')}
-							highlight="green"
-						/>
-					{/each}
-				{/if}
-			</div>
-			{#if hasSubscription && rebateGroups.length > 0}
-				<p class="note">
-					{m('billing.usage.cardRebatesNote')}
-					{#each rebateGroups as group, i (group.currency)}{i > 0
-							? ', '
-							: ''}<Money amount={group.total} currency={group.currency} />{/each}
-					{m('billing.usage.informational')}
-					<HelpTip term="card-rebate" />
-				</p>
-			{/if}
-		</section>
-
-		<!-- The priced meter (decisions §253): AI-read invoices against the plan
-		     allowance, the overage + its projection, the spending cap and the
-		     pause state. Rendered for an org with no subscription too — it is on
-		     the Free allowance. Only an admin edits the cap (the endpoint is
-		     admin-only); a CFO sees it read-only. -->
-		<AiUsagePanel
-			usage={data?.ai_usage ?? null}
-			pending={loading}
-			canEditCap={auth.isAdmin}
-			onUsageChange={(ai) => {
-				if (data) data = { ...data, ai_usage: ai };
-			}}
-		/>
-	{/if}
-
-	<!-- Payment methods — the org's saved cards (PII-safe metadata only). Loaded
-	     independently of the plan/usage block, so it renders for an org with a
-	     card on file but no live subscription too. -->
-	{#if !loading && !error}
+		<!-- Payment methods — the org's saved cards (PII-safe metadata only).
+		     Loaded independently of the plan/usage block, with its own loading
+		     and error states, so it renders while the plan is still loading, for
+		     an org with no live subscription, and even when the plan failed. -->
 		<section
-			class="payment-methods-section"
+			id="billing-payment-methods"
+			class="list-section"
 			aria-label={m('billing.pm.aria')}
 			data-testid="billing-payment-methods"
 		>
-			<div class="pm-head">
-				<h3>{m('billing.pm.heading')}</h3>
+			<div class="section-head">
+				<h2 class="section-title">{m('billing.pm.heading')}</h2>
 				<button
 					type="button"
-					class="btn"
+					class="btn-cancel"
 					onclick={startAddCard}
 					disabled={addingCard}
 					data-testid="billing-add-card"
@@ -520,7 +568,7 @@
 						<a class="link" href="mailto:{CONTACT.support}">{m('billing.card.contactUs')}</a>
 					{:else if cardSetup.state === 'error'}
 						<p>{cardSetup.message}</p>
-						<button type="button" class="btn" onclick={startAddCard}>{m('common.retry')}</button>
+						<button type="button" class="btn-cancel" onclick={startAddCard}>{m('common.retry')}</button>
 					{:else if cardSetup.state === 'ready'}
 						<p>{cardSetup.message}</p>
 						<!-- DEPLOYED-ONLY SEAM: mount the provider's card form (Stripe
@@ -555,27 +603,23 @@
 						{#each paymentMethods as pm (pm.id)}
 							<tr>
 								<td>
-									{cardLabel(pm)}
+									<span class="card-label">{cardLabel(pm)}</span>
 									{#if pm.is_default}
 										<span class="default-pill">{m('billing.pm.default')}</span>
 									{/if}
 								</td>
-								<td>{cardExpiry(pm)}</td>
-								<td class="actions"></td>
+								<td class="muted">{cardExpiry(pm)}</td>
 							</tr>
 						{/each}
 					{/snippet}
 				</DataTable>
 			{/if}
 		</section>
-	{/if}
 
-	<!-- Invoices / receipts — the org's past platform-billing invoices. Loaded
-	     independently of the plan/usage block above, so it renders for an org
-	     with receipts but no live subscription too. -->
-	{#if !loading && !error}
-		<section class="invoices-section" aria-label={m('billing.invoices.aria')} data-testid="billing-invoices">
-			<h3>{m('billing.invoices.heading')}</h3>
+		<!-- Invoices / receipts — the org's past platform-billing invoices, loaded
+		     independently of everything above for the same reason. -->
+		<section class="list-section" aria-label={m('billing.invoices.aria')} data-testid="billing-invoices">
+			<h2 class="section-title">{m('billing.invoices.heading')}</h2>
 			{#if invoicesLoading}
 				<p class="state" data-testid="billing-invoices-loading">{m('billing.invoices.loading')}</p>
 			{:else if invoicesError}
@@ -594,8 +638,8 @@
 						{#each invoices as inv (inv.id)}
 							<tr>
 								<td class="mono">{inv.number ?? '—'}</td>
-								<td>{inv.period ?? '—'}</td>
-								<td class="num"><Money amount={inv.amount} currency={inv.currency} /></td>
+								<td>{inv.period ? formatPeriod(inv.period) : '—'}</td>
+								<td class="num"><Money amount={inv.amount} currency={inv.currency} mono /></td>
 								<td>
 									<Badge tone={INVOICE_STATUS_TONES[inv.status] ?? 'muted'} variant={inv.status}>
 										{INVOICE_STATUS_LABELS[inv.status] ?? inv.status}
@@ -623,7 +667,7 @@
 				</DataTable>
 			{/if}
 		</section>
-	{/if}
+	</div>
 </PageHeader>
 
 <!-- Plan-change dialog. `POST /api/billing/change-plan` applies the move on the
@@ -709,7 +753,7 @@
 								{/if}
 							</span>
 							<span class="plan-option-price">
-								<Money amount={p.monthly_price} currency={p.currency} />
+								<Money amount={p.monthly_price} currency={p.currency} mono />
 								<span class="per">{m('billing.plan.perMonth')}</span>
 							</span>
 						</label>
@@ -743,272 +787,240 @@
 </Modal>
 
 <style>
+	/* One reading column. A local cap, not a breakpoint: below 64rem the
+	   column is simply the workspace width, so 390px gets no new rule. */
+	.billing {
+		display: flex;
+		flex-direction: column;
+		gap: 2rem;
+		width: 100%;
+		max-width: 64rem;
+		min-width: 0;
+	}
+
+	.billing > :global(*) {
+		min-width: 0;
+	}
+
+	/* The card surface every non-table section sits on — the same radius and
+	   shadow `.grid-container` and `.kpi` use, so the page reads as one set. */
+	.panel {
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		box-shadow: var(--shadow-card);
+		padding: 1.5rem;
+	}
+
+	.section-title {
+		margin: 0;
+		font-size: 1.1rem;
+		font-weight: 600;
+	}
+
+	.section-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+	}
+
+	.list-section,
+	.usage {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+
 	.state {
 		color: var(--text-muted);
-		padding: 1rem 0;
+		margin: 0;
+		padding: 0.5rem 0;
 	}
 
 	.state.error {
 		color: var(--danger);
 	}
 
-	.empty {
-		max-width: 640px;
-		padding: 1rem 0;
+	/* --- Status callout (past due) --- */
+	.callout {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		background: var(--surface);
+		border: 1px solid var(--border);
+		border-left-width: 4px;
+		border-radius: var(--radius);
+		padding: 1rem 1.25rem;
 	}
 
+	.callout.tone-danger {
+		border-left-color: var(--danger);
+	}
+
+	.callout p {
+		margin: 0;
+		color: var(--text-muted);
+	}
+
+	.callout a {
+		color: var(--accent);
+		font-weight: 600;
+		align-self: flex-start;
+		margin-top: 0.25rem;
+	}
+
+	/* --- Empty (no subscription) --- */
 	.empty h2 {
 		margin: 0 0 0.5rem;
+		font-size: 1.25rem;
 	}
 
 	.empty p {
 		color: var(--text-muted);
-		margin: 0 0 1rem;
+		margin: 0 0 1.25rem;
+		max-width: 42rem;
 	}
 
-	.plan-card {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 12px;
-		padding: 1.5rem;
-		max-width: 720px;
-		margin-bottom: 1.5rem;
+	.btn-link {
+		display: inline-block;
+		text-decoration: none;
+	}
+
+	/* --- Current plan --- */
+	.plan-pending {
+		/* Roughly the settled card's height, so the sections below do not jump
+		   when the plan lands. */
+		min-height: 14rem;
 	}
 
 	.plan-head {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: 1rem 2rem;
 	}
 
-	.eyebrow {
+	.plan-title {
+		min-width: 0;
+	}
+
+	.eyebrow,
+	.meta-label,
+	.plan-meta dt {
 		display: block;
 		font-size: 0.75rem;
+		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		color: var(--text-muted);
 	}
 
-	.plan-name {
-		margin: 0.25rem 0 0;
-		font-size: 1.5rem;
-	}
-
-	.plan-meta {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-		gap: 1rem;
-		margin-top: 1.25rem;
-	}
-
-	.meta-item {
+	.plan-name-row {
 		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem 0.75rem;
+		margin-top: 0.35rem;
 	}
 
-	.meta-label {
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--text-muted);
+	.plan-name {
+		margin: 0;
+		font-size: 1.75rem;
+		line-height: 1.2;
+		overflow-wrap: anywhere;
 	}
 
-	.meta-value {
-		font-weight: 600;
+	.plan-price {
+		margin: 0;
+		display: flex;
+		align-items: baseline;
+		gap: 0.35rem;
+		white-space: nowrap;
+	}
+
+	.price-figure {
+		font-size: 1.75rem;
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.per {
 		font-weight: 400;
 		color: var(--text-muted);
-		font-size: 0.85rem;
+		font-size: 0.9rem;
+	}
+
+	.plan-meta {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+		gap: 1rem 1.5rem;
+		margin: 1.5rem 0 0;
+		padding-top: 1.25rem;
+		border-top: 1px solid var(--hairline);
+	}
+
+	.meta-item {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+		min-width: 0;
+	}
+
+	.plan-meta dd {
+		margin: 0;
+		font-weight: 600;
+		overflow-wrap: anywhere;
 	}
 
 	.entitlements {
-		margin-top: 1.25rem;
+		margin-top: 1.5rem;
 	}
 
+	.entitlements h3 {
+		margin: 0;
+	}
+
+	/* A checklist, not tag pills: the features are what the plan buys, and a
+	   list of sentences reads as one where a cloud of chips does not. */
 	.entitlements ul {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+		gap: 0.5rem 1.5rem;
 		list-style: none;
 		padding: 0;
-		margin: 0.5rem 0 0;
+		margin: 0.6rem 0 0;
 	}
 
-	/* Not `<Badge>`: an entitlement TAG list, not a status — sentence-cased,
-	   regular weight, and read as a group. Colour comes from the palette pair. */
 	.entitlements li {
-		background: var(--accent-tint);
-		color: var(--accent-on-tint);
-		padding: 3px 10px;
-		border-radius: 12px;
-		font-size: 0.8rem;
-		text-transform: capitalize;
-	}
-
-	/* Plan-change modal: picker fieldset + result panel. */
-	.plan-options {
-		border: none;
-		padding: 0;
-		margin: 0 0 1rem;
 		display: flex;
-		flex-direction: column;
+		align-items: flex-start;
 		gap: 0.5rem;
+		font-size: 0.9rem;
 	}
 
-	.plan-options legend {
-		font-size: 0.75rem;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		color: var(--text-muted);
-		padding: 0 0 0.5rem;
+	.check {
+		flex: none;
+		width: 1rem;
+		height: 1rem;
+		margin-top: 0.15rem;
+		fill: none;
+		stroke: var(--success);
+		stroke-width: 2;
+		stroke-linecap: round;
+		stroke-linejoin: round;
 	}
 
-	.plan-option {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		padding: 0.65rem 0.85rem;
-		cursor: pointer;
-	}
-
-	.plan-option:has(input:disabled) {
-		cursor: default;
-		opacity: 0.6;
-	}
-
-	.plan-option.selected {
-		border-color: var(--accent);
-	}
-
-	.plan-option-name {
-		flex: 1;
-		font-weight: 600;
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-
-	.plan-option-price {
-		white-space: nowrap;
-		font-weight: 600;
-	}
-
-	/* Not `<Badge>`: a "this is the one you already have" marker inside a
-	   radio label, deliberately smaller than a status pill (0.7rem) and metric-
-	   matched to `.default-pill` below. Colour comes from the palette pair. */
-	.current-pill {
-		background: var(--muted-tint);
-		color: var(--muted-on-tint);
-		padding: 2px 8px;
-		border-radius: 10px;
-		font-size: 0.7rem;
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-		font-weight: 600;
-	}
-
-	.apply-notice {
-		font-size: 0.85rem;
-		color: var(--text-muted);
-		margin: 0 0 1rem;
-	}
-
-	.change-result .proration {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 1rem;
-		background: var(--surface-2);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		padding: 0.75rem 1rem;
-		margin: 0.75rem 0;
-	}
-
-	.change-result .proration dt {
-		/* Same 4.34:1 failure as the admin code chips — muted text on
-		   --surface-2. /billing is not in the axe route list, so this one was
-		   latent rather than caught. */
-		color: var(--text);
-		font-size: 0.85rem;
-	}
-
-	.change-result .proration dd {
-		margin: 0;
-		font-weight: 600;
-		font-size: 1.1rem;
-	}
-
-	.change-result .hint {
-		font-size: 0.85rem;
-		color: var(--text-muted);
-	}
-
-	.actions {
+	.plan-actions {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.75rem;
+		gap: 0.75rem 1.25rem;
 		margin-top: 1.5rem;
 		padding-top: 1.25rem;
-		border-top: 1px solid var(--border);
-	}
-
-	.usage-section h3 {
-		margin: 0 0 0.75rem;
-	}
-	.usage-title {
-		margin: 0 0 0.75rem;
-	}
-	.usage-section .usage-title > h3 {
-		margin: 0;
-	}
-
-	.period {
-		font-weight: 400;
-		color: var(--text-muted);
-		font-size: 0.9rem;
-	}
-
-	.kpi-row {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-		gap: 1rem;
-	}
-
-	.note {
-		margin-top: 0.75rem;
-		color: var(--text-muted);
-		font-size: 0.9rem;
-	}
-
-	.btn {
-		background: var(--surface-2);
-		color: var(--text);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		padding: 0.5rem 1rem;
-		font-size: 0.9rem;
-		cursor: pointer;
-	}
-
-	.btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.btn.primary {
-		background: var(--accent-strong);
-		color: #fff;
-		border-color: transparent;
-		text-decoration: none;
-		display: inline-block;
+		border-top: 1px solid var(--hairline);
 	}
 
 	.link {
@@ -1016,23 +1028,48 @@
 		font-size: 0.9rem;
 	}
 
-	.payment-methods-section {
-		margin-top: 1.5rem;
-		max-width: 720px;
+	/* --- Usage --- */
+	.period {
+		font-weight: 400;
+		color: var(--text-muted);
+		font-size: 0.95rem;
 	}
 
-	.pm-head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
+	/* `AiUsagePanel` draws its own top rule and offset for when it followed
+	   other content; as the first thing inside its card those are a stray
+	   line. Neutralised here rather than in the shared component. */
+	.usage .panel > :global(.ai-usage) {
+		margin-top: 0;
+		padding-top: 0;
+		border-top: none;
+	}
+
+	.usage-counts {
+		margin-top: 0.5rem;
+	}
+
+	.usage-title {
 		margin: 0 0 0.75rem;
 	}
 
-	.pm-head h3 {
+	.usage-title > h3 {
 		margin: 0;
+		font-size: 0.95rem;
 	}
 
+	.kpi-row {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+		gap: 1rem;
+	}
+
+	.note {
+		margin: 0.75rem 0 0;
+		color: var(--text-muted);
+		font-size: 0.9rem;
+	}
+
+	/* --- Payment methods --- */
 	.card-setup {
 		display: flex;
 		flex-wrap: wrap;
@@ -1040,9 +1077,8 @@
 		gap: 0.75rem;
 		background: var(--surface);
 		border: 1px solid var(--border);
-		border-radius: 8px;
+		border-radius: var(--radius-sm);
 		padding: 0.75rem 1rem;
-		margin-bottom: 0.75rem;
 		font-size: 0.9rem;
 	}
 
@@ -1071,11 +1107,17 @@
 		border: none;
 		cursor: pointer;
 		padding: 0;
+		min-height: 24px;
 	}
 
-	/* Not `<Badge>`: the "default card" marker inside a table cell — same
-	   smaller register as `.current-pill` above, and it owns its own inline
-	   offset. Colour comes from the palette pair. */
+	.card-label {
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* Not `<Badge>`: the "default card" marker inside a table cell — a
+	   register smaller than a status pill, metric-matched to `.current-pill`
+	   below, and it owns its own inline offset. Colour is the palette pair. */
 	.default-pill {
 		display: inline-block;
 		margin-left: 0.5rem;
@@ -1089,15 +1131,7 @@
 		font-weight: 600;
 	}
 
-	.invoices-section {
-		margin-top: 1.5rem;
-		max-width: 720px;
-	}
-
-	.invoices-section h3 {
-		margin: 0 0 0.75rem;
-	}
-
+	/* --- Invoices --- */
 	.num {
 		text-align: right;
 	}
@@ -1106,7 +1140,114 @@
 		color: var(--text-muted);
 	}
 
-	/* The settlement-state pill is `<Badge>` now. It already spelled out the
-	   shared recipe by hand ("mirrors the StatusBadge .badge recipe") in three
-	   private tones — exactly the duplication the primitive exists to end. */
+	/* --- Plan-change modal: picker fieldset + result panel --- */
+	.plan-options {
+		border: none;
+		padding: 0;
+		margin: 0 0 1rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+
+	.plan-options legend {
+		font-size: 0.75rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--text-muted);
+		padding: 0 0 0.5rem;
+	}
+
+	.plan-option {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		padding: 0.75rem 0.9rem;
+		cursor: pointer;
+		transition: border-color 0.15s var(--ease-out);
+	}
+
+	.plan-option:hover:not(:has(input:disabled)) {
+		border-color: var(--border-strong);
+	}
+
+	/* The plan you already have: de-emphasised with the muted colour token,
+	   never `opacity`, which takes the text below its contrast floor. */
+	.plan-option:has(input:disabled) {
+		cursor: default;
+		color: var(--text-muted);
+	}
+
+	.plan-option.selected {
+		border-color: var(--accent);
+		box-shadow: 0 0 0 1px var(--accent);
+	}
+
+	.plan-option-name {
+		flex: 1;
+		min-width: 0;
+		font-weight: 600;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.plan-option-price {
+		white-space: nowrap;
+		font-weight: 600;
+	}
+
+	/* Not `<Badge>`: a "this is the one you already have" marker inside a
+	   radio label, deliberately smaller than a status pill and metric-matched
+	   to `.default-pill` above. Colour comes from the palette pair. */
+	.current-pill {
+		background: var(--muted-tint);
+		color: var(--muted-on-tint);
+		padding: 2px 8px;
+		border-radius: 10px;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		font-weight: 600;
+	}
+
+	.apply-notice {
+		font-size: 0.85rem;
+		color: var(--text-muted);
+		margin: 0 0 1rem;
+	}
+
+	.change-result .proration {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		background: var(--surface-2);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		padding: 0.75rem 1rem;
+		margin: 0.75rem 0;
+	}
+
+	.change-result .proration dt {
+		/* Muted text on --surface-2 is 4.34:1; only --text clears 4.5:1 there.
+		   /billing was not in the axe route list, so this one was latent. */
+		color: var(--text);
+		font-size: 0.85rem;
+	}
+
+	.change-result .proration dd {
+		margin: 0;
+		font-weight: 600;
+		font-size: 1.1rem;
+	}
+
+	.change-result .hint {
+		font-size: 0.85rem;
+		color: var(--text-muted);
+	}
 </style>
