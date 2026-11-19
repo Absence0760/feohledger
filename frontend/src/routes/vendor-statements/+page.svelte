@@ -424,7 +424,7 @@
 									armed={confirmDeleteId === recon.id}
 									disabled={busyId === recon.id}
 									onclick={() => deleteRecon(recon)}
-									ariaLabel={m('vendorStatements.row.deleteAria', { vendor: recon.vendor_name ?? m('vendorStatements.vendorFallback'), date: formatDate(recon.statement_date) })}
+									ariaLabel={m('common.rowActionAria', { action: confirmDeleteId === recon.id ? m('vendorStatements.row.confirm') : m('vendorStatements.row.delete'), name: `${recon.vendor_name ?? m('vendorStatements.vendorFallback')} ${formatDate(recon.statement_date)}` })}
 								>
 									{confirmDeleteId === recon.id ? m('vendorStatements.row.confirm') : m('vendorStatements.row.delete')}
 								</RowAction>

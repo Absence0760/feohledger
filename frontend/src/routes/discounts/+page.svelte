@@ -745,7 +745,7 @@
 										armed={confirmDeclineId === offer.id}
 										disabled={declining}
 										onclick={() => decline(offer)}
-										ariaLabel={m('discounts.row.declineAria', { vendor: offer.vendor_name ?? offer.id.slice(0, 8) })}
+										ariaLabel={m('common.rowActionAria', { action: confirmDeclineId === offer.id ? m('discounts.row.confirm') : m('discounts.row.decline'), name: offer.vendor_name ?? offer.id.slice(0, 8) })}
 									>
 										{confirmDeclineId === offer.id ? m('discounts.row.confirm') : m('discounts.row.decline')}
 									</RowAction>

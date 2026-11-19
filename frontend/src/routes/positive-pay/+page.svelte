@@ -409,7 +409,7 @@
 									armed={confirmDeleteId === file.id}
 									disabled={busyId === file.id}
 									onclick={() => deleteFile(file)}
-									ariaLabel={m('positivePay.row.deleteAria', { label: fileLabel(file) })}
+									ariaLabel={m('common.rowActionAria', { action: confirmDeleteId === file.id ? m('positivePay.row.confirm') : m('positivePay.row.delete'), name: fileLabel(file) })}
 								>
 									{confirmDeleteId === file.id ? m('positivePay.row.confirm') : m('positivePay.row.delete')}
 								</RowAction>

@@ -206,7 +206,7 @@ test.describe('/discounts (clerk — read-only)', () => {
 
 			// …but with no decide controls on any row.
 			await expect(page.getByRole('button', { name: /^Accept discount for / })).toHaveCount(0);
-			await expect(page.getByRole('button', { name: /^Decline discount for / })).toHaveCount(0);
+			await expect(page.getByRole('button', { name: /^Decline for / })).toHaveCount(0);
 
 			// The optimizer is a read for RBAC purposes, so a clerk may run it.
 			const optimize = page.waitForResponse((r) => r.url().includes('/api/discounts/optimize'));

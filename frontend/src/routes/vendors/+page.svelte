@@ -472,7 +472,7 @@
 	function clearSelection() {
 		selected = new Set();
 		selectedAllMatching = false;
-		bulkRejectArmed = false;
+		if (armed?.action === 'bulkReject') armed = null;
 	}
 
 	async function bulkVerify() {
@@ -575,14 +575,16 @@
 		}
 	}
 
-	/** The row whose Reject is armed (one click from committing), or null. */
-	let rejectArmedId = $state<string | null>(null);
-	// The bulk bar's Reject is armed the same way: it does to every selected
-	// vendor what the row Reject does to one — stops their payments and
-	// revokes their live cards — so it must not commit on a single click
-	// either. Any click outside a `.row-action` (a checkbox included, so the
-	// selection can't change under an armed confirm) un-arms it.
-	let bulkRejectArmed = $state(false);
+	// The one armed (one click from committing) Reject on the page: a row's, or
+	// the bulk bar's. The bulk Reject does to every selected vendor what the row
+	// Reject does to one — stops their payments and revokes their live cards —
+	// so it must not commit on a single click either. A single slot means arming
+	// one disarms the other; two separate flags let a row and the bulk bar sit
+	// armed together. Any click outside a `.row-action` (a checkbox included, so
+	// the selection can't change under an armed confirm) un-arms it.
+	let armed = $state<{ action: 'reject'; id: string } | { action: 'bulkReject' } | null>(null);
+	const rejectArmedFor = (id: string) => armed?.action === 'reject' && armed.id === id;
+	const bulkRejectArmed = $derived(armed?.action === 'bulkReject');
 
 	async function rejectVendor(id: string) {
 		try {
@@ -677,8 +679,7 @@
 	onclick={(e) => {
 		// Outside-click un-arms a pending Reject confirmation.
 		if (!(e.target as HTMLElement)?.closest?.('.row-action')) {
-			if (rejectArmedId) rejectArmedId = null;
-			if (bulkRejectArmed) bulkRejectArmed = false;
+			if (armed) armed = null;
 		}
 	}}
 />
@@ -864,16 +865,16 @@
 								     only arms (the shape the change-request queue uses). -->
 								<RowAction
 									variant="danger"
-									armed={rejectArmedId === v.id}
+									armed={rejectArmedFor(v.id)}
 									onclick={(e) => {
 										e.stopPropagation();
-										if (rejectArmedId === v.id) {
-											rejectArmedId = null;
+										if (rejectArmedFor(v.id)) {
+											armed = null;
 											rejectVendor(v.id);
-										} else rejectArmedId = v.id;
+										} else armed = { action: 'reject', id: v.id };
 									}}
 								>
-									{rejectArmedId === v.id ? m('vendors.row.confirmReject') : m('vendors.row.reject')}
+									{rejectArmedFor(v.id) ? m('vendors.row.confirmReject') : m('vendors.row.reject')}
 								</RowAction>
 							{/if}
 							<RowAction onclick={() => openBankEditor(v)}>
@@ -922,9 +923,9 @@
 					disabled={bulkBusy}
 					onclick={() => {
 						if (bulkRejectArmed) {
-							bulkRejectArmed = false;
+							armed = null;
 							bulkReject();
-						} else bulkRejectArmed = true;
+						} else armed = { action: 'bulkReject' };
 					}}
 				>
 					{bulkRejectArmed ? m('vendors.row.confirmReject') : m('vendors.row.reject')}
