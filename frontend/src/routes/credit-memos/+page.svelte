@@ -14,6 +14,7 @@
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import VendorPicker from '#lib/components/ui/VendorPicker.svelte';
@@ -312,7 +313,12 @@
 		// sat on the previous filter's rows with no spinner until the response
 		// landed.
 		if (opts.append) loadingMore = true;
-		else loading = true;
+		else {
+			loading = true;
+			// Clearing on issue is what lets Retry take `LoadError` down and
+			// show the loading line while the new request is out.
+			errored = false;
+		}
 		try {
 			const nextPage = opts.nextPage ?? 1;
 			const params = new URLSearchParams();
@@ -348,8 +354,13 @@
 		} catch {
 			// `isCurrentRequest`, not `canCommit`: only the newest request reports.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			errored = true;
-			toast(m('creditMemos.toast.loadFailed'), 'error');
+			// A failed Load-more keeps the rows already shown, so a toast is
+			// enough. A failed list load has nothing true to show — the previous
+			// filter's rows would otherwise sit under the new chip, with
+			// `errored` set but invisible (the table was not empty) — so
+			// `LoadError` replaces the table, with a Retry.
+			if (opts.append) toast(m('creditMemos.toast.loadMoreFailed'), 'error');
+			else errored = true;
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -594,14 +605,13 @@
 	 * wrong — "No credit memos." under an active Void chip is false whenever
 	 * the tenant has open ones.
 	 */
+	// (A failed fetch never reaches this line: `LoadError` replaces the table.)
 	let emptyMessage = $derived(
 		loading
 			? m('common.loading')
-			: errored
-				? m('common.loadFailed')
-				: filtered
-					? m('creditMemos.empty.filtered')
-					: m('creditMemos.empty')
+			: filtered
+				? m('creditMemos.empty.filtered')
+				: m('creditMemos.empty')
 	);
 
 	// Only the true zero-data case gets the illustrated onboarding block: a
@@ -649,6 +659,12 @@
 			description={m('creditMemos.onboarding.description')}
 			actionLabel={canMutate ? m('creditMemos.new') : undefined}
 			onaction={canMutate ? openCreate : undefined}
+		/>
+	{:else if errored}
+		<LoadError
+			message={m('creditMemos.toast.loadFailed')}
+			onretry={() => loadMemos()}
+			testId="credit-memos-load-error"
 		/>
 	{:else}
 		<DataTable isEmpty={memos.length === 0} empty={emptyMessage} colspan={8}>
@@ -739,7 +755,9 @@
 		</DataTable>
 	{/if}
 
-	{#if hasMore}
+	{#if errored}
+		<!-- No footer under a failed load: its counts describe rows not shown. -->
+	{:else if hasMore}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={loadMoreMemos} disabled={loadingMore}>
 				{loadingMore ? m('common.loading') : m('creditMemos.loadMore', { shown: memos.length, total })}

@@ -728,6 +728,7 @@ export const messages = {
 		'Extraktions-Vorgaben: {cache, plural, one {# Lieferanten-Cache-Feld} other {# Lieferanten-Cache-Felder}}, {rag, plural, one {# RAG-Nachbar} other {# RAG-Nachbarn}}',
 	'invoices.empty': 'Keine Rechnungen entsprechen Ihren Filtern.',
 	'invoices.empty.errored': 'Rechnungen konnten nicht geladen werden. Bitte erneut versuchen.',
+	'invoices.toast.loadMoreFailed': 'Weitere Rechnungen konnten nicht geladen werden.',
 	'invoices.empty.fresh': 'Noch keine Rechnungen. Laden Sie eine hoch, erstellen Sie eine manuell oder importieren Sie eine CSV, um Ihre offenen Verbindlichkeiten zu laden.',
 	'invoices.row.delete': 'Löschen',
 	'invoices.row.confirm': 'Bestätigen',
@@ -1703,6 +1704,7 @@ export const messages = {
 
 	'recurring.dayOfPeriod': 'Tag {day}',
 	'recurring.empty': 'Keine wiederkehrenden Vorlagen entsprechen Ihren Filtern.',
+	'recurring.empty.fresh': 'Noch keine wiederkehrenden Vorlagen.',
 	'recurring.notFound': 'Vorlage nicht gefunden',
 	'recurring.row.open': 'Vorlage {name} öffnen',
 	'recurring.row.generateNow': 'Jetzt erstellen',
@@ -4055,6 +4057,7 @@ export const messages = {
 	'creditMemos.toast.createFailed': 'Erstellen fehlgeschlagen',
 	'creditMemos.toast.created': 'Gutschrift erstellt',
 	'creditMemos.toast.loadFailed': 'Gutschriften konnten nicht geladen werden',
+	'creditMemos.toast.loadMoreFailed': 'Weitere Gutschriften konnten nicht geladen werden.',
 	'creditMemos.toast.updateFailed': 'Aktualisieren fehlgeschlagen',
 	'creditMemos.toast.updated': 'Gutschrift aktualisiert',
 	'creditMemos.toast.voidFailed': 'Stornieren fehlgeschlagen',

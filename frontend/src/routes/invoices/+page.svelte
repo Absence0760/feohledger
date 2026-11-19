@@ -31,6 +31,7 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
@@ -507,6 +508,13 @@
 	async function refreshInvoiceList() {
 		await invoiceStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method, routes through api client
 		await invoiceStore.fetchCounts(buildParams());
+	}
+
+	// A failed Load-more keeps the rows already shown, so a toast is enough —
+	// it used to be an unhandled rejection: the button re-enabled with nothing
+	// said, and a second click failed the same way.
+	function loadMoreInvoices() {
+		invoiceStore.loadMore().catch(() => toast(m('invoices.toast.loadMoreFailed'), 'error'));
 	}
 
 	function closeInvoiceModal() {
@@ -1083,6 +1091,16 @@
 			onaction={() => fileInput.click()}
 			testId="invoices-empty-state"
 		/>
+	{:else if invoiceStore.errored && !invoiceStore.loading}
+		<!-- A failed list load replaces the table (ui-patterns.md § LoadError).
+		     The empty-line message alone was not enough: when a filter change
+		     failed, the PREVIOUS filter's rows stayed on screen under the new
+		     chip with nothing saying they were stale, and no way to retry. -->
+		<LoadError
+			message={m('invoices.empty.errored')}
+			onretry={() => void refreshInvoiceList().catch(() => {})}
+			testId="invoices-load-error"
+		/>
 	{:else}
 	<DataTable isEmpty={invoiceStore.all.length === 0} empty={emptyMessage} colspan={10} fixed stickyHeader>
 		{#snippet header()}
@@ -1192,13 +1210,13 @@
 	</DataTable>
 	{/if}
 
-	{#if invoiceStore.hasMore}
+	{#if invoiceStore.hasMore && !invoiceStore.errored}
 		<div class="load-more-row">
-			<button class="btn-load-more" onclick={() => invoiceStore.loadMore()} disabled={invoiceStore.loading}>
+			<button class="btn-load-more" onclick={loadMoreInvoices} disabled={invoiceStore.loading}>
 				{invoiceStore.loading ? m('common.loading') : m('invoices.loadMore', { shown: invoiceStore.all.length, total: invoiceStore.total })}
 			</button>
 		</div>
-	{:else if invoiceStore.total > 0}
+	{:else if invoiceStore.total > 0 && !invoiceStore.errored}
 		<div class="load-more-row">
 			<span class="load-more-end">{m('invoices.showingAll', { total: invoiceStore.total })}</span>
 		</div>

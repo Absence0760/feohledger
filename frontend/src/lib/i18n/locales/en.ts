@@ -809,6 +809,7 @@ export const en = {
 		'Extraction priors: {cache, plural, one {# vendor-cache field} other {# vendor-cache fields}}, {rag, plural, one {# RAG neighbor} other {# RAG neighbors}}',
 	'invoices.empty': 'No invoices match your filters.',
 	'invoices.empty.errored': 'Could not load invoices. Try again.',
+	'invoices.toast.loadMoreFailed': 'Could not load more invoices.',
 	'invoices.empty.fresh': 'No invoices yet. Upload one, create one manually, or import a CSV to load your open AP.',
 	'invoices.row.delete': 'Delete',
 	'invoices.row.confirm': 'Confirm',
@@ -1846,6 +1847,7 @@ export const en = {
 
 	'recurring.dayOfPeriod': 'day {day}',
 	'recurring.empty': 'No recurring templates match your filters.',
+	'recurring.empty.fresh': 'No recurring templates yet.',
 	'recurring.notFound': 'Template not found',
 	'recurring.row.open': 'Open template {name}',
 	'recurring.row.generateNow': 'Generate now',
@@ -4228,6 +4230,7 @@ export const en = {
 	'creditMemos.toast.createFailed': 'Create failed',
 	'creditMemos.toast.created': 'Credit memo created',
 	'creditMemos.toast.loadFailed': 'Failed to load credit memos',
+	'creditMemos.toast.loadMoreFailed': 'Could not load more credit memos.',
 	'creditMemos.toast.updateFailed': 'Update failed',
 	'creditMemos.toast.updated': 'Credit memo updated',
 	'creditMemos.toast.voidFailed': 'Void failed',
