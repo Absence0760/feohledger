@@ -99,7 +99,7 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'currency': 'currency',
   },
   'po_billed_beyond_receipt': {
-    'billedAmount': 'money',
+    'totalBilled': 'money',
     'poNumber': 'text',
     'receivedValue': 'money',
     'currency': 'currency',
@@ -575,16 +575,16 @@ String? _localizeWarningCode(
         poNumber,
         poTotal,
       );
-    // Other invoices already bill {billedAmount} {currency} against PO {poNumber}, of which goods worth {receivedValue} {currency} have been received — this invoice takes it past what was received
+    // Invoices on PO {poNumber} bill {totalBilled} {currency}, this one included; goods worth {receivedValue} {currency} have been received
     case 'po_billed_beyond_receipt':
-      final billedAmount = _money(p['billedAmount'], currency);
-      if (billedAmount == null) return null;
+      final totalBilled = _money(p['totalBilled'], currency);
+      if (totalBilled == null) return null;
       final poNumber = _text(p['poNumber'], currency);
       if (poNumber == null) return null;
       final receivedValue = _money(p['receivedValue'], currency);
       if (receivedValue == null) return null;
       return l.invoiceWarningPoBilledBeyondReceipt(
-        billedAmount,
+        totalBilled,
         poNumber,
         receivedValue,
       );

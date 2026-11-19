@@ -610,7 +610,7 @@ export const messages = {
 	'invoices.warning.poNotFound': 'Pedido {poNumber} não encontrado',
 	'invoices.warning.poAmountVariance': 'Variação de valor {variancePct} em relação ao pedido {poNumber} (nota {invoiceAmount} contra pedido {poTotal})',
 	'invoices.warning.poBilledBeyondTotal': 'Outras faturas já cobram {billedAmount} contra o pedido {poNumber}, cujo total é {poTotal} — esta fatura ultrapassa esse total',
-	'invoices.warning.poBilledBeyondReceipt': 'Outras faturas já cobram {billedAmount} contra o pedido {poNumber}, do qual foram recebidas mercadorias no valor de {receivedValue} — esta fatura ultrapassa o que foi recebido',
+	'invoices.warning.poBilledBeyondReceipt': 'As faturas do pedido {poNumber} cobram {totalBilled}, incluindo esta; foram recebidas mercadorias no valor de {receivedValue}',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Variação de valor {variancePct} em relação ao pedido {poNumber}, que não registra moeda (nota {invoiceAmount} contra pedido {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'A nota está em {invoiceCurrency}, mas o pedido {poNumber} está em {poCurrency} — os valores não foram comparados',
 	'invoices.warning.poCurrencyMismatchInvoiceCurrencyUnknown': 'A nota não registra uma moeda válida e os pedidos de {poNumber} estão em moedas diferentes ({poCurrencies}) — os valores não foram comparados',
