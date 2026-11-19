@@ -437,8 +437,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get paymentsEmpty => '支払いはありません';
 
   @override
-  String paymentsErrorPrefix(String error) {
-    return 'エラー: $error';
+  String paymentsLoadErrorPrefix(String error) {
+    return '支払を読み込めませんでした: $error';
   }
 
   @override
@@ -1129,10 +1129,14 @@ class AppLocalizationsJa extends AppLocalizations {
   String get payQueueEmpty => '支払待ちの請求書はありません';
 
   @override
-  String get payQueueError => '支払キューを読み込めませんでした';
+  String payQueueLoadErrorPrefix(String error) {
+    return '支払キューを読み込めませんでした: $error';
+  }
 
   @override
-  String get payQueueRetry => '再試行';
+  String payRunsLoadErrorPrefix(String error) {
+    return '支払実行を読み込めませんでした: $error';
+  }
 
   @override
   String payQueueDue(String date) {

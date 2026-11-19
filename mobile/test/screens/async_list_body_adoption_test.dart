@@ -26,8 +26,6 @@ const _notYetConverted = <String>{
   'inspections_screen.dart',
   'invoice_detail_screen.dart',
   'notifications_screen.dart',
-  'payment_queue_screen.dart',
-  'payments_screen.dart',
   'vendors_screen.dart',
   'workflow_detail_screen.dart',
   'workflows_screen.dart',

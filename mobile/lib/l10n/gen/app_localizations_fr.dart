@@ -460,8 +460,8 @@ class AppLocalizationsFr extends AppLocalizations {
   String get paymentsEmpty => 'Aucun paiement';
 
   @override
-  String paymentsErrorPrefix(String error) {
-    return 'Erreur : $error';
+  String paymentsLoadErrorPrefix(String error) {
+    return 'Impossible de charger les paiements : $error';
   }
 
   @override
@@ -1242,10 +1242,14 @@ class AppLocalizationsFr extends AppLocalizations {
   String get payQueueEmpty => 'Aucune facture en attente de paiement';
 
   @override
-  String get payQueueError => 'Impossible de charger la file de paiement';
+  String payQueueLoadErrorPrefix(String error) {
+    return 'Impossible de charger la file de paiement : $error';
+  }
 
   @override
-  String get payQueueRetry => 'Réessayer';
+  String payRunsLoadErrorPrefix(String error) {
+    return 'Impossible de charger les lots de paiement : $error';
+  }
 
   @override
   String payQueueDue(String date) {

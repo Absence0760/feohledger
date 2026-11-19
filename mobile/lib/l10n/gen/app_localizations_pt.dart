@@ -458,8 +458,8 @@ class AppLocalizationsPt extends AppLocalizations {
   String get paymentsEmpty => 'Nenhum pagamento';
 
   @override
-  String paymentsErrorPrefix(String error) {
-    return 'Erro: $error';
+  String paymentsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar os pagamentos: $error';
   }
 
   @override
@@ -1239,10 +1239,14 @@ class AppLocalizationsPt extends AppLocalizations {
   String get payQueueEmpty => 'Nenhuma fatura aguardando pagamento';
 
   @override
-  String get payQueueError => 'Não foi possível carregar a fila de pagamentos';
+  String payQueueLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar a fila de pagamentos: $error';
+  }
 
   @override
-  String get payQueueRetry => 'Tentar novamente';
+  String payRunsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar os lotes de pagamento: $error';
+  }
 
   @override
   String payQueueDue(String date) {
@@ -5249,8 +5253,8 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get paymentsEmpty => 'Nenhum pagamento';
 
   @override
-  String paymentsErrorPrefix(String error) {
-    return 'Erro: $error';
+  String paymentsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar os pagamentos: $error';
   }
 
   @override
@@ -6030,10 +6034,14 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get payQueueEmpty => 'Nenhuma fatura aguardando pagamento';
 
   @override
-  String get payQueueError => 'Não foi possível carregar a fila de pagamentos';
+  String payQueueLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar a fila de pagamentos: $error';
+  }
 
   @override
-  String get payQueueRetry => 'Tentar novamente';
+  String payRunsLoadErrorPrefix(String error) {
+    return 'Não foi possível carregar os lotes de pagamento: $error';
+  }
 
   @override
   String payQueueDue(String date) {

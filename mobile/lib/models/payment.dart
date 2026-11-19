@@ -1,3 +1,5 @@
+import 'package:feohledger_mobile/models/payment_queue.dart';
+
 enum PaymentMethod {
   ach('ach'),
   wire('wire'),
@@ -55,23 +57,26 @@ enum PaymentStatus {
 class Payment {
   final String id;
   final String invoiceId;
-  final double amount;
 
-  /// What [amount] — the AUTHORIZED figure — is denominated in. `payments` has
-  /// no currency column; a payment settles in its invoice's currency, and
+  /// The AUTHORIZED figure, exactly as served ([moneyToDisplay]): money is a
+  /// display string on the device, never a `double` it could do arithmetic on.
+  final String amountDisplay;
+
+  /// What [amountDisplay] is denominated in. `payments` has no currency
+  /// column; a payment settles in its invoice's currency, and
   /// `PaymentResponse.currency` joins it through for exactly this reason.
   /// `null` means the invoice carries no code or none was joined, and is NOT
   /// a licence to substitute a default (`docs/decisions.md` §79/§82).
   final String? currency;
 
   /// The accepted early-payment discount this payment TAKES, already deducted
-  /// from [amount] (`PaymentResponse.discount_amount`, migration 0104). `null`
-  /// when the payment moves the full net — never a zero standing in for "no
-  /// discount". Never add it back to [amount] on-device: [amount] is what was
+  /// from [amountDisplay] (`PaymentResponse.discount_amount`, migration 0104).
+  /// `null` when the payment moves the full net — never a zero standing in for
+  /// "no discount". Never added back on-device: the amount is what was
   /// authorized and what settlement is verified against. The offer's id
   /// (`discount_offer_id`) is deliberately not parsed: no mobile screen links
   /// to a discount offer.
-  final double? discountAmount;
+  final String? discountAmountDisplay;
 
   final PaymentMethod method;
   final PaymentStatus status;
@@ -81,9 +86,9 @@ class Payment {
   Payment({
     required this.id,
     required this.invoiceId,
-    required this.amount,
+    required this.amountDisplay,
     this.currency,
-    this.discountAmount,
+    this.discountAmountDisplay,
     required this.method,
     required this.status,
     this.reference,
@@ -91,18 +96,32 @@ class Payment {
   });
 
   factory Payment.fromJson(Map<String, dynamic> json) {
+    final discount = json['discount_amount'];
     return Payment(
       id: json['id'] as String,
       invoiceId: json['invoice_id'] as String,
-      amount: (json['amount'] as num).toDouble(),
+      amountDisplay: moneyToDisplay(json['amount']),
       currency: json['currency'] as String?,
-      discountAmount: (json['discount_amount'] as num?)?.toDouble(),
+      discountAmountDisplay: discount == null ? null : moneyToDisplay(discount),
       method: PaymentMethod.fromString(json['method'] as String),
       status: PaymentStatus.fromString(json['status'] as String),
       reference: json['reference'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
     );
   }
+
+  /// The offline-cache shape: [Payment.fromJson] reads it back unchanged.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'invoice_id': invoiceId,
+        'amount': amountDisplay,
+        'currency': currency,
+        'discount_amount': discountAmountDisplay,
+        'method': method.value,
+        'status': status.value,
+        'reference': reference,
+        'created_at': createdAt.toIso8601String(),
+      };
 }
 
 class DashboardData {

@@ -194,8 +194,9 @@
   "exceptionActionFailed": "Action failed",
   "paymentsTitle": "Payments",
   "paymentsEmpty": "No payments",
-  "paymentsErrorPrefix": "Error: {error}",
-  "@paymentsErrorPrefix": {
+  "paymentsLoadErrorPrefix": "Couldn't load payments: {error}",
+  "@paymentsLoadErrorPrefix": {
+    "description": "Payments history first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.",
     "placeholders": {
       "error": {
         "type": "String"
@@ -813,8 +814,24 @@
     }
   },
   "payQueueEmpty": "No invoices awaiting payment",
-  "payQueueError": "Could not load the payment queue",
-  "payQueueRetry": "Retry",
+  "payQueueLoadErrorPrefix": "Couldn't load the payment queue: {error}",
+  "@payQueueLoadErrorPrefix": {
+    "description": "Pay screen, Queue tab: first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "payRunsLoadErrorPrefix": "Couldn't load payment runs: {error}",
+  "@payRunsLoadErrorPrefix": {
+    "description": "Pay screen, Runs tab: first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "payQueueDue": "Due {date}",
   "@payQueueDue": {
     "placeholders": {

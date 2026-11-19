@@ -237,7 +237,7 @@ void main() {
       final run = PaymentRun.fromJson(
         runResponse(requiresCfoApproval: true),
       );
-      expect(run.status, 'draft');
+      expect(run.status, PaymentRunStatus.draft);
       expect(run.totalAmountDisplay, '5000.0');
       expect(run.currency, 'USD');
       expect(run.paymentCount, 3);
@@ -291,6 +291,68 @@ void main() {
       final run = PaymentRun.fromJson(json);
       expect(run.requiresCfoApproval, isFalse);
       expect(run.cfoApproved, isFalse);
+    });
+  });
+
+  // The run-status rules the Pay screen used to apply to raw strings
+  // (`run.status == 'draft'`, a switch on the status text for the pill), now
+  // predicates on the model so a mistyped comparison can't hide a control.
+  group('PaymentRunStatus + run predicates', () {
+    test('every served status parses; an unnamed one is other, code kept', () {
+      for (final s in PaymentRunStatus.values) {
+        if (s == PaymentRunStatus.other) continue;
+        expect(PaymentRunStatus.fromString(s.value), s);
+      }
+      final run = PaymentRun.fromJson(runResponse(status: 'executing'));
+      expect(run.status, PaymentRunStatus.other);
+      expect(run.statusCode, 'executing');
+      // The empty value of `other` never matches a served empty string back
+      // into a real status.
+      expect(PaymentRunStatus.fromString(''), PaymentRunStatus.other);
+    });
+
+    test('only a draft executes or cancels', () {
+      for (final s in PaymentRunStatus.values) {
+        final code = s == PaymentRunStatus.other ? 'executing' : s.value;
+        final run = PaymentRun.fromJson(runResponse(status: code));
+        final draft = s == PaymentRunStatus.draft;
+        expect(run.isDraft, draft, reason: code);
+        expect(run.isExecutable, draft, reason: code);
+        expect(run.isCancellable, draft, reason: code);
+      }
+    });
+
+    test('record-as-paid is offered on a draft or an exported run only', () {
+      final offered = {
+        for (final s in PaymentRunStatus.values)
+          if (PaymentRun.fromJson(runResponse(
+            status: s == PaymentRunStatus.other ? 'executing' : s.value,
+          )).mayRecordOutside)
+            s,
+      };
+      expect(offered, {PaymentRunStatus.draft, PaymentRunStatus.exported});
+    });
+
+    test('CFO sign-off: waiting only while required and not yet given', () {
+      expect(PaymentRun.fromJson(runResponse()).awaitsCfoApproval, isFalse);
+      final waiting =
+          PaymentRun.fromJson(runResponse(requiresCfoApproval: true));
+      expect(waiting.awaitsCfoApproval, isTrue);
+      expect(waiting.canTakeCfoApproval, isTrue);
+      final signed = PaymentRun.fromJson(runResponse(
+        requiresCfoApproval: true,
+        cfoApprovedAt: '2026-01-11T09:00:00',
+      ));
+      expect(signed.awaitsCfoApproval, isFalse);
+      expect(signed.canTakeCfoApproval, isFalse);
+    });
+
+    test('a run past draft can take no sign-off, even one still owed', () {
+      final exported = PaymentRun.fromJson(
+        runResponse(status: 'exported', requiresCfoApproval: true),
+      );
+      expect(exported.awaitsCfoApproval, isTrue);
+      expect(exported.canTakeCfoApproval, isFalse);
     });
   });
 

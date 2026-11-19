@@ -457,8 +457,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get paymentsEmpty => 'Keine Zahlungen';
 
   @override
-  String paymentsErrorPrefix(String error) {
-    return 'Fehler: $error';
+  String paymentsLoadErrorPrefix(String error) {
+    return 'Zahlungen konnten nicht geladen werden: $error';
   }
 
   @override
@@ -1233,11 +1233,14 @@ class AppLocalizationsDe extends AppLocalizations {
   String get payQueueEmpty => 'Keine Rechnungen zur Zahlung';
 
   @override
-  String get payQueueError =>
-      'Zahlungswarteschlange konnte nicht geladen werden';
+  String payQueueLoadErrorPrefix(String error) {
+    return 'Zahlungswarteschlange konnte nicht geladen werden: $error';
+  }
 
   @override
-  String get payQueueRetry => 'Erneut versuchen';
+  String payRunsLoadErrorPrefix(String error) {
+    return 'Zahlungsläufe konnten nicht geladen werden: $error';
+  }
 
   @override
   String payQueueDue(String date) {
