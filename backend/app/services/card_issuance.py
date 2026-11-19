@@ -508,14 +508,15 @@ async def issue_card_for_invoice(
     if config is None:
         return CardIssueResult(card=None, success=False, failure_reason="cards_not_enabled")
     # A card is denominated in the invoice's currency; one that records none
-    # (blank: the invoice PATCH's legacy value) is refused before any provider
-    # call, never minted as USD. Both callers refuse it earlier with their own
-    # code — the run's card leg in `payment_runs.dispatch_preflight`, and
-    # `POST /api/cards/generate` as `card_skip_currency_unknown` — so this is
-    # the backstop for a caller that skips that gate.
-    from app.services.international_payments import normalize_currency_code
+    # (NULL, blank, whitespace-only or malformed — decisions §473) is refused
+    # before any provider call, never minted as USD or in a malformed code.
+    # Both callers refuse it earlier with their own code — the run's card leg
+    # in `payment_runs.dispatch_preflight`, and `POST /api/cards/generate` as
+    # `card_skip_currency_unknown` — so this is the backstop for a caller that
+    # skips that gate, and it judges with the same predicate they do.
+    from app.services.payment_runs import payable_currency_code
 
-    card_currency = normalize_currency_code(invoice.currency)
+    card_currency = payable_currency_code(invoice.currency)
     if card_currency is None:
         return CardIssueResult(card=None, success=False, failure_reason="currency_unknown")
 
