@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.pagination import PaginationParams, pagination_params
 from app.api.portal_deps import get_current_vendor_user
+from app.api.refusals import ActionRefusal
 from app.database import get_control_db
 from app.models.discount import OFFER_STATUS_OFFERED, DiscountOffer
 from app.models.exception import Exception as APException
@@ -37,6 +38,7 @@ from app.models.invoice_status import was_ever_approved
 from app.models.organization import Organization
 from app.models.payment import Payment
 from app.models.procurement import (
+    DEAD_PO_STATUSES,
     UNISSUED_PO_STATUS,
     POLineItem,
     PurchaseOrder,
@@ -46,6 +48,7 @@ from app.models.supplier_chat import ChatAuthorRole, ChatThreadStatus, SupplierC
 from app.models.vendor import Vendor
 from app.models.vendor_change_request import VendorChangeRequest
 from app.models.vendor_user import VendorUser
+from app.schemas.action_verdict import CodedRefusal
 from app.schemas.money import json_money
 from app.schemas.organization import BrandConfig
 from app.schemas.portal import (
@@ -921,6 +924,54 @@ async def list_my_payments(
 #: the supplier it does not exist until the ERP issues it.
 _SUPPLIER_VISIBLE_PO = PurchaseOrder.status != UNISSUED_PO_STATUS
 
+#: The flip's refusal for a PO that no longer represents a live commitment.
+PO_NOT_INVOICEABLE = "po_not_invoiceable"
+#: The flip's refusal for a PO whose total the ERP's last sync could not vouch
+#: for (decisions §323).
+PO_TOTAL_UNVERIFIABLE = "po_total_unverifiable"
+
+
+def po_flip_refusal(po: PurchaseOrder) -> ActionRefusal | None:
+    """Why the flip would refuse to mint a NEW invoice from ``po``, or ``None``.
+
+    The one gate the flip raises from and the list / detail ship as
+    ``flip_verdict``, so the portal offers "Create invoice" exactly where the
+    endpoint accepts it (issue #575). The caller has already scoped ``po`` to
+    the signed-in vendor, so the ``status`` param names only their own order.
+
+    - **A dead order** (``models/procurement.DEAD_PO_STATUSES``: cancelled,
+      voided, closed — and unissued, which the portal already hides) commits
+      no spend, so there is nothing left to bill. This is deliberately the
+      wider set, not the matcher's ``UNMATCHABLE_PO_STATUSES``: the matcher
+      lets a ``closed`` PO match because the invoice it is matching may itself
+      be what closed it (fully billed), whereas a flip bills the PO's WHOLE
+      total again as a new invoice — on a closed order that is a second bill.
+    - **An unvouched total** (decisions §323): the flip bills ``po.total``, and
+      an invoice minted at a figure nobody vouches for would be a payable at an
+      unconfirmed amount. Kept as the plain-string 409 it always answered.
+    """
+    if po.status in DEAD_PO_STATUSES:
+        return ActionRefusal(
+            code=PO_NOT_INVOICEABLE,
+            message=f"This purchase order is {po.status} and can no longer be invoiced.",
+            http_status=status.HTTP_409_CONFLICT,
+            params={"status": po.status},
+            coded=True,
+        )
+    if po.total_unverifiable_reason:
+        return ActionRefusal(
+            code=PO_TOTAL_UNVERIFIABLE,
+            message="This purchase order's total could not be confirmed. "
+            "Submit your invoice instead.",
+            http_status=status.HTTP_409_CONFLICT,
+        )
+    return None
+
+
+def _po_flip_verdict(po: PurchaseOrder) -> CodedRefusal | None:
+    refusal = po_flip_refusal(po)
+    return CodedRefusal(**refusal.verdict()) if refusal else None
+
 
 @router.get("/purchase-orders", response_model=PortalPOListResponse)
 async def list_my_purchase_orders(
@@ -965,6 +1016,7 @@ async def list_my_purchase_orders(
                 currency=po.currency,
                 line_item_count=n,
                 created_at=po.created_at,
+                flip_verdict=_po_flip_verdict(po),
             )
             for po, n in rows
         ],
@@ -1003,6 +1055,7 @@ async def get_my_purchase_order(
         total_unverifiable=bool(po.total_unverifiable_reason),
         currency=po.currency,
         created_at=po.created_at,
+        flip_verdict=_po_flip_verdict(po),
         line_items=[
             PortalPOLineItem(
                 description=li.description,
@@ -1078,15 +1131,12 @@ async def flip_purchase_order(
             message="Invoice already created from this PO.",
         )
 
-    # The flip bills `po.total`. When the ERP's last sync could not price this
-    # PO (decisions §323) that total is one nobody vouches for, and an invoice
-    # minted at it would be a payable at an unconfirmed figure.
-    if po.total_unverifiable_reason:
-        raise HTTPException(
-            status_code=409,
-            detail="This purchase order's total could not be confirmed. "
-            "Submit your invoice instead.",
-        )
+    # A dead order or an unvouched total mints nothing — after the replay
+    # short-circuit above, so a retry of a flip that went through (and may
+    # itself have closed the PO) still gets its invoice back.
+    refusal = po_flip_refusal(po)
+    if refusal:
+        raise refusal.http()
 
     po_lines = (
         (await db.execute(select(POLineItem).where(POLineItem.po_id == po.id))).scalars().all()
