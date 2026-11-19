@@ -29,21 +29,25 @@ const row = {
 	updated_at: '2024-01-01T00:00:00Z'
 };
 
+function stubList(page: import('@playwright/test').Page) {
+	return page.route(
+		(url) => url.pathname === '/api/experiments',
+		(route) =>
+			route.request().method() === 'GET'
+				? route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({ experiments: [row] })
+					})
+				: route.fallback()
+	);
+}
+
 test.describe('/experiments status filter', () => {
 	test('the chip writes ?status=, a reload restores it, and filtered-to-zero is not "empty"', async ({
 		page
 	}) => {
-		await page.route(
-			(url) => url.pathname === '/api/experiments',
-			(route) =>
-				route.request().method() === 'GET'
-					? route.fulfill({
-							status: 200,
-							contentType: 'application/json',
-							body: JSON.stringify({ experiments: [row] })
-						})
-					: route.fallback()
-		);
+		await stubList(page);
 
 		await page.goto('/experiments');
 		await expect(page.locator('table tbody tr', { hasText: 'Status filter stub' })).toBeVisible();
@@ -62,5 +66,36 @@ test.describe('/experiments status filter', () => {
 		await page.getByRole('button', { name: /^All/ }).click();
 		await expect(page).not.toHaveURL(/status=/);
 		await expect(page.locator('table tbody tr', { hasText: 'Status filter stub' })).toBeVisible();
+	});
+
+	// SvelteKit reuses the mounted page for a navigation within the route, so
+	// a filter read only at mount would leave the address bar and the chips
+	// disagreeing (`docs/ui-patterns.md` § "Reading the URL once at mount is
+	// only half of the round trip").
+	test('a same-route navigation and back/forward re-apply the status chip', async ({ page }) => {
+		await stubList(page);
+		const concluded = page.getByRole('button', { name: /^Concluded/ });
+		const all = page.getByRole('button', { name: /^All/ });
+		const stubRow = page.locator('table tbody tr', { hasText: 'Status filter stub' });
+
+		await page.goto('/experiments?status=concluded');
+		await expect(concluded).toHaveAttribute('aria-pressed', 'true');
+		await expect(page.getByTestId('table-empty')).toHaveText('No experiments with this status.');
+
+		// Sidebar row → bare /experiments, whose default is All.
+		await page.getByRole('link', { name: 'Experiments', exact: true }).click();
+		await expect(page).toHaveURL(/\/experiments$/);
+		await expect(all).toHaveAttribute('aria-pressed', 'true');
+		await expect(concluded).toHaveAttribute('aria-pressed', 'false');
+		await expect(stubRow).toBeVisible();
+
+		await page.goBack();
+		await expect(page).toHaveURL(/[?&]status=concluded\b/);
+		await expect(concluded).toHaveAttribute('aria-pressed', 'true');
+		await expect(page.getByTestId('table-empty')).toHaveText('No experiments with this status.');
+
+		await page.goForward();
+		await expect(all).toHaveAttribute('aria-pressed', 'true');
+		await expect(stubRow).toBeVisible();
 	});
 });
