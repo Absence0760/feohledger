@@ -94,7 +94,7 @@ def test_the_scan_still_finds_the_known_rollups():
     for expected in (
         "app/api/analytics.py",
         "app/api/cards.py",
-        "app/api/dashboard.py",
+        "app/services/dashboard_metrics.py",
         "app/api/payments.py",
         "app/services/billing/usage_rollup.py",
     ):

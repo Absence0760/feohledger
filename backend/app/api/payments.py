@@ -828,7 +828,7 @@ async def _payment_queue_rollup(
 
     Grouped by the invoice's own currency and rolled to the org reporting
     currency **in SQL** — the CASE expressions mirror
-    ``currency_conversion.reporting_amount_for_row`` exactly as ``api/dashboard``
+    ``currency_conversion.reporting_amount_for_row`` exactly as ``services/dashboard_metrics``
     does — so a paginated queue never loses its KPI-bar totals or its
     blocked / early-pay-savings banners to "just this page". ``selectable_only``
     excludes rows a payment run would refuse (the set "select all matching"

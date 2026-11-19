@@ -13,7 +13,7 @@ forecast variance). Both are computed by pure functions in
 | Layer | File | Purpose |
 |---|---|---|
 | Compute | `app/services/analytics.py` | Pure functions — DPO, processing time, supplier concentration, ... |
-| Operational dashboard | `app/api/dashboard.py` | Pipeline / aging / processing time / approval bottleneck / discount capture (AP clerk + manager + CFO) |
+| Operational dashboard | `app/api/dashboard.py` (route) + `app/services/dashboard_metrics.py` (one function per section) | Pipeline / aging / processing time / approval bottleneck / discount capture (AP clerk + manager + CFO) |
 | CFO dashboard | `app/api/analytics.py::get_cfo_analytics` | DPO + trend, CCC, accruals, working-capital impact, supplier concentration, fraud-rate trend, rebate yield (admin + CFO only) |
 | Drill-through | `/api/analytics/drill/*` | Per-metric "show me the rows" endpoints (spend_concentration, dpo) |
 | Cash-flow forecasting | `/api/analytics/{cashflow_forecast,cashflow_whatif,cash_position}` | Predictive AP outflow buckets, payment-timing what-if, running cash position with bank-balance auto-sync (admin + CFO only). Web dashboard at `/cfo`. |
@@ -229,7 +229,7 @@ SELECT vendor_name, coalesce(sum(<rep_expr>), 0) AS total
 `aging_reporting` buckets and the `monthly_trend` reporting column use — the
 row's persisted `reporting_amount` when it is locked *for the org's reporting
 currency*, else face `amount`. There is one expression, built once in
-`api/dashboard.py`, so the tile cannot drift from the rollup beside it.
+`services/dashboard_metrics.DashboardScope`, so the tile cannot drift from the rollup beside it.
 
 It used to `SELECT` five columns of **every** non-rejected invoice — all time,
 no `LIMIT` — and fold them in Python through

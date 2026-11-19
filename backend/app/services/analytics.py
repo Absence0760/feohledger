@@ -447,7 +447,7 @@ def compute_discount_capture(invoice_rows: list) -> DiscountCaptureMetrics:
 #: into. Exhaustive and mutually exclusive: captured (paid inside the discount
 #: window), missed (the window closed unused), pending (still capturable — no
 #: deadline, or one that has not passed). Named here because the SQL ``CASE``
-#: in ``api/dashboard`` emits these exact strings and
+#: in ``services/dashboard_metrics.discount_capture`` emits these exact strings and
 #: ``discount_capture_from_grouped_rows`` reads them back.
 DISCOUNT_CAPTURE_BUCKETS = ("captured", "missed", "pending")
 
