@@ -10,7 +10,7 @@
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
-	import { api } from '#lib/api.ts';
+	import { api, ApiError } from '#lib/api.ts';
 	import StatusBadge from '#lib/components/ui/StatusBadge.svelte';
 	import InvoiceModal from '#lib/components/modals/InvoiceModal.svelte';
 	import CreateInvoiceModal from '#lib/components/modals/CreateInvoiceModal.svelte';
@@ -473,6 +473,32 @@
 	// the handler cleared itself could be re-read before the scrub landed, and
 	// re-open the modal the user had just closed).
 	let deepLinkLoaded = $state<string | null>(null);
+	// The deep-linked invoice that could not be fetched for a reason OTHER
+	// than "it does not exist" (a 500, a timeout, offline). Only a 404 may say
+	// "not found": telling a user whose network blipped that the invoice is
+	// gone sends them hunting for a row that is still there. Anything else is
+	// stated in place with a Retry (`ui/LoadError`), since it is a failed load.
+	let deepLinkFailedId = $state<string | null>(null);
+
+	function openDeepLink(id: string) {
+		deepLinkFailedId = null;
+		api
+			.get<Invoice>(`/api/invoices/${id}`)
+			.then((inv) => {
+				// The user may have navigated to another `?id=` (or off it)
+				// while this was in flight; don't open a modal they left.
+				if (deepLinkId === id) editing = inv;
+			})
+			.catch((err) => {
+				if (deepLinkId !== id) return;
+				if (err instanceof ApiError && err.status === 404) {
+					toast(m('invoices.toast.notFound'), 'error');
+				} else {
+					deepLinkFailedId = id;
+				}
+			});
+	}
+
 	$effect(() => {
 		const id = page.url.searchParams.get('id');
 		// State reads AND writes are untracked: this effect depends on the
@@ -482,6 +508,7 @@
 			untrack(() => {
 				deepLinkId = null;
 				deepLinkLoaded = null;
+				deepLinkFailedId = null;
 			});
 			return;
 		}
@@ -489,11 +516,8 @@
 		untrack(() => {
 			deepLinkId = id;
 			deepLinkLoaded = id;
+			openDeepLink(id);
 		});
-		api
-			.get<Invoice>(`/api/invoices/${id}`)
-			.then((inv) => (editing = inv))
-			.catch(() => toast(m('invoices.toast.notFound'), 'error'));
 	});
 
 	/**
@@ -510,11 +534,13 @@
 		await invoiceStore.fetchCounts(buildParams());
 	}
 
-	// A failed Load-more keeps the rows already shown, so a toast is enough —
-	// it used to be an unhandled rejection: the button re-enabled with nothing
-	// said, and a second click failed the same way.
-	function loadMoreInvoices() {
-		invoiceStore.loadMore().catch(() => toast(m('invoices.toast.loadMoreFailed'), 'error'));
+	// A failed Load-more keeps the rows already shown, so a toast is enough
+	// (the sibling lists do the same). The store never rejects here — it
+	// records the outcome in `loadMoreErrored`, which is false when a newer
+	// load superseded this one, so a filter change mid-page raises no toast.
+	async function loadMoreInvoices() {
+		await invoiceStore.loadMore();
+		if (invoiceStore.loadMoreErrored) toast(m('invoices.toast.loadMoreFailed'), 'error');
 	}
 
 	function closeInvoiceModal() {
@@ -909,7 +935,7 @@
 		     create an invoice, and `POST /api/invoices/upload` takes the same
 		     entry roles as `POST /api/invoices` (`api/invoice_entry.py`). -->
 		{#if canEnterInvoices}
-			<button class="btn-upload" disabled={uploading} onclick={() => fileInput.click()}>
+			<button class="btn-primary btn-upload" disabled={uploading} onclick={() => fileInput.click()}>
 				{uploading ? uploadProgress || m('invoices.action.uploading') : m('invoices.action.upload')}
 			</button>
 		{/if}
@@ -1063,7 +1089,7 @@
 								/>
 							{/if}
 							<button
-								class="bulk-apply-btn"
+								class="btn-primary bulk-apply-btn"
 								disabled={bulkBusy || (bulkNeedsReason && !bulkRejectReason.trim())}
 								onclick={bulkStatusChange}
 							>{m('common.apply')}</button>
@@ -1078,6 +1104,14 @@
 			<button class="bulk-action-btn" disabled={bulkBusy} onclick={() => bulkExport('json')}>JSON</button>
 			<button class="bulk-action-btn" disabled={bulkBusy} onclick={() => bulkExport('xml')}>XML</button>
 		</div>
+	{/if}
+
+	{#if deepLinkFailedId}
+		<LoadError
+			message={m('invoices.deepLink.loadFailed')}
+			onretry={() => deepLinkFailedId && openDeepLink(deepLinkFailedId)}
+			testId="invoices-deeplink-error"
+		/>
 	{/if}
 
 	{#if showOnboarding}
@@ -1431,28 +1465,11 @@
 		cursor: help;
 	}
 
+	/* Colour, hover and disabled come from the shared `.btn-primary`; this
+	   only keeps the label on one line in the header's action row. */
 	.btn-upload {
-		padding: 8px 18px;
-		border-radius: 6px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		transition: opacity 0.15s;
 		white-space: nowrap;
 		flex-shrink: 0;
-	}
-
-	.btn-upload:hover {
-		opacity: 0.85;
-	}
-
-	.btn-upload:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	.btn-secondary {
@@ -1632,24 +1649,10 @@
 		min-width: 220px;
 	}
 
+	/* Fill, text colour, hover and disabled are the shared `.btn-primary`'s;
+	   only the metrics shrink to sit beside the dropdown's compact select. */
 	.bulk-apply-btn {
 		padding: 5px 12px;
-		border-radius: 4px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
 		font-size: 0.8rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.bulk-apply-btn:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.bulk-apply-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 </style>
