@@ -4488,6 +4488,7 @@ export const messages = {
 	'experiments.status.concluded': 'Abgeschlossen',
 
 	'experiments.table.empty': 'Noch keine Experimente.',
+	'experiments.table.emptyFiltered': 'Keine Experimente mit diesem Status.',
 	'experiments.title': 'Workflow-Experimente',
 	'experiments.toast.concludeFailed': 'Experiment konnte nicht abgeschlossen werden.',
 	'experiments.toast.concluded': 'Experiment abgeschlossen.',

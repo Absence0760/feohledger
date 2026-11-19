@@ -36,6 +36,8 @@
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
 
 	const canMutate = $derived(auth.isAdmin);
 
@@ -59,7 +61,22 @@
 	let experiments = $state<Experiment[]>([]);
 	let loading = $state(true);
 	let loadError = $state<string | null>(null);
-	let statusFilter = $state<string>('all');
+	// URL-backed (`?status=`), like every other list's chips: Back / reload /
+	// a shared link restore the view. An unknown value falls back to All rather
+	// than an empty table no chip is lit for.
+	const urlStatus = page.url.searchParams.get('status');
+	let statusFilter = $state<string>(
+		urlStatus && (EXPERIMENT_STATUSES as string[]).includes(urlStatus) ? urlStatus : 'all'
+	);
+
+	// A writer of URL state, never a dependency of it (`docs/ui-patterns.md`):
+	// called from the chip's `onchange`, so it cannot re-trigger itself.
+	function syncUrl(key: string) {
+		const url = new URL(page.url.href);
+		if (key !== 'all') url.searchParams.set('status', key);
+		else url.searchParams.delete('status');
+		replaceState(`${url.pathname}${url.search}`, {});
+	}
 
 	let definitions = $state<WorkflowDefinition[]>([]);
 
@@ -115,16 +132,23 @@
 		}))
 	]);
 
+	// Every lifecycle action and a Retry re-issue this, so two can be in flight
+	// at once: the newest wins, or a slow pre-action response re-lists a
+	// concluded experiment as running (`frontend/CLAUDE.md` § Sequencing).
+	const listSequence = createRequestSequencer();
+
 	async function load() {
+		const token = listSequence.start();
 		loading = true;
 		loadError = null;
 		try {
 			const res = await listExperiments();
+			if (!listSequence.canCommit(token)) return;
 			experiments = res.experiments;
 		} catch {
-			loadError = m('experiments.error.load');
+			if (listSequence.isCurrentRequest(token)) loadError = m('experiments.error.load');
 		} finally {
-			loading = false;
+			if (listSequence.isCurrentRequest(token)) loading = false;
 		}
 	}
 
@@ -322,7 +346,7 @@
 
 	<p class="lede">{m('experiments.lede')}</p>
 
-	<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
+	<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} onchange={syncUrl} />
 
 	{#if loadError}
 		<!-- Not rendered ALONGSIDE the table: the banner and "No experiments yet."
@@ -334,7 +358,11 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={filtered.length === 0}
-		empty={loading ? m('common.loading') : m('experiments.table.empty')}
+		empty={loading
+			? m('common.loading')
+			: experiments.length > 0
+				? m('experiments.table.emptyFiltered')
+				: m('experiments.table.empty')}
 	>
 		{#snippet body()}
 			{#each filtered as exp (exp.id)}

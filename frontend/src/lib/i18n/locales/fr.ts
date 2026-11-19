@@ -4489,6 +4489,7 @@ export const messages = {
 	'experiments.status.concluded': 'Terminé',
 
 	'experiments.table.empty': 'Aucune expérience pour l\'instant.',
+	'experiments.table.emptyFiltered': 'Aucune expérience avec ce statut.',
 	'experiments.title': 'Expériences de workflow',
 	'experiments.toast.concludeFailed': 'Échec de la conclusion de l\'expérience.',
 	'experiments.toast.concluded': 'Expérience conclue.',
