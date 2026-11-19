@@ -684,6 +684,27 @@ def _password_reset_url(org: Organization, token: str) -> str | None:
     return password_reset_url(org.slug, org.settings, token)
 
 
+def _password_reset_message(*, to: str, full_name: str, reset_url: str) -> EmailMessage:
+    """The forgot-password email: the link is declared, so it renders as the
+    button, and the preheader never carries it."""
+    return EmailMessage(
+        to=to,
+        subject="Reset your FeohLedger password",
+        body_text=(
+            f"Hi {full_name},\n\n"
+            "We received a request to reset your FeohLedger password. If you "
+            "made this request, click the link below to choose a new one:\n\n"
+            f"  {reset_url}\n\n"
+            f"This link expires in {settings.password_reset_ttl_minutes} minutes "
+            "and can only be used once.\n\n"
+            "If you didn't request this, you can safely ignore this email — "
+            "your password will not be changed.\n"
+        ),
+        links=(reset_url,),
+        preheader="Use the link in this email to choose a new password.",
+    )
+
+
 async def _issue_and_send_reset(
     *, user_id: uuid.UUID, org_id: uuid.UUID, to: str, full_name: str, ip: str | None
 ) -> None:
@@ -714,22 +735,7 @@ async def _issue_and_send_reset(
             org.id,
         )
     else:
-        msg = EmailMessage(
-            to=to,
-            subject="Reset your FeohLedger password",
-            body_text=(
-                f"Hi {full_name},\n\n"
-                "We received a request to reset your FeohLedger password. If you "
-                "made this request, click the link below to choose a new one:\n\n"
-                f"  {reset_url}\n\n"
-                f"This link expires in {settings.password_reset_ttl_minutes} minutes "
-                "and can only be used once.\n\n"
-                "If you didn't request this, you can safely ignore this email — "
-                "your password will not be changed.\n"
-            ),
-            links=(reset_url,),
-            preheader="Use the link in this email to choose a new password.",
-        )
+        msg = _password_reset_message(to=to, full_name=full_name, reset_url=reset_url)
         try:
             await get_email_adapter().send(msg)
         except Exception as exc:  # noqa: BLE001
