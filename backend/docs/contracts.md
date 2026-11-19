@@ -220,7 +220,7 @@ invoices and would go stale. But no unattended door approves past one.
 `/complete`'s `auto_approve_below` floor land at `ready_for_review` with
 `auto_approve_suppressed: "contract_cap"`, and the exception-agent coordinator
 unwinds an apply that approved such an invoice and escalates
-(`docs/decisions.md` §TBD-contractfx). A person approving with the finding in
+(`docs/decisions.md` §472). A person approving with the finding in
 front of them is the review it asks for.
 
 ### 5. Contract-based PO creation

@@ -2668,7 +2668,7 @@ UNATTENDED_APPROVAL_PO_OVERBILLED = "po_overbilled"
 UNATTENDED_APPROVAL_PO_RECEIPT_IMPLICATED = "po_receipt_implicated"
 #: The invoice carries an ``error`` contract finding: a not-to-exceed contract's
 #: limit is passed, or cannot be measured because the invoice is in another
-#: currency or none (decisions §TBD-contractfx). Like §469's warning it raises
+#: currency or none (decisions §472). Like §469's warning it raises
 #: no hold, so no unattended door approves past it.
 UNATTENDED_APPROVAL_CONTRACT_CAP = "contract_cap"
 
@@ -2702,7 +2702,7 @@ def has_contract_cap_warning(invoice: Invoice) -> bool:
     on ``invoice``. Only a ``not_to_exceed`` contract's spend-limit findings
     carry that severity (``contract_spend_limit_exceeded_not_to_exceed``,
     ``contract_currency_mismatch`` and its unknown-currency twin), so this is
-    "a hard cap is passed or could not be measured" (decisions §TBD-contractfx).
+    "a hard cap is passed or could not be measured" (decisions §472).
     Read from ``invoice.warnings``, so asked after the refresh."""
     return any(
         isinstance(w, dict)
@@ -2739,7 +2739,7 @@ async def po_match_hold_refusal(
       been received of it. It raises no hold, so only a person reading it may
       approve.
     * an ``error`` contract finding (:func:`has_contract_cap_warning`,
-      decisions §TBD-contractfx): a not-to-exceed contract's limit is passed,
+      decisions §472): a not-to-exceed contract's limit is passed,
       or the invoice's currency is not the contract's (or is missing) so the
       limit was not measured. Not a PO-match finding, but every unattended
       door already asks this function, so it answers here rather than adding a

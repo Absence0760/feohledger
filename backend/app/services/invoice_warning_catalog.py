@@ -544,7 +544,7 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
     ),
     # The invoice and the contract are in different currencies, or the invoice
     # records none, so the cumulative spend was not measured against the limit
-    # (decisions §TBD-contractfx): no rate is guessed to make the figures
+    # (decisions §472): no rate is guessed to make the figures
     # comparable. The codes are the finding, so both are `text`, as in
     # `po_currency_mismatch`. Severity follows `not_to_exceed`, as the
     # spend-limit codes' does.

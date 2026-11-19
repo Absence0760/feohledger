@@ -770,7 +770,7 @@ def test_an_agent_approval_past_a_po_over_billing_warning_unwinds(status, warned
 def test_an_agent_approval_past_a_not_to_exceed_contract_cap_unwinds(status, severity, refused):
     """A not-to-exceed contract whose limit the invoice cannot be measured
     against (another currency) is an `error` finding that no unattended door
-    approves past (decisions §TBD-contractfx); an agent's approval is no person
+    approves past (decisions §472); an agent's approval is no person
     reading it either. A plain contract's `warning` does not unwind."""
     from types import SimpleNamespace
 

@@ -19,7 +19,7 @@ Checks (all advisory unless the contract is ``not_to_exceed``):
     cannot be summed against the limit and no rate is guessed to make it so:
     it says so instead (``contract_currency_mismatch`` /
     ``…_invoice_currency_unknown``), at the same severity the spend-limit
-    finding would carry (decisions §TBD-contractfx).
+    finding would carry (decisions §472).
   * invoice vendor differs from the contract vendor
   * invoice GL account outside the contract's ``terms.allowed_gl_accounts``
 """
@@ -120,7 +120,7 @@ async def evaluate_contract_compliance(
     limited = contract.spend_limit is not None and invoice.amount is not None
     # A not-to-exceed cap is an `error`, as its breach is, and stops every
     # unattended approval (`invoice_warnings.has_contract_cap_warning`): an amount
-    # the cap cannot measure is one a person must read (decisions §TBD-contractfx).
+    # the cap cannot measure is one a person must read (decisions §472).
     cap_severity = "error" if contract.not_to_exceed else "warning"
     if limited and contract_currency is not None and invoice_currency != contract_currency:
         # Never converted: a guessed rate would decide a contractual cap.

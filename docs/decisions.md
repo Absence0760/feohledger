@@ -23774,7 +23774,7 @@ totals, entity scope); `mobile/test/screens/dashboard_screen_test.dart`
 (overdue and due-soon cards, zero, absent fields, offline cache,
 currency-less group).
 
-## §TBD-contractfx. A contract limit the invoice's currency cannot measure is a finding, and a not-to-exceed one stops unattended approval (round 28, 2026-11-19)
+## 472. A contract limit the invoice's currency cannot measure is a finding, and a not-to-exceed one stops unattended approval (round 28, 2026-11-19)
 
 **Problem.** `contract_compliance.evaluate_contract_compliance` measures
 cumulative spend against `spend_limit` only when the invoice's currency

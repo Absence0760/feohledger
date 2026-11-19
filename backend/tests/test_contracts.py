@@ -1254,7 +1254,7 @@ async def test_a_usd_invoice_still_matches_a_usd_contract(currency):
 
 
 # ---------------------------------------------------------------------------
-# An invoice the limit cannot measure says so (decisions §TBD-contractfx).
+# An invoice the limit cannot measure says so (decisions §472).
 # ---------------------------------------------------------------------------
 
 

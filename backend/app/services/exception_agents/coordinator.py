@@ -517,7 +517,7 @@ def _approved_past_po_overbilling(invoice) -> bool:
 class _ContractCap(NotApprovable):
     """The apply approved an invoice whose refresh reports an ``error``
     contract finding: a not-to-exceed limit passed, or not measurable because
-    the invoice is in another currency or none (decisions §TBD-contractfx).
+    the invoice is in another currency or none (decisions §472).
     The unattended doors send it to a person
     (``invoice_warnings.UNATTENDED_APPROVAL_CONTRACT_CAP``); an agent approval
     is no person reading it either, so the apply unwinds and the row

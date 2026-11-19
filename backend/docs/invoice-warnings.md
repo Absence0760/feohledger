@@ -95,7 +95,7 @@ Rules that hold at every call site:
   (`contract_currency_mismatch_invoice_currency_unknown`), as
   `po_currency_mismatch` has its `_invoice_currency_unknown` twin. Both state
   ISO codes as `text`: they are printed, never used to format a figure
-  (`docs/decisions.md` §TBD-contractfx).
+  (`docs/decisions.md` §472).
 - **A count is a `count` param and the template uses an ICU plural.** The
   catalogue resolves those with English rules for the fallback; the client
   resolves the same block through `Intl.PluralRules`. `=0 {}` is how an
