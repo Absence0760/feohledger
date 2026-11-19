@@ -446,7 +446,7 @@
 								mfaErr = '';
 							}}>{m('portal.company.mfa.cancel')}</button
 						>
-						<button type="submit" class="btn-danger armed" disabled={mfaBusy || !disableCode}>
+						<button type="submit" class="btn-danger" class:armed={!!disableCode} disabled={mfaBusy || !disableCode}>
 							{mfaBusy ? m('portal.company.mfa.turningOff') : m('portal.company.mfa.turnOffBtn')}
 						</button>
 					</div>

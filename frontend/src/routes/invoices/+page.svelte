@@ -20,6 +20,7 @@
 	import type { ImportResult } from '#lib/types/csvImport.ts';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import BulkDeleteButton from '#lib/components/ui/BulkDeleteButton.svelte';
+	import BulkBar from '#lib/components/ui/BulkBar.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
@@ -572,16 +573,22 @@
 		void refreshInvoiceList().catch(() => {});
 	}
 
-	let hasAdvancedFilters = $derived(
-		advancedFilters.vendor !== '' ||
-		advancedFilters.invoice_number !== '' ||
-		advancedFilters.po_number !== '' ||
-		advancedFilters.description !== '' ||
-		advancedFilters.amount_min !== '' ||
-		advancedFilters.amount_max !== '' ||
-		advancedFilters.due_date_from !== '' ||
-		advancedFilters.due_date_to !== ''
+	// How many advanced-search fields are set (statuses are the chips', not
+	// counted here). The dot shows it; the button's description says it,
+	// since a dot announces nothing to a screen reader.
+	let advancedFilterCount = $derived(
+		[
+			advancedFilters.vendor,
+			advancedFilters.invoice_number,
+			advancedFilters.po_number,
+			advancedFilters.description,
+			advancedFilters.amount_min,
+			advancedFilters.amount_max,
+			advancedFilters.due_date_from,
+			advancedFilters.due_date_to
+		].filter((v) => v !== '').length
 	);
+	let hasAdvancedFilters = $derived(advancedFilterCount > 0);
 
 	let totalCount = $derived(
 		Object.values(invoiceStore.statusCounts).reduce((a, b) => a + b, 0)
@@ -981,6 +988,7 @@
 				class="btn-icon advanced-btn advanced-toggle"
 				onclick={() => { advancedFilters = { ...advancedFilters, statuses: [...activeStatuses] }; showAdvancedSearch = true; }}
 				aria-label={m('invoices.search.advanced')}
+				aria-describedby={hasAdvancedFilters ? 'advanced-filters-set' : undefined}
 			>
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 					<line x1="4" y1="6" x2="20" y2="6" />
@@ -989,9 +997,14 @@
 					<circle cx="6" cy="12" r="2" /><circle cx="10" cy="18" r="2" /><circle cx="8" cy="6" r="2" />
 				</svg>
 				{#if hasAdvancedFilters}
-					<span class="dot"></span>
+					<span class="dot" aria-hidden="true"></span>
 				{/if}
 			</button>
+			{#if hasAdvancedFilters}
+				<span id="advanced-filters-set" class="visually-hidden" data-testid="advanced-filters-set">
+					{m('invoices.search.filtersSet', { n: advancedFilterCount })}
+				</span>
+			{/if}
 		</div>
 		<div class="assignee-group">
 			<button
@@ -1040,11 +1053,14 @@
 		</nav>
 	</div>
 
-	{#if selected.size > 0}
-		<div class="bulk-bar">
-			<span class="bulk-count">{m('invoices.bulk.selected', { n: selected.size })}</span>
+	<BulkBar
+		count={selected.size}
+		countLabel={m('invoices.bulk.selected', { n: selected.size })}
+		onclear={() => { selected = new Set(); selectedAllMatching = false; }}
+	>
+		{#snippet lead()}
 			{#if allSelected && !selectedAllMatching && invoiceStore.total > selectableInvoices.length}
-				<button class="bulk-select-all-matching" disabled={selectingAllMatching} onclick={selectAllMatching}>
+				<button type="button" class="btn-secondary bulk-select-all-matching" disabled={selectingAllMatching} onclick={selectAllMatching}>
 					{selectingAllMatching
 						? m('common.loading')
 						: m('common.selectAllMatching', { total: invoiceStore.total })}
@@ -1052,9 +1068,8 @@
 			{:else if selectedAllMatching}
 				<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 			{/if}
-			<button class="bulk-clear" onclick={() => { selected = new Set(); selectedAllMatching = false; }}>{m('common.clear')}</button>
-			<div class="bulk-divider"></div>
-
+		{/snippet}
+		{#snippet actions()}
 			{#if canManageInvoices}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<span class="bulk-btn-wrap" title={hasImmutableSelected ? m('invoices.bulk.cannotDelete') : ''}>
@@ -1112,8 +1127,8 @@
 			<button class="btn-secondary" disabled={bulkBusy} onclick={() => bulkExport('csv')}>CSV</button>
 			<button class="btn-secondary" disabled={bulkBusy} onclick={() => bulkExport('json')}>JSON</button>
 			<button class="btn-secondary" disabled={bulkBusy} onclick={() => bulkExport('xml')}>XML</button>
-		</div>
-	{/if}
+		{/snippet}
+	</BulkBar>
 
 	{#if deepLinkFailedId}
 		<LoadError
@@ -1484,73 +1499,7 @@
 
 	/* --- Bulk action bar --- */
 
-	/* Floats above the page so selecting rows doesn't shove the table down.
-	   Bottom-centered so it lands in the natural eye line for an "I'm
-	   acting on the selection" affordance. */
-	.bulk-bar {
-		position: fixed;
-		left: 50%;
-		bottom: 24px;
-		transform: translateX(-50%);
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 10px 16px;
-		background: var(--surface);
-		border: 1px solid var(--accent);
-		border-radius: 8px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-		flex-wrap: wrap;
-		z-index: 50;
-		max-width: calc(100vw - 48px);
-	}
-
-	.bulk-count {
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: var(--accent);
-		white-space: nowrap;
-	}
-
-	.bulk-clear {
-		padding: 4px 10px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.bulk-clear:hover {
-		color: var(--text);
-		background: var(--bg);
-	}
-
-	.bulk-select-all-matching {
-		padding: 4px 10px;
-		border-radius: 4px;
-		border: 1px solid var(--accent);
-		background: transparent;
-		color: var(--accent);
-		font-size: 0.8rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.bulk-select-all-matching:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-
-	.bulk-select-all-matching:not(:disabled):hover {
-		background: var(--accent);
-		color: var(--surface);
-	}
-
+	/* The bar itself is the shared <BulkBar>; these place what it holds. */
 	.bulk-all-matching-note {
 		font-size: 0.8rem;
 		color: var(--text-muted);

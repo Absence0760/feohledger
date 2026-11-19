@@ -162,3 +162,73 @@ test.describe('/invoices bulk reject', () => {
 		).toBeEnabled();
 	});
 });
+
+test.describe('/invoices bulk bar at phone width (375px)', () => {
+	test.use({ viewport: { width: 375, height: 740 } });
+
+	test('the bar is the shared toolbar, fits the screen, and never covers the pagination', async ({
+		page
+	}) => {
+		await page.goto('/invoices');
+		await expect(page.locator('table tbody tr').first()).toBeVisible();
+		await page
+			.locator('table tbody tr td.checkbox-col input[type="checkbox"]:not([disabled])')
+			.first()
+			.check();
+
+		// The shared <BulkBar>: a named toolbar, one button size throughout.
+		const bar = page.getByRole('toolbar', { name: 'Bulk actions' });
+		await expect(bar).toBeVisible();
+		await expect(bar.locator('button.bulk-clear')).toHaveClass(/\bbtn-cancel\b/);
+		await expect(bar.locator('button.bulk-delete-btn')).toHaveClass(/\bbtn-danger\b/);
+
+		// No horizontal overflow: neither the page nor the wrapped bar.
+		const widths = await page.evaluate(() => {
+			const box = document.querySelector('.bulk-bar')!.getBoundingClientRect();
+			return {
+				scroll: document.documentElement.scrollWidth,
+				viewport: window.innerWidth,
+				left: box.left,
+				right: box.right
+			};
+		});
+		expect(widths.scroll).toBeLessThanOrEqual(widths.viewport);
+		expect(widths.left).toBeGreaterThanOrEqual(0);
+		expect(widths.right).toBeLessThanOrEqual(widths.viewport);
+
+		// The page reserves the bar's height under the list, so the pagination
+		// row scrolls clear of the fixed bar and still takes the click.
+		const pagination = page.locator('.load-more-row').first();
+		await pagination.scrollIntoViewIfNeeded();
+		await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+		const [rowBox, barBox] = await Promise.all([pagination.boundingBox(), bar.boundingBox()]);
+		expect(rowBox, 'the pagination row renders').not.toBeNull();
+		expect(barBox).not.toBeNull();
+		expect(rowBox!.y + rowBox!.height).toBeLessThanOrEqual(barBox!.y);
+		const loadMore = pagination.locator('button.btn-load-more');
+		if ((await loadMore.count()) > 0) {
+			// `trial` runs every actionability check, the hit test included,
+			// without loading the next page.
+			await loadMore.click({ trial: true });
+		}
+	});
+});
+
+test.describe('/invoices advanced-filter button', () => {
+	test('says how many advanced filters are set, to a screen reader too', async ({ page }) => {
+		await page.goto('/invoices');
+		await expect(page.locator('table tbody tr').first()).toBeVisible();
+		const toggle = page.getByRole('button', { name: 'Advanced search', exact: true });
+		await expect(toggle).not.toHaveAttribute('aria-describedby');
+
+		await toggle.click();
+		const dialog = page.locator('div.modal[role="dialog"][aria-label="Advanced search"]');
+		await expect(dialog).toBeVisible();
+		await dialog.getByLabel('Vendor', { exact: true }).fill('Acme');
+		await dialog.locator('button.btn-apply').click();
+		await expect(dialog).toHaveCount(0);
+
+		await expect(toggle).toHaveAttribute('aria-describedby', 'advanced-filters-set');
+		await expect(toggle).toHaveAccessibleDescription('1 filter set');
+	});
+});

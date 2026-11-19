@@ -778,10 +778,24 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 }
 
 /* --- Primary / cancel buttons --- */
+/* .btn-primary and .btn-cancel take the exact box .btn-secondary /
+   .btn-danger do (inline-flex, a 1px border, the line-height a <button>
+   computes), so a footer mixing all four is one height and an icon + label
+   inside any of them sits on one centred line. The primary's border is
+   transparent: same box, no outline. */
+.btn-primary,
+.btn-cancel {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	line-height: normal;
+	text-decoration: none;
+}
 .btn-primary {
 	padding: 9px 18px;
 	border-radius: var(--radius-sm);
-	border: none;
+	border: 1px solid transparent;
 	background: var(--accent-strong);
 	color: #fff;
 	font-size: 0.85rem;
@@ -831,8 +845,8 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
    destructive trigger (erase, disable); the filled, armed confirmation stays
    with <RowAction armed> / <BulkDeleteButton>.
 
-   Same box as .btn-primary / .btn-cancel so a toolbar mixing them is one
-   height. inline-flex so an <a> (a navigating "button") or a hidden <span>
+   Same box as .btn-primary / .btn-cancel (declared on both above) so a
+   toolbar mixing them is one height. inline-flex so an <a> (a navigating "button") or a hidden <span>
    slot reserve takes the exact box a <button> does.
 
    Measured, dark / light, worst of --bg and --surface:
@@ -919,6 +933,13 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	box-shadow: none;
 	opacity: 1;
 	cursor: not-allowed;
+}
+
+/* While a <BulkBar> shows, the page reserves the fixed bar's measured
+   height below its content (BulkBar sets both), so the last rows and the
+   pagination scroll clear of the bar instead of sitting under it. */
+html.has-bulk-bar body {
+	padding-bottom: var(--bulk-bar-reserve, 0px);
 }
 
 /* --- Ghost button ---

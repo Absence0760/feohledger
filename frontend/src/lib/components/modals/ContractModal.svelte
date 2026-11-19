@@ -610,7 +610,14 @@
 		<div class="modal-footer">
 			<button type="button" class="btn-cancel" onclick={onclose}>{m('contracts.modal.close')}</button>
 			{#if canEdit}
-				<button type="submit" class="btn-primary" disabled={saving}>
+				<!-- One lead per modal: while the Renew / Create PO sub-form is open,
+				     its confirm is the .btn-primary and Save steps back to secondary.
+				     `.btn-save` is an e2e hook with no CSS. -->
+				<button
+					type="submit"
+					class="btn-save {showRenew || showCreatePo ? 'btn-secondary' : 'btn-primary'}"
+					disabled={saving}
+				>
 					{saving ? m('contracts.modal.saving') : isCreate ? m('contracts.modal.create') : m('contracts.modal.save')}
 				</button>
 			{/if}

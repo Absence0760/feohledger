@@ -2350,7 +2350,11 @@
 											class="btn-remove-domain"
 											class:armed={confirmRemoveChatWebhook}
 											disabled={savingChatWebhook}
-											aria-label={m('org.chat.webhook.removeAria')}
+											aria-label={savingChatWebhook
+												? undefined
+												: confirmRemoveChatWebhook
+													? m('org.chat.webhook.confirmRemoveAria')
+													: m('org.chat.webhook.removeAria')}
 											onclick={removeChatWebhook}
 										>
 											{confirmRemoveChatWebhook
@@ -2440,7 +2444,7 @@
 								<button
 									type="button"
 									class="btn-save-section"
-									aria-label={m('org.emailIntake.copyAria')}
+									aria-label={intakeCopied ? undefined : m('org.emailIntake.copyAria')}
 									onclick={copyIntakeAddress}
 								>
 									{intakeCopied ? m('org.emailIntake.copied') : m('org.emailIntake.copy')}
@@ -2459,7 +2463,11 @@
 									class="btn-remove-domain"
 									class:armed={confirmRotateIntake}
 									disabled={rotatingIntake}
-									aria-label={m('org.emailIntake.rotateAria')}
+									aria-label={rotatingIntake
+										? undefined
+										: confirmRotateIntake
+											? m('org.emailIntake.rotateConfirmAria')
+											: m('org.emailIntake.rotateAria')}
 									onclick={rotateIntakeAddress}
 								>
 									{rotatingIntake
