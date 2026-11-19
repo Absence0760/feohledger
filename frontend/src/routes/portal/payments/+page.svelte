@@ -9,6 +9,7 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import Money from '#lib/components/ui/Money.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -214,27 +215,29 @@
 			{/if}
 		</div>
 	{:else}
-		<table>
-			<thead>
-				<tr>
-					<th>{m('portal.payments.col.invoiceNumber')}</th>
-					<th>{m('portal.payments.col.submitted')}</th>
-					<th>{m('portal.payments.col.completed')}</th>
-					<th>{m('portal.payments.col.method')}</th>
-					<th class="num">{m('portal.payments.col.amount')}</th>
-					<th>{m('portal.payments.col.status')}</th>
-					<th>{m('portal.payments.col.reference')}</th>
-					<th class="actions-col"></th>
-				</tr>
-			</thead>
-			<tbody>
+		<!-- DataTable: eight columns scroll inside a named, focusable region
+		     at narrow widths instead of overflowing the page (WCAG 1.4.10). -->
+		<DataTable
+			ariaLabel={m('portal.payments.tableAria')}
+			columns={[
+				{ label: m('portal.payments.col.invoiceNumber') },
+				{ label: m('portal.payments.col.submitted') },
+				{ label: m('portal.payments.col.completed') },
+				{ label: m('portal.payments.col.method') },
+				{ label: m('portal.payments.col.amount'), class: 'right' },
+				{ label: m('portal.payments.col.status') },
+				{ label: m('portal.payments.col.reference') },
+				{}
+			]}
+		>
+			{#snippet body()}
 				{#each items as p (p.id)}
 					<tr>
 						<td>{p.invoice_number}</td>
 						<td>{formatDate(p.submitted_at, m('portal.common.dash'))}</td>
 						<td>{formatDate(p.completed_at, m('portal.common.dash'))}</td>
 						<td>{methodLabel(p.method)}</td>
-						<td class="num"><Money amount={p.amount} currency={p.currency} mono /></td>
+						<td class="right"><Money amount={p.amount} currency={p.currency} mono /></td>
 						<td><span class="status s-{p.status}">{m(portalPaymentStatusLabelKey(p.status))}</span></td>
 						<td>{p.reference || m('portal.common.dash')}</td>
 						<td class="actions">
@@ -251,8 +254,8 @@
 						</td>
 					</tr>
 				{/each}
-			</tbody>
-		</table>
+			{/snippet}
+		</DataTable>
 
 		{#if hasMore}
 			<div class="load-more-row">
@@ -287,42 +290,8 @@
 		margin: 0;
 		font-size: 1.25rem;
 	}
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		overflow: hidden;
-	}
-	th,
-	td {
-		text-align: left;
-		padding: 10px 12px;
-		font-size: 0.88rem;
-		border-bottom: 1px solid var(--border);
-	}
-	th {
-		background: var(--bg);
-		color: var(--text-muted);
-		font-weight: 500;
-		text-transform: uppercase;
-		font-size: 0.72rem;
-		letter-spacing: 0.04em;
-	}
-	tbody tr:last-child td {
-		border-bottom: none;
-	}
-	.num {
-		text-align: right;
-		font-variant-numeric: tabular-nums;
-	}
-	.actions {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		white-space: nowrap;
-	}
+	/* Table chrome (padding, borders, header, `.right`, `td.actions`) is
+	   app.css's `.grid-container`, owned by DataTable. */
 	.remit-btn {
 		padding: 4px 12px;
 		border: 1px solid var(--border);

@@ -111,10 +111,13 @@ export const enPortal = {
 	'portal.invoices.einvoiceDownloadFailed': 'Could not download the e-invoice.',
 	'portal.invoices.preparing': 'Preparing…',
 	'portal.invoices.fileDownloadFailed': 'Download failed',
+	'portal.invoices.tableAria': 'Your invoices',
+	'portal.invoices.chatLoadFailed': 'The conversation could not be loaded.',
 
 	// Portal payments (routes/portal/payments/+page.svelte)
 	'portal.payments.title': 'Payments',
 	'portal.payments.loadFailed': 'Load failed',
+	'portal.payments.tableAria': 'Your payments',
 	'portal.payments.downloadFailed': 'Download failed',
 	'portal.payments.empty': 'No payments yet.',
 	'portal.payments.emptyHint': 'Payments appear here once your customer has issued them.',
@@ -178,6 +181,7 @@ export const enPortal = {
 	'portal.discounts.filter.captured': 'Captured',
 	'portal.discounts.filter.closed': 'Closed',
 	'portal.discounts.loadFailed': 'Load failed',
+	'portal.discounts.tableAria': 'Your discount offers',
 	'portal.discounts.acceptFailed': 'Accept failed',
 	'portal.discounts.declineFailed': 'Decline failed',
 	'portal.discounts.loadMore': 'Load more ({shown} of {total})',

@@ -111,10 +111,13 @@ export const messages = {
 		'No se pudo descargar la factura electrónica.',
 	'portal.invoices.preparing': 'Preparando…',
 	'portal.invoices.fileDownloadFailed': 'Error al descargar',
+	'portal.invoices.tableAria': 'Sus facturas',
+	'portal.invoices.chatLoadFailed': 'No se pudo cargar la conversación.',
 
 	// Pagos del portal (routes/portal/payments/+page.svelte)
 	'portal.payments.title': 'Pagos',
 	'portal.payments.loadFailed': 'Error al cargar',
+	'portal.payments.tableAria': 'Sus pagos',
 	'portal.payments.downloadFailed': 'Error al descargar',
 	'portal.payments.empty': 'Aún no hay pagos.',
 	'portal.payments.emptyHint': 'Los pagos aparecen aquí una vez que tu cliente los emite.',
@@ -177,6 +180,7 @@ export const messages = {
 	'portal.discounts.filter.captured': 'Capturadas',
 	'portal.discounts.filter.closed': 'Cerradas',
 	'portal.discounts.loadFailed': 'Error al cargar',
+	'portal.discounts.tableAria': 'Sus ofertas de descuento',
 	'portal.discounts.acceptFailed': 'Error al aceptar',
 	'portal.discounts.declineFailed': 'Error al rechazar',
 	'portal.discounts.loadMore': 'Cargar más ({shown} de {total})',

@@ -81,6 +81,19 @@ const TRANSLATED = [
 	'/src/routes/exceptions/+page.svelte',
 	'/src/routes/organization/+page.svelte',
 	'/src/routes/find-workspace/+page.svelte',
+	// The supplier portal, every page but purchase-orders (round 24).
+	'/src/routes/portal/+layout.svelte',
+	'/src/routes/portal/+page.svelte',
+	'/src/routes/portal/payments/+page.svelte',
+	'/src/routes/portal/reset-password/+page.svelte',
+	'/src/routes/portal/change-password/+page.svelte',
+	'/src/routes/portal/company/+page.svelte',
+	'/src/routes/portal/discount-offers/+page.svelte',
+	'/src/routes/portal/forgot-password/+page.svelte',
+	'/src/routes/portal/invoices/+page.svelte',
+	'/src/routes/portal/login/+page.svelte',
+	'/src/routes/portal/notifications/+page.svelte',
+	'/src/routes/portal/cards/[token]/+page.svelte',
 	'/src/routes/reports/+page.svelte',
 	'/src/routes/vendors/+page.svelte'
 ];

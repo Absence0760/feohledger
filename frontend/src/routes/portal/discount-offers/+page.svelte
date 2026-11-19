@@ -4,6 +4,7 @@
 	import { replaceState } from '$app/navigation';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -258,41 +259,43 @@
 			{/if}
 		</div>
 	{:else}
-		<table>
-			<thead>
-				<tr>
-					<th>{m('portal.discounts.col.appliesTo')}</th>
-					<th class="num">{m('portal.discounts.col.amount')}</th>
-					<th>{m('portal.discounts.col.tiers')}</th>
-					<th class="num">{m('portal.discounts.col.bestDiscount')}</th>
-					<th class="num">{m('portal.discounts.col.youSave')}</th>
-					<th>{m('portal.discounts.col.window')}</th>
-					<th>{m('portal.discounts.col.status')}</th>
-					<th class="actions-col"></th>
-				</tr>
-			</thead>
-			<tbody>
+		<!-- DataTable: eight columns scroll inside a named, focusable region
+		     at narrow widths instead of overflowing the page (WCAG 1.4.10). -->
+		<DataTable
+			ariaLabel={m('portal.discounts.tableAria')}
+			columns={[
+				{ label: m('portal.discounts.col.appliesTo') },
+				{ label: m('portal.discounts.col.amount'), class: 'right' },
+				{ label: m('portal.discounts.col.tiers') },
+				{ label: m('portal.discounts.col.bestDiscount'), class: 'right' },
+				{ label: m('portal.discounts.col.youSave'), class: 'right' },
+				{ label: m('portal.discounts.col.window') },
+				{ label: m('portal.discounts.col.status') },
+				{}
+			]}
+		>
+			{#snippet body()}
 				{#each items as o (o.id)}
 					<tr>
 						<td>
 							{offerLabel(o)}
 						</td>
-						<td class="num"><Money amount={o.base_amount} currency={o.currency} /></td>
+						<td class="right"><Money amount={o.base_amount} currency={o.currency} mono /></td>
 						<td class="tiers">
 							{#each o.tiers as t (t.days)}
 								<span class="tier">{m('portal.discounts.tier', { days: t.days, percent: fmtPct(t.percent) })}</span>
 							{/each}
 						</td>
-						<td class="num">
+						<td class="right">
 							{o.best_tier ? fmtPct(o.best_tier.percent) : m('portal.common.dash')}
 						</td>
-						<td class="num">
+						<td class="right">
 							{#if o.status === 'captured' && o.captured_amount !== null}
-								<Money amount={o.captured_amount} currency={o.currency} />
+								<Money amount={o.captured_amount} currency={o.currency} mono />
 							{:else if o.accepted_tier}
-								<Money amount={o.accepted_tier.savings} currency={o.currency} />
+								<Money amount={o.accepted_tier.savings} currency={o.currency} mono />
 							{:else if o.best_tier}
-								<Money amount={o.best_tier.savings} currency={o.currency} />
+								<Money amount={o.best_tier.savings} currency={o.currency} mono />
 							{:else}
 								{m('portal.common.dash')}
 							{/if}
@@ -334,8 +337,8 @@
 						</td>
 					</tr>
 				{/each}
-			</tbody>
-		</table>
+			{/snippet}
+		</DataTable>
 
 		{#if hasMore}
 			<div class="load-more-row">
@@ -447,43 +450,16 @@
 		border-color: var(--accent-strong);
 		color: #fff;
 	}
-	table {
-		width: 100%;
-		border-collapse: collapse;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		overflow: hidden;
-	}
-	th,
+	/* Table chrome (padding, borders, header, `.right`, `td.actions`) is
+	   app.css's `.grid-container`, owned by DataTable. Cells top-align: the
+	   tier list makes a row several lines tall. */
 	td {
-		text-align: left;
-		padding: 10px 12px;
-		font-size: 0.88rem;
-		border-bottom: 1px solid var(--border);
 		vertical-align: top;
 	}
-	th {
-		background: var(--bg);
-		color: var(--text-muted);
-		font-weight: 500;
-		text-transform: uppercase;
-		font-size: 0.72rem;
-		letter-spacing: 0.04em;
-	}
-	tbody tr:last-child td {
-		border-bottom: none;
-	}
-	.num {
-		text-align: right;
-		font-variant-numeric: tabular-nums;
-	}
-	.tiers {
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-	}
+	/* Stacked with `display: block`, not a flex <td>: a flex cell stops being
+	   a table cell, so its border drifts out of line with the rest of the row. */
 	.tier {
+		display: block;
 		font-size: 0.78rem;
 		color: var(--text-muted);
 		white-space: nowrap;
@@ -492,12 +468,6 @@
 		white-space: nowrap;
 		font-size: 0.82rem;
 		color: var(--text-muted);
-	}
-	.actions {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		white-space: nowrap;
 	}
 	.empty,
 	.loading {
