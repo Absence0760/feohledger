@@ -49,6 +49,33 @@ test.describe('audit console (admin)', () => {
 		await expect(page.getByRole('alert')).toContainText('invoice ID');
 	});
 
+	test('an action reads as a label and keeps its exact token', async ({ page }) => {
+		// Stubbed so the row set is known: a labelled token, and one no build
+		// knows, which must render raw rather than vanish.
+		const row = (id: string, action: string) => ({
+			id,
+			actor_name: 'Ada',
+			action,
+			entity_type: 'invoice',
+			entity_id: '00000000-0000-0000-0000-000000000001',
+			details: null,
+			created_at: '2026-11-01T10:00:00Z'
+		});
+		await page.route('**/api/audit/export*', (route) =>
+			route.fulfill({
+				json: [row('a1', 'invoice.approved'), row('a2', 'invoice.from_the_future')]
+			})
+		);
+		await page.goto('/audit');
+		await page.getByRole('button', { name: 'Run query' }).click();
+
+		const rows = page.locator('.grid-container tbody tr');
+		await expect(rows).toHaveCount(2);
+		await expect(rows.nth(0)).toContainText('Invoice approved');
+		await expect(rows.nth(0).getByTestId('audit-action-token')).toHaveText('invoice.approved');
+		await expect(rows.nth(1).getByTestId('audit-action-token')).toHaveText('invoice.from_the_future');
+	});
+
 	test('a failed query says so with a Retry, not an empty trail', async ({ page }) => {
 		let fail = true;
 		await page.route('**/api/audit/export*', (route) =>

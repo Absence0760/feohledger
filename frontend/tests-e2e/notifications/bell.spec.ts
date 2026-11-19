@@ -143,6 +143,32 @@ test.describe('notification bell popover', () => {
 		await expect(popover.getByRole('button', { name: /Renewal due: bell spec contract/ })).toHaveCount(0);
 	});
 
+	test('an unread item with nowhere to go has its own Mark read control', async ({ page }) => {
+		const unreadItem: NotificationListResponse = {
+			...CONTRACT_ITEM,
+			items: [{ ...CONTRACT_ITEM.items[0], read_at: null }],
+			unread: 1
+		};
+		const id = unreadItem.items[0].id;
+		await page.route(LIST, (route) => route.fulfill({ json: unreadItem }));
+		await page.route(
+			(url) => url.pathname === `/api/notifications/${id}/read`,
+			(route) => route.fulfill({ json: {} })
+		);
+		await page.goto('/');
+		await page.locator('.bell-btn').click();
+		const popover = page.getByRole('dialog', { name: 'Notifications' });
+
+		const marked = page.waitForRequest(
+			(r) => r.method() === 'POST' && new URL(r.url()).pathname === `/api/notifications/${id}/read`
+		);
+		await popover.getByRole('button', { name: 'Mark read: Renewal due: bell spec contract' }).click();
+		await marked;
+		// Read now: the control is gone, focus stayed in the dialog.
+		await expect(popover.getByRole('button', { name: /^Mark read:/ })).toHaveCount(0);
+		await expect(popover.getByRole('heading', { name: 'Notifications' })).toBeFocused();
+	});
+
 	test('a non-invoice item opens its own record and closes the popover', async ({ page }) => {
 		const contractId = '00000000-0000-0000-0000-00000000c0de';
 		const withId: NotificationListResponse = {
