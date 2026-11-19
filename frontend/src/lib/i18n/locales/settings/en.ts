@@ -1154,7 +1154,6 @@ export const enSettings = {
 	'billing.plan.managedBy': 'Managed by',
 	'billing.plan.perMonth': '/ month',
 	'billing.plan.period': 'Billing period',
-	'billing.plan.price': 'Price',
 	'billing.plan.provider': 'provider',
 	'billing.plan.selfServe': 'Self-serve',
 	'billing.plan.trialEnds': 'Trial ends',

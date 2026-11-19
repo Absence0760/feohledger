@@ -1127,7 +1127,6 @@ export const messages = {
 	'billing.plan.managedBy': '管理元',
 	'billing.plan.perMonth': '/ 月',
 	'billing.plan.period': '請求期間',
-	'billing.plan.price': '料金',
 	'billing.plan.provider': 'プロバイダー',
 	'billing.plan.selfServe': 'セルフサービス',
 	'billing.plan.trialEnds': 'トライアル終了',

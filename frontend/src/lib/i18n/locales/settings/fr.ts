@@ -1137,7 +1137,6 @@ export const messages = {
 	'billing.plan.managedBy': 'Géré par',
 	'billing.plan.perMonth': '/ mois',
 	'billing.plan.period': 'Période de facturation',
-	'billing.plan.price': 'Prix',
 	'billing.plan.provider': 'fournisseur',
 	'billing.plan.selfServe': 'En libre-service',
 	'billing.plan.trialEnds': 'Fin de l\'essai',
