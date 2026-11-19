@@ -885,7 +885,8 @@
 									{#if confirmRegenerate}
 										<button
 											type="button"
-											class="btn-danger armed"
+											class="btn-danger"
+											class:armed={isAllowed(run.actions?.nacha_regenerate) && nachaDateOk}
 											disabled={downloadingNacha ||
 												!isAllowed(run.actions?.nacha_regenerate) ||
 												!nachaDateOk}
@@ -1134,7 +1135,8 @@
 							     a test can wait on the armed control by name instead
 							     of on a timer. -->
 							<button
-								class="btn-primary armed"
+								class="btn-primary"
+								class:armed={isAllowed(run.actions?.execute)}
 								disabled={executing || cancelling || !isAllowed(run.actions?.execute)}
 								aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
 								onclick={execute}
@@ -1225,7 +1227,8 @@
 					{#if showRetry}
 						{#if confirmRetry}
 							<button
-								class="btn-primary armed"
+								class="btn-primary"
+								class:armed={isAllowed(run?.actions?.retry_failed)}
 								disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
 								onclick={retryFailed}
 							>

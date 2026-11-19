@@ -2971,7 +2971,7 @@
 									></textarea>
 									<div class="reject-actions">
 										<button type="button" class="btn-cancel" onclick={() => { showRejectForm = false; rejectReason = ''; }}>{m('common.cancel')}</button>
-										<button type="button" class="btn-danger armed" disabled={reviewing || !rejectReason.trim()} onclick={handleReject}>
+										<button type="button" class="btn-danger" class:armed={!!rejectReason.trim()} disabled={reviewing || !rejectReason.trim()} onclick={handleReject}>
 											{reviewing ? m('invoices.modal.review.rejecting') : m('invoices.modal.review.confirmReject')}
 										</button>
 									</div>
@@ -3037,11 +3037,12 @@
 								</button>
 							{/if}
 							{#if canWrite && !isDone}
-								<!-- `.btn-save` / `.btn-submit` are e2e hooks with no CSS. Submit is the
-								     footer's lead action when offered, so Save steps back to secondary. -->
+								<!-- `.btn-save` / `.btn-submit` are e2e hooks with no CSS. Submit (or, for a
+								     reviewer, Approve in the review row) is the footer's lead action when
+								     offered, so Save steps back to secondary: one .btn-primary per footer. -->
 								<button
 									type="submit"
-									class="btn-save {canSubmit || resubmitOffered ? 'btn-secondary' : 'btn-primary'}"
+									class="btn-save {canSubmit || resubmitOffered || (canReview && isOffered(verdicts?.approve)) ? 'btn-secondary' : 'btn-primary'}"
 									disabled={saving}
 								>
 									{saving ? m('common.saving') : m('common.save')}

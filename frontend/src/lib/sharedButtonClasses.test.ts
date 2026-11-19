@@ -47,6 +47,8 @@ const COVERED = [
 	'lib/components/modals/RunDetailModal.svelte',
 	'lib/components/organization/CloseWorkspacePanel.svelte',
 	'lib/components/reports/ResultTable.svelte',
+	'lib/components/ui/BulkBar.svelte',
+	'lib/components/ui/BulkDeleteButton.svelte',
 	'lib/components/workflow-mgmt/ImportExportControls.svelte',
 	'lib/components/workflow-mgmt/SimulationModal.svelte',
 	'lib/components/workflow-mgmt/TemplateLibraryModal.svelte',
@@ -80,6 +82,7 @@ const PAINT =
  */
 const E2E_HOOKS = new Set([
 	'lib/components/modals/AdvancedSearchModal.svelte btn-apply',
+	'lib/components/modals/ContractModal.svelte btn-save',
 	'lib/components/modals/InvoiceModal.svelte btn-save',
 	'lib/components/modals/InvoiceModal.svelte btn-submit',
 	'routes/invoices/+page.svelte btn-upload',
@@ -136,6 +139,27 @@ describe('shared button classes', () => {
 		expect(busy![1]).toMatch(/opacity: 1;/);
 		expect(busy![1]).toMatch(/background: var\(--danger-tint\);/);
 		expect(busy![1]).toMatch(/color: var\(--danger-on-tint\);/);
+	});
+
+	it('app.css gives .btn-primary and .btn-cancel the box .btn-secondary has', () => {
+		const rules = parseRules(appCss);
+		const box = (cls: string) => {
+			const decl = new Map<string, string>();
+			for (const r of rules) {
+				const parts = r.selector.split(',').map((p) => p.trim());
+				if (parts.includes(`.${cls}`)) for (const [p, v] of r.declarations) decl.set(p, v);
+			}
+			return decl;
+		};
+		const secondary = box('btn-secondary');
+		for (const cls of ['btn-primary', 'btn-cancel']) {
+			const decl = box(cls);
+			for (const prop of ['display', 'align-items', 'justify-content', 'gap', 'line-height', 'padding']) {
+				expect(decl.get(prop), `.${cls} ${prop}`).toBe(secondary.get(prop));
+			}
+			// A 1px border on all four, so the heights match to the pixel.
+			expect(decl.get('border'), `.${cls} border`).toMatch(/^1px solid /);
+		}
 	});
 
 	it('app.css declares the icon button: a 24px target, a pressed state, no opacity', () => {

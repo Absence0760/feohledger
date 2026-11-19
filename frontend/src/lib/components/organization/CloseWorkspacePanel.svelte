@@ -202,7 +202,8 @@
 			<div class="form-actions">
 				<button
 					type="submit"
-					class="btn-danger armed"
+					class="btn-danger"
+					class:armed={canSubmit || submitting}
 					data-testid="close-workspace-submit"
 					disabled={!canSubmit}
 				>

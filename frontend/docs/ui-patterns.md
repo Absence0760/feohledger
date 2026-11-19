@@ -356,13 +356,25 @@ appears when one or more rows are selected:
   (e.g. excluding the current user, the default workflow, or
   immutable-status invoices). Items that can't be selected render
   their `<td class="checkbox-col">` empty rather than disabled.
+- **One size throughout.** Every button in the bar is a shared class at its
+  standard box: Clear is `.btn-cancel`, `BulkDeleteButton` is `.btn-danger`
+  (`.armed` for its confirm), any other action or "select all N matching" is
+  `.btn-secondary`. No compact local copies.
+- While the bar shows, `BulkBar` reserves its measured height (it wraps on a
+  phone) under the page (`html.has-bulk-bar body { padding-bottom }` in
+  `app.css`), so the fixed bar never covers the last rows or the pagination.
+- `countLabel` overrides the count text when the page's noun takes a gender
+  (`invoices.bulk.selected`); the `lead` snippet sits between the count and
+  Clear, for the "select all N matching" button or its in-force note.
 - Delete is always armed-confirm (one click arms; outside-click or
   second click un-arms or commits). `BulkDeleteButton` does this.
   Pass `confirmLabel` (the armed label) from the catalogue too — its
   fallback, `"Confirm " + label`, is English-only. `title` sets a native
   tooltip; wrap the button in a `<span title>` instead when the tooltip
   must show while it is `disabled` (`/invoices` does). Never restyle a
-  local `.bulk-delete-btn` copy — `/invoices` carried one until it drifted.
+  local `.bulk-delete-btn` copy — `/invoices` carried one until it drifted,
+  and a hand-rolled `.bulk-bar` with it (it now uses `<BulkBar>`, so it has the
+  `role="toolbar"` and its name).
 - Bulk endpoints return a partial-success shape — `{deleted: [],
   failed: [{id, reason, ...}]}` — and the page surfaces the per-row
   reason in a toast. See `bulk_delete_users` in `backend/app/api/admin.py`
@@ -1072,7 +1084,7 @@ the `ui/` primitive in the Source column.
 | Data table | `.grid-container` + `table`/`th`/`td`/`.empty` | `ui/DataTable.svelte` |
 | Search input | `.search-box` | `ui/SearchBox.svelte` |
 | Bulk bar | `.bulk-bar` | `ui/BulkBar.svelte` |
-| Bulk delete | `.bulk-delete-btn` (+ `.armed`) | `ui/BulkDeleteButton.svelte` |
+| Bulk delete | `.btn-danger.bulk-delete-btn` (+ `.armed`) | `ui/BulkDeleteButton.svelte` |
 | Bulk action | `.btn-secondary` (`.btn-primary` for the bar's lead action) | `src/app.css`, always inside a BulkBar |
 | Per-row action | `<RowAction>` (variant + armed) | `ui/RowAction.svelte` |
 | Clickable-row open control | `<RowLink>` + `.clickable` row + `isRowOpenClick` | `ui/RowLink.svelte` / `utils/rowNav.ts` |
@@ -1106,7 +1118,14 @@ modals and the rest, and every header `.close-btn` / `.icon-btn` and the
 the change that migrates it:
 - `.btn-primary` — the page's one lead action (white on `--accent-strong`).
   One per footer: `RunDetailModal` renders Execute as `.btn-secondary` while
-  the CFO sign-off (`.btn-primary`) is pending.
+  the CFO sign-off (`.btn-primary`) is pending; `InvoiceModal`'s Save steps
+  back to `.btn-secondary` while Submit, Resubmit or a reviewer's Approve is
+  offered; `ContractModal`'s Save does while the Renew / Create PO sub-form
+  (whose confirm is the lead) is open.
+  `.btn-primary` and `.btn-cancel` share the `.btn-secondary` box
+  (`inline-flex`, a 1px border — transparent on the primary — and a
+  `<button>`'s `line-height`), so an icon + label centres the same way in all
+  four.
 - `.btn-cancel` — dismiss / back out, beside a Save. Reads in `--text-muted`.
 - `.btn-secondary` — any other action (Create beside Upload, Import CSV,
   Refresh, Merge duplicates). Reads in `--text`; works on an `<a>` that
@@ -1133,8 +1152,26 @@ the change that migrates it:
   bulk discounts, unblock a vendor's payments on `/vendors/screening`):
   a `--danger-strong` fill, whatever the button looked like unarmed. Pair it
   with a distinct armed label (`Confirm execute · …`), since a colour change
-  announces nothing to a screen reader. Busy (disabled) it stays red without
-  `opacity`: the danger tint, `--danger-on-tint` text, the strong border.
+  announces nothing to a screen reader — and when the button carries an
+  `aria-label`, switch that with the state too (`<key>Aria` /
+  `<confirmKey>Aria`, as `VendorModal`'s ERP unlink and `/organization`'s
+  webhook Remove and intake Rotate do) and drop it while busy, or the armed
+  name still says the unarmed words (WCAG 2.5.3; `a11y/labelInName.test.ts`
+  scans for a fixed label over switched text).
+  **Arming follows the precondition.** A commit has three looks, and `.armed`
+  is only on while the click would actually commit:
+  1. **Disabled, precondition unmet** (no reject reason typed, the workspace
+     slug not typed, the server's verdict refuses execute): no `.armed` — the
+     plain muted disabled look of its base class. A red fill on a button that
+     cannot be pressed reads as "ready".
+  2. **Ready**: `.armed` — the `--danger-strong` fill.
+  3. **Busy** (disabled while the request is in flight): `.armed` stays on,
+     and it shows the danger tint with `--danger-on-tint` text and the strong
+     border, never `opacity`.
+  So write `class:armed={precondition || busy}`, never a static
+  `class="… armed"` on a button whose `disabled` reads anything but busy
+  (`CloseWorkspacePanel`: `class:armed={canSubmit || submitting}`;
+  `InvoiceModal` Confirm reject: `class:armed={!!rejectReason.trim()}`).
 - **A confirmation dialog's destructive commit is `.btn-danger.armed`.** The
   outlined `.btn-danger` trigger opened the dialog (or the inline confirm it
   reveals), so that step is the first click and its commit is the second: Void payment, Dismiss compliance
