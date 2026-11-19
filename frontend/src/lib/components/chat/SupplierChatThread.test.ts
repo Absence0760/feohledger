@@ -1,5 +1,9 @@
 import { render } from 'svelte/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// LoadError reaches the i18n store, which reads `$app/env` — a SvelteKit
+// virtual module the plain vitest config does not provide.
+vi.mock('$app/env', () => ({ browser: false }));
 
 import SupplierChatThread from './SupplierChatThread.svelte';
 
