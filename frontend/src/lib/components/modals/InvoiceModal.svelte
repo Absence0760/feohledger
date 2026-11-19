@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatPercent, formatRatioPercent } from '#lib/utils/percent.ts';
 	import { focusTrap } from '#lib/actions/focusTrap.ts';
 	import type { Invoice, AuditSummary } from '#lib/types/invoice.ts';
 	import {
@@ -2168,7 +2169,7 @@
 										{m('invoices.modal.suggestions.provenance', {
 											occurrences: s.occurrences,
 											sample: s.sample_size,
-											confidence: s.confidence,
+											confidence: formatPercent(s.confidence, { minimumFractionDigits: 1 }),
 										})}
 										{#if s.runner_up}
 											<span class="coding-suggestion-runner">
@@ -2394,7 +2395,7 @@
 												{isPositiveAmount(pm.amount_variance) ? '+' : ''}{formatMoney(pm.amount_variance, {
 													currency: pm.currency_check === 'same' ? invoice.currency : null
 												})}
-												({pm.amount_variance_pct > 0 ? '+' : ''}{pm.amount_variance_pct.toFixed(1)}%)
+												({pm.amount_variance_pct > 0 ? '+' : ''}{formatPercent(pm.amount_variance_pct, { minimumFractionDigits: 1 })})
 											</span>
 										</div>
 									{/if}
@@ -2669,7 +2670,7 @@
 												<tbody>
 													{#each priors.rag_neighbors as n}
 														<tr>
-															<td>{Math.round(n.similarity * 100)}%</td>
+															<td>{formatRatioPercent(n.similarity, { maximumFractionDigits: 0 })}</td>
 															<td>{n.vendor_name ?? '—'}</td>
 															<td>{n.invoice_number ?? '—'}</td>
 															<td>{formatMoney(n.amount, { currency: invoice.currency })}</td>
@@ -2703,7 +2704,7 @@
 												<span class="activity-detail">— {entry.details.reason}</span>
 											{/if}
 											{#if entry.action === 'invoice.extraction_completed' && entry.details?.confidence}
-												<span class="activity-detail">{m('invoices.modal.activity.confidence', { method: String(entry.details.method), pct: Math.round((entry.details.confidence as number) * 100) })}</span>
+												<span class="activity-detail">{m('invoices.modal.activity.confidence', { method: String(entry.details.method), pct: formatRatioPercent(entry.details.confidence as number, { maximumFractionDigits: 0 }) })}</span>
 											{/if}
 											{#if entry.action === 'invoice.extraction_completed' && entry.details?.gl_suggested}
 												<span class="activity-detail">{m('invoices.modal.activity.glSuggested', { gl: String(entry.details.gl_suggested) })}</span>

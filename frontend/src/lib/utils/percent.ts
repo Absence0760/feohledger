@@ -13,8 +13,16 @@
  * Every percentage this API sends — discount tiers, `capture_rate_pct`,
  * `annualized_return_pct`, budget `utilization_pct` — is on the 0–100 scale:
  * `12.5` means twelve and a half percent. `formatPercent(12.5)` renders
- * "12.5%". There is deliberately no ratio mode: one scale means a caller can
- * never be off by a factor of a hundred.
+ * "12.5%". There is deliberately no ratio *mode* (no flag on this function):
+ * one scale per function name means a caller can never be off by a factor of
+ * a hundred by forgetting an option.
+ *
+ * A few fields really are ratios (0–1): an AI decision's `confidence`, a
+ * retrieval `similarity`, an agent `resolution_rate`. Those go through the
+ * separately named `formatRatioPercent`, never `formatPercent(x * 100)` — the
+ * name states the scale at the call site, and the ratio reaches `Intl`
+ * untouched (its percent style multiplies exactly), so no float product
+ * (`0.0115 * 100` is `1.1500000000000001`) is ever rounded.
  *
  * ## String decimals are shifted, not divided
  *
@@ -80,8 +88,31 @@ export function pointsToRatioString(points: PercentPoints): string | null {
  * never `NaN%`, and never a fabricated `0%`.
  */
 export function formatPercent(points: PercentPoints, options: FormatPercentOptions = {}): string {
+	return formatRatioString(pointsToRatioString(points), options);
+}
+
+/**
+ * Format a 0–1 RATIO as a percentage for the active locale.
+ *
+ * `formatRatioPercent(0.875)` → "87.5%" (en), "87,5 %" (fr). Same options and
+ * fallback as `formatPercent`; only the input scale differs.
+ */
+export function formatRatioPercent(ratio: PercentPoints, options: FormatPercentOptions = {}): string {
+	return formatRatioString(ratioToString(ratio), options);
+}
+
+/** `ratio` as a decimal string `Intl` can read exactly, or `null`. */
+function ratioToString(ratio: PercentPoints): string | null {
+	if (ratio === null || ratio === undefined) return null;
+	if (typeof ratio === 'number') return Number.isFinite(ratio) ? String(ratio) : null;
+	const text = ratio.trim();
+	const match = DECIMAL.exec(text);
+	if (!match || (!match[2] && !match[3])) return null;
+	return text;
+}
+
+function formatRatioString(ratio: string | null, options: FormatPercentOptions): string {
 	const { minimumFractionDigits = 0, maximumFractionDigits, fallback = '—' } = options;
-	const ratio = pointsToRatioString(points);
 	if (ratio === null) return fallback;
 	const formatter = new Intl.NumberFormat(getActiveFormatLocale(), {
 		style: 'percent',

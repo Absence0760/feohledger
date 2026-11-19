@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatPercent } from '#lib/utils/percent.ts';
 	// This month's AI-read invoices against the plan allowance (decisions §253):
 	// the meter, the overage so far and its month-end projection, the spending
 	// cap (editable by an admin on a plan that bills overage), and the pause
@@ -95,7 +96,7 @@
 					included: formatNumber(usage.included)
 				})}
 			</span>
-			<span class="pct">{percent}%</span>
+			<span class="pct">{formatPercent(percent)}</span>
 		</div>
 		<div
 			class="track tone-{tone}"
