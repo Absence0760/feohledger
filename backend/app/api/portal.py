@@ -23,7 +23,8 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -926,12 +927,15 @@ _SUPPLIER_VISIBLE_PO = PurchaseOrder.status != UNISSUED_PO_STATUS
 
 #: The flip's refusal for a PO that no longer represents a live commitment.
 PO_NOT_INVOICEABLE = "po_not_invoiceable"
+#: The flip's refusal for a PO this vendor has already invoiced (decisions
+#: §NEW-N1).
+PO_ALREADY_INVOICED = "po_already_invoiced"
 #: The flip's refusal for a PO whose total the ERP's last sync could not vouch
 #: for (decisions §323).
 PO_TOTAL_UNVERIFIABLE = "po_total_unverifiable"
 
 
-def po_flip_refusal(po: PurchaseOrder) -> ActionRefusal | None:
+def po_flip_refusal(po: PurchaseOrder, *, already_invoiced: bool) -> ActionRefusal | None:
     """Why the flip would refuse to mint a NEW invoice from ``po``, or ``None``.
 
     The one gate the flip raises from and the list / detail ship as
@@ -946,6 +950,12 @@ def po_flip_refusal(po: PurchaseOrder) -> ActionRefusal | None:
       lets a ``closed`` PO match because the invoice it is matching may itself
       be what closed it (fully billed), whereas a flip bills the PO's WHOLE
       total again as a new invoice — on a closed order that is a second bill.
+    - **An order already invoiced** (``already_invoiced``, from
+      :func:`_pos_already_invoiced`): an open PO the vendor has billed through
+      a normal submit (or AP keyed) before the ERP closes it. The flip would
+      bill the whole total a second time, under an empty invoice number the
+      duplicate detector cannot match (decisions §NEW-N1). No params: the
+      caller learns only about its own invoices, and not which one.
     - **An unvouched total** (decisions §323): the flip bills ``po.total``, and
       an invoice minted at a figure nobody vouches for would be a payable at an
       unconfirmed amount. Kept as the plain-string 409 it always answered.
@@ -958,6 +968,14 @@ def po_flip_refusal(po: PurchaseOrder) -> ActionRefusal | None:
             params={"status": po.status},
             coded=True,
         )
+    if already_invoiced:
+        return ActionRefusal(
+            code=PO_ALREADY_INVOICED,
+            message="You have already invoiced this purchase order. "
+            "Submit an invoice for any remaining amount instead.",
+            http_status=status.HTTP_409_CONFLICT,
+            coded=True,
+        )
     if po.total_unverifiable_reason:
         return ActionRefusal(
             code=PO_TOTAL_UNVERIFIABLE,
@@ -968,9 +986,62 @@ def po_flip_refusal(po: PurchaseOrder) -> ActionRefusal | None:
     return None
 
 
-def _po_flip_verdict(po: PurchaseOrder) -> CodedRefusal | None:
-    refusal = po_flip_refusal(po)
-    return CodedRefusal(**refusal.verdict()) if refusal else None
+async def _pos_already_invoiced(
+    db: AsyncSession, vendor_id: uuid.UUID, pos: list[PurchaseOrder]
+) -> set[uuid.UUID]:
+    """The ids of ``pos`` that a live invoice of ``vendor_id`` already cites.
+
+    "Cites" is what the matcher resolves an invoice to its PO by
+    (``services/po_matching``): the PO's number on ``Invoice.po_number`` within
+    the invoice's entity (an invoice or PO with no entity spans them), or the
+    PO's id among a multi-PO split's recorded legs (``split_po_ids``). "Live"
+    is every status but ``rejected``: from ``new`` to ``done`` the invoice is,
+    or can still become, a payable, and ``failed`` is either a stalled
+    extraction or an approved bill whose ERP push is retried. A rejected
+    invoice bills nothing while it stays rejected, and the supplier who is
+    told to re-bill needs a way to (decisions §NEW-N1).
+
+    Scoped to the caller's own vendor, so the verdict says nothing about any
+    other supplier's invoices.
+    """
+    if not pos:
+        return set()
+    numbers = {po.po_number for po in pos if po.po_number}
+    ids = [str(po.id) for po in pos]
+    cites = Invoice.split_po_ids.has_any(array(ids))
+    if numbers:
+        cites = or_(Invoice.po_number.in_(numbers), cites)
+    rows = (
+        await db.execute(
+            select(Invoice.po_number, Invoice.entity_id, Invoice.split_po_ids).where(
+                Invoice.vendor_id == vendor_id,
+                Invoice.status != InvoiceStatus.rejected,
+                cites,
+            )
+        )
+    ).all()
+    invoiced: set[uuid.UUID] = set()
+    for po in pos:
+        for number, entity_id, split in rows:
+            same_entity = entity_id is None or po.entity_id is None or entity_id == po.entity_id
+            by_number = number == po.po_number and same_entity
+            by_leg = isinstance(split, list) and str(po.id) in split
+            if by_number or by_leg:
+                invoiced.add(po.id)
+                break
+    return invoiced
+
+
+async def _po_flip_verdicts(
+    db: AsyncSession, vendor_id: uuid.UUID, pos: list[PurchaseOrder]
+) -> dict[uuid.UUID, CodedRefusal | None]:
+    """``flip_verdict`` for each of ``pos``, in one query for the whole page."""
+    invoiced = await _pos_already_invoiced(db, vendor_id, pos)
+    verdicts: dict[uuid.UUID, CodedRefusal | None] = {}
+    for po in pos:
+        refusal = po_flip_refusal(po, already_invoiced=po.id in invoiced)
+        verdicts[po.id] = CodedRefusal(**refusal.verdict()) if refusal else None
+    return verdicts
 
 
 @router.get("/purchase-orders", response_model=PortalPOListResponse)
@@ -1004,6 +1075,7 @@ async def list_my_purchase_orders(
         .limit(pagination.limit)
     )
     rows = (await db.execute(query)).all()
+    verdicts = await _po_flip_verdicts(db, vu.vendor_id, [po for po, _ in rows])
 
     return PortalPOListResponse(
         items=[
@@ -1016,7 +1088,7 @@ async def list_my_purchase_orders(
                 currency=po.currency,
                 line_item_count=n,
                 created_at=po.created_at,
-                flip_verdict=_po_flip_verdict(po),
+                flip_verdict=verdicts[po.id],
             )
             for po, n in rows
         ],
@@ -1046,6 +1118,7 @@ async def get_my_purchase_order(
         raise HTTPException(status_code=404, detail="Purchase order not found")
 
     lines = (await db.execute(select(POLineItem).where(POLineItem.po_id == po.id))).scalars().all()
+    verdicts = await _po_flip_verdicts(db, vu.vendor_id, [po])
 
     return PortalPODetail(
         id=str(po.id),
@@ -1055,7 +1128,7 @@ async def get_my_purchase_order(
         total_unverifiable=bool(po.total_unverifiable_reason),
         currency=po.currency,
         created_at=po.created_at,
-        flip_verdict=_po_flip_verdict(po),
+        flip_verdict=verdicts[po.id],
         line_items=[
             PortalPOLineItem(
                 description=li.description,
@@ -1131,10 +1204,12 @@ async def flip_purchase_order(
             message="Invoice already created from this PO.",
         )
 
-    # A dead order or an unvouched total mints nothing — after the replay
-    # short-circuit above, so a retry of a flip that went through (and may
-    # itself have closed the PO) still gets its invoice back.
-    refusal = po_flip_refusal(po)
+    # A dead order, one this vendor has already invoiced, or an unvouched total
+    # mints nothing — after the replay short-circuit above, so a retry of a
+    # flip that went through (and may itself have closed the PO, and whose
+    # invoice now cites it) still gets its invoice back.
+    already_invoiced = po.id in await _pos_already_invoiced(db, vendor_id_scope, [po])
+    refusal = po_flip_refusal(po, already_invoiced=already_invoiced)
     if refusal:
         raise refusal.http()
 
