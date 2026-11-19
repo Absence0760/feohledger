@@ -57,6 +57,10 @@ class AppLocalizationsPt extends AppLocalizations {
   String get commonRetry => 'Tentar novamente';
 
   @override
+  String get commonLoadErrorConnection =>
+      'Não foi possível contactar o FeohLedger. Verifique a ligação e toque em Tentar novamente.';
+
+  @override
   String get commonAll => 'Todas';
 
   @override
@@ -1777,8 +1781,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get workflowDetailFallbackTitle => 'Fluxo de trabalho';
 
   @override
-  String get workflowDetailLoadError =>
-      'Não foi possível carregar o fluxo de trabalho';
+  String workflowDetailErrorPrefix(String error) {
+    return 'Não foi possível carregar o fluxo de trabalho: $error';
+  }
 
   @override
   String get workflowDetailNoSteps => 'Este fluxo de trabalho não tem etapas.';
@@ -2199,7 +2204,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get exceptionDetailTitle => 'Exceção';
 
   @override
-  String get exceptionDetailNotFound => 'Exceção não encontrada';
+  String exceptionDetailErrorPrefix(String error) {
+    return 'Não foi possível carregar a exceção: $error';
+  }
 
   @override
   String get exceptionDetailOverdue => 'Em atraso';
@@ -4592,6 +4599,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get commonRetry => 'Tentar novamente';
 
   @override
+  String get commonLoadErrorConnection =>
+      'Não foi possível conectar ao FeohLedger. Verifique sua conexão e toque em Tentar novamente.';
+
+  @override
   String get commonAll => 'Todas';
 
   @override
@@ -6312,8 +6323,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get workflowDetailFallbackTitle => 'Fluxo de trabalho';
 
   @override
-  String get workflowDetailLoadError =>
-      'Não foi possível carregar o fluxo de trabalho';
+  String workflowDetailErrorPrefix(String error) {
+    return 'Não foi possível carregar o fluxo de trabalho: $error';
+  }
 
   @override
   String get workflowDetailNoSteps => 'Este fluxo de trabalho não tem etapas.';
@@ -6734,7 +6746,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get exceptionDetailTitle => 'Exceção';
 
   @override
-  String get exceptionDetailNotFound => 'Exceção não encontrada';
+  String exceptionDetailErrorPrefix(String error) {
+    return 'Não foi possível carregar a exceção: $error';
+  }
 
   @override
   String get exceptionDetailOverdue => 'Em atraso';
