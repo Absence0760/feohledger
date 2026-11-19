@@ -4450,6 +4450,7 @@ export const en = {
 	'discounts.modal.noTiers': 'This offer has no sliding-scale tiers; accepting confirms it as-is.',
 	'discounts.modal.save': 'save',
 	'discounts.modal.tierOption': '{percent}% off if paid within {days} days',
+	'discounts.modal.tierOptionFormatted': '{percent} off if paid within {days} days',
 	'discounts.modal.title': 'Accept discount',
 	'discounts.opt.availableSavings': 'Available savings:',
 	'discounts.opt.budgetAria': 'Cash budget',
@@ -4475,6 +4476,7 @@ export const en = {
 	'discounts.opt.unrankableNote': '{n, plural, one {# offer has} other {# offers have}} no net due date, so there is no horizon to annualize the return over. The saving is real and shown; the APR is withheld rather than reported as 0%. They are in no total above and were never selected — set the invoice due date to rank them.',
 	'discounts.opt.aprUnknown': 'APR unknown — no due date',
 	'discounts.opt.apr': '{pct} APR',
+	'discounts.opt.tierTerms': '{percent} / {days}d',
 	'discounts.opt.notRanked': 'Not ranked',
 
 	'discounts.redirecting': 'Redirecting…',

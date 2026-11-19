@@ -2,7 +2,7 @@
 	import { goto, replaceState } from '$app/navigation';
 	import { page as appPage } from '$app/state';
 	import { untrack } from 'svelte';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { formatPercent } from '#lib/utils/percent.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { hasPartialRealisedSet, partialRealisedCount } from '#lib/utils/discountPartialSet.ts';
@@ -127,13 +127,14 @@
 	}
 
 	// Percentages follow the active in-app locale ("12.3 %" in French, not a
-	// hard-coded `12.3%`), the same holder dates and money read.
+	// hard-coded `12.3%`) through the shared formatter. Rates are shown at a
+	// fixed precision; a tier's discount keeps up to two places so a 1.25 %
+	// tier is not rounded into a neighbour.
 	function formatPct(value: number, digits: number): string {
-		return new Intl.NumberFormat(getActiveFormatLocale(), {
-			style: 'percent',
-			minimumFractionDigits: digits,
-			maximumFractionDigits: digits
-		}).format(value / 100);
+		return formatPercent(value, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+	}
+	function tierPct(value: number): string {
+		return formatPercent(value, { maximumFractionDigits: 2 });
 	}
 
 	let loading = $state(true);
@@ -611,7 +612,7 @@
 											>{formatAmountWithoutCurrency(rec.roi.savings)}</span
 										>
 									{/if}
-									· {rec.discount_percent}% / {rec.tier_days}d
+									· {m('discounts.opt.tierTerms', { percent: tierPct(rec.discount_percent), days: rec.tier_days })}
 								</span>
 								<!-- The banner above reports how MANY rows are excluded; this
 								     says which one you are looking at. Without it the card
@@ -661,7 +662,7 @@
 										{:else}
 											<span class="money">{formatAmountWithoutCurrency(rec.roi.savings)}</span>
 										{/if}
-										· {rec.discount_percent}% / {rec.tier_days}d
+										· {m('discounts.opt.tierTerms', { percent: tierPct(rec.discount_percent), days: rec.tier_days })}
 									</span>
 									<span class="scenario-flag">{m('discounts.opt.notRanked')}</span>
 								</div>
@@ -715,7 +716,7 @@
 								{#if bestAmt !== null && best}
 									<span class="best-discount">
 										<Money amount={bestAmt} currency={offer.currency} mono />
-										<span class="best-pct">{best.percent}%</span>
+										<span class="best-pct">{tierPct(best.percent)}</span>
 									</span>
 								{:else}
 									<span class="muted">—</span>
@@ -800,7 +801,7 @@
 								onchange={() => (selectedTierDays = tier.days)}
 							/>
 							<span class="tier-option-label">
-								{m('discounts.modal.tierOption', { percent: tier.percent, days: tier.days })}
+								{m('discounts.modal.tierOptionFormatted', { percent: tierPct(tier.percent), days: tier.days })}
 								<span class="tier-option-amt">
 									{m('discounts.modal.save')} <Money
 										amount={scaleMoney(acceptTarget.base_amount, tier.percent, {
