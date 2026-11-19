@@ -23487,7 +23487,7 @@ mean matching on a number another supplier may have written.
 **Left open.** The reverse order is not refused: a supplier who flips and then
 submits an ordinary invoice for the same PO. Partial and corrective invoices
 against one PO are legitimate there, so it is a review-side check, not a
-portal refusal.
+portal refusal. Tracked in `docs/followups.md`.
 
 Tests: `backend/tests/test_portal_self_service.py` (live statuses refused with
 the coded detail and verdict, a split leg, a rejected or foreign-vendor invoice
