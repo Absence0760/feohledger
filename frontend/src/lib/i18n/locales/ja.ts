@@ -74,7 +74,7 @@ export const messages = {
 	'shell.primaryNav': 'メインナビゲーション',
 	'shell.sectionNav': 'セクション：{group}',
 	'shell.sectionMore': 'その他',
-	'shell.sectionMoreAria': '他 {count} セクション',
+	'shell.sectionMoreAria': 'その他 {count} セクション',
 	'shell.profileMenu': 'プロフィールとアカウントメニュー',
 	'shell.profileMenuNamed': '{name} — プロフィールとアカウントメニュー',
 	'shell.profile': 'プロフィール',

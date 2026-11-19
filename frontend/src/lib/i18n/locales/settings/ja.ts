@@ -152,7 +152,7 @@ export const messages = {
 	'org.chat.webhook.saving': '保存中…',
 	'org.chat.webhook.remove': 'Webhook を削除',
 	'org.chat.webhook.confirmRemove': '削除を確認',
-	'org.chat.webhook.removeAria': 'チャット受信 Webhook の URL を削除',
+	'org.chat.webhook.removeAria': 'Webhook を削除（チャット受信 Webhook の URL）',
 	'org.chat.webhook.rotateHint':
 		'差し替えは重複期間なしで即時に反映されます。投稿先は 1 つの URL だけなので、古い URL を残すとそちらに投稿し続けることになります。古い Webhook はチャットプロバイダー側でも削除してください。失効させられるのはプロバイダーだけです。',
 	'org.chat.webhook.toast.saved': 'チャット Webhook を保存しました',

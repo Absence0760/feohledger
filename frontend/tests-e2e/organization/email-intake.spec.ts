@@ -92,7 +92,7 @@ test.describe('/organization email intake', () => {
 		// No address to show, and — the point — no control that could only
 		// mint another token addressing nothing.
 		await expect(card.getByTestId('email-intake-address')).toHaveCount(0);
-		await expect(card.getByRole('button', { name: 'Rotate the email intake address' })).toHaveCount(
+		await expect(card.getByRole('button', { name: 'Rotate address for email intake' })).toHaveCount(
 			0
 		);
 	});
@@ -113,7 +113,7 @@ test.describe('/organization email intake', () => {
 		await page.goto('/organization?section=email-intake');
 
 		const card = panel(page);
-		const rotate = card.getByRole('button', { name: 'Rotate the email intake address' });
+		const rotate = card.getByRole('button', { name: 'Rotate address for email intake' });
 
 		// First click ARMS only — it must not reach the endpoint. Watch for the
 		// POST so a regression that fires on the first click fails here rather
@@ -157,7 +157,7 @@ test.describe('/organization email intake', () => {
 		await expect(card.getByRole('button', { name: 'Create intake address' })).toBeVisible();
 		// Nothing exists yet, so nothing can be invalidated — the destructive
 		// wording and the armed confirm belong to rotation only.
-		await expect(card.getByRole('button', { name: 'Rotate the email intake address' })).toHaveCount(
+		await expect(card.getByRole('button', { name: 'Rotate address for email intake' })).toHaveCount(
 			0
 		);
 	});
@@ -197,7 +197,7 @@ test.describe('/organization email intake', () => {
 		// load failure the reader cannot act on.
 		await expect(card.getByTestId('email-intake-admin-only')).toBeVisible();
 		await expect(card.getByTestId('email-intake-address')).toHaveCount(0);
-		await expect(card.getByRole('button', { name: 'Rotate the email intake address' })).toHaveCount(
+		await expect(card.getByRole('button', { name: 'Rotate address for email intake' })).toHaveCount(
 			0
 		);
 	});

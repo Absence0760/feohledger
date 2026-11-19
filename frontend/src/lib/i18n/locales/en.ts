@@ -5475,7 +5475,7 @@ export const en = {
 	'erpSync.listingTruncated': "{provider} has more records than one sync can read, so nothing was synced. Contact support.",
 	'glAccounts.erpLink.needsDecision': "Needs a decision",
 	'glAccounts.erpLink.choose': "Choose ERP account",
-	'glAccounts.erpLink.chooseAria': "Choose the ERP account for {code}",
+	'glAccounts.erpLink.chooseAria': "Choose ERP account for {code}",
 	'glAccounts.erpLink.title': "Which ERP account is {code}?",
 	'glAccounts.erpLink.intro': "The sync found more than one ERP account this row could mean, so it linked none. Invoices coded to {code} will post to the account you choose. Your choice is recorded in the audit trail.",
 	'glAccounts.erpLink.optionId': "ERP id {id}",

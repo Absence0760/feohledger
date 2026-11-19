@@ -153,7 +153,7 @@ export const messages = {
 	'org.chat.webhook.saving': 'Wird gespeichert…',
 	'org.chat.webhook.remove': 'Webhook entfernen',
 	'org.chat.webhook.confirmRemove': 'Entfernen bestätigen',
-	'org.chat.webhook.removeAria': 'Eingehende Chat-Webhook-URL entfernen',
+	'org.chat.webhook.removeAria': 'Webhook entfernen: eingehende Chat-Webhook-URL',
 	'org.chat.webhook.rotateHint':
 		'Das Ersetzen wirkt sofort und ohne Übergangsfenster — wir senden an genau eine URL, die alte aktiv zu lassen würde also weiter dorthin senden. Lösche den alten Webhook zusätzlich beim Chat-Anbieter: nur dort kann er widerrufen werden.',
 	'org.chat.webhook.toast.saved': 'Chat-Webhook gespeichert',
