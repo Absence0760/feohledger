@@ -103,6 +103,8 @@ export const messages = {
 	'toast.region': "Statusmeldungen",
 	'toast.dismiss': "Schließen",
 	'common.loadFailed': 'Diese Liste konnte nicht geladen werden. Zum erneuten Versuch aktualisieren.',
+	'common.empty': 'Keine Einträge.',
+	'common.emptyFiltered': 'Nichts entspricht diesen Filtern.',
 	'common.amountInvalid': 'Geben Sie den Betrag als einfache Zahl ein, z. B. 1200 oder 1200.50',
 	'common.reportingCurrencyUnresolved': 'Berichtswährung',
 	'common.currencyCode.required': 'Geben Sie die Währung als dreistelligen ISO-4217-Code ein, z. B. USD oder PLN.',
@@ -922,7 +924,6 @@ export const messages = {
 	'payments.cards.projectedAnnual': 'Prognose Jahr',
 	'payments.cards.atRunRate': 'bei aktueller Rate',
 	'payments.cards.activeCards': 'Aktive Karten',
-	'payments.cards.loading': 'Karten werden geladen …',
 	'payments.cards.empty': 'Noch keine virtuellen Karten ausgegeben.',
 	'payments.cards.errored': 'Virtuelle Karten konnten nicht geladen werden.',
 	'payments.cards.revealFailed': "Die Kartendaten konnten nicht angezeigt werden.",
@@ -950,7 +951,6 @@ export const messages = {
 	'payments.rebates.subtitle':
 		'Rückvergütungen des Kartenprozessors auf Ihre virtuellen Karten. Ein Statuswechsel dokumentiert nur, was der Prozessor bereits auf seiner eigenen Abrechnung getan hat — es wird keine Auszahlung angefordert und kein Geld bewegt.',
 	'payments.rebates.cardsTitle': 'Karten',
-	'payments.rebates.loading': 'Rückvergütungen werden geladen …',
 	'payments.rebates.empty': 'Noch keine Rückvergütungen erfasst.',
 	'payments.rebates.errored': 'Rückvergütungen konnten nicht geladen werden.',
 	'payments.rebates.col.period': 'Zeitraum',
@@ -1514,7 +1514,6 @@ export const messages = {
 	'exceptions.agents.run.refreshing': 'Wird aktualisiert…',
 	'exceptions.agents.run.note':
 		'Eine Ausführung bewertet eine Ausnahme und wendet die Korrektur über denselben auditierten Weg an, den auch ein Mensch nutzen würde — sofern die Konfidenz die Autonomieschwelle dieser Organisation erreicht. Darunter wird stattdessen an einen Menschen eskaliert. In beiden Fällen wird genau eine Entscheidung im Protokoll unten festgehalten.',
-	'exceptions.agents.run.empty.loading': 'Offene Ausnahmen werden geladen…',
 	'exceptions.agents.run.empty.errored':
 		'Die offenen Ausnahmen konnten nicht geladen werden. Versuchen Sie „Aktualisieren“.',
 	'exceptions.agents.run.empty.none':
@@ -2123,7 +2122,6 @@ export const messages = {
 	'expenses.kpi.pending': 'Ausstehend',
 	'expenses.search.placeholder': 'Ausgaben suchen...',
 	'expenses.search.aria': 'Ausgaben suchen',
-	'expenses.loading': 'Wird geladen…',
 	'expenses.empty': 'Keine Ausgaben entsprechen Ihren Filtern.',
 	'expenses.empty.errored': 'Ausgaben konnten nicht geladen werden. Bitte erneut versuchen.',
 	'expenses.col.date': 'Datum',
@@ -4265,7 +4263,6 @@ export const messages = {
 	'discounts.status.expired': 'Abgelaufen',
 	'discounts.status.offered': 'Angeboten',
 	'discounts.table.empty': 'Keine Skonto-Angebote entsprechen diesem Filter.',
-	'discounts.table.loading': 'Angebote werden geladen…',
 	'discounts.title': 'Skonti',
 	'discounts.toast.acceptFailed': 'Angebot konnte nicht angenommen werden',
 	'discounts.toast.accepted': 'Skonto-Angebot angenommen',

@@ -64,7 +64,6 @@
 	// Three states, not two: a failed load must not read as "nothing matched".
 	// The failed state renders `ui/LoadError` (with a Retry) in the table's
 	// place, so the empty line only has loading vs. empty to say.
-	let emptyMessage = $derived(contractStore.loading ? m('common.loading') : m('contracts.empty'));
 
 	let showCreate = $state(false);
 	let editing = $state<Contract | null>(null);
@@ -352,7 +351,8 @@
 	{:else}
 	<DataTable
 		isEmpty={contractStore.all.length === 0}
-		empty={emptyMessage}
+		loading={contractStore.loading}
+		empty={m('contracts.empty')}
 		colspan={8}
 	>
 		{#snippet header()}

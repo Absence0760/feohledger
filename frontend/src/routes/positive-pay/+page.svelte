@@ -373,11 +373,10 @@
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={!loading && files.length === 0}
-			empty={loading
-				? m('common.loading')
-				: typeFilter !== 'all' || appliedSearch
-					? m('positivePay.empty')
-					: m('positivePay.emptyNone')}
+			{loading}
+			filtered={typeFilter !== 'all' || !!appliedSearch}
+			emptyFiltered={m('positivePay.empty')}
+			empty={m('positivePay.emptyNone')}
 			colspan={9}
 		>
 			{#snippet body()}

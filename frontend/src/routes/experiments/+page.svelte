@@ -390,11 +390,10 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={filtered.length === 0}
-		empty={loading
-			? m('common.loading')
-			: experiments.length > 0
-				? m('experiments.table.emptyFiltered')
-				: m('experiments.table.empty')}
+		{loading}
+		filtered={experiments.length > 0}
+		emptyFiltered={m('experiments.table.emptyFiltered')}
+		empty={m('experiments.table.empty')}
 	>
 		{#snippet body()}
 			{#each filtered as exp (exp.id)}

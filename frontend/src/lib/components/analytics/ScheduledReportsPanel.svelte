@@ -412,11 +412,10 @@
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={schedules.length === 0}
-			empty={loading
-				? m('common.loading')
-				: errored
-					? m('scheduledReports.empty.errored')
-					: m('scheduledReports.empty.none')}
+			{loading}
+			{errored}
+			emptyErrored={m('scheduledReports.empty.errored')}
+			empty={m('scheduledReports.empty.none')}
 		>
 			{#snippet body()}
 				{#each schedules as s (s.id)}

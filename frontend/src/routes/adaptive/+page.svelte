@@ -473,7 +473,8 @@
 				<DataTable
 					columns={SUGGESTION_COLUMNS}
 					isEmpty={suggestions.length === 0}
-					empty={suggestionsLoading ? m('common.loading') : m('adaptive.suggestions.empty')}
+					loading={suggestionsLoading}
+					empty={m('adaptive.suggestions.empty')}
 				>
 					{#snippet body()}
 						{#each suggestions as s (s.id)}
@@ -756,7 +757,8 @@
 				<DataTable
 					columns={APPROVER_COLUMNS}
 					isEmpty={(patterns?.approvers.length ?? 0) === 0}
-					empty={patternsLoading ? m('common.loading') : m('adaptive.patterns.emptyApprovers')}
+					loading={patternsLoading}
+					empty={m('adaptive.patterns.emptyApprovers')}
 				>
 					{#snippet body()}
 						{#each patterns?.approvers ?? [] as a (a.approver_id)}
@@ -797,7 +799,8 @@
 				<DataTable
 					columns={VENDOR_COLUMNS}
 					isEmpty={(patterns?.vendors.length ?? 0) === 0}
-					empty={patternsLoading ? m('common.loading') : m('adaptive.patterns.emptyVendors')}
+					loading={patternsLoading}
+					empty={m('adaptive.patterns.emptyVendors')}
 				>
 					{#snippet body()}
 						{#each patterns?.vendors ?? [] as v (v.vendor_name)}
@@ -840,7 +843,8 @@
 				<DataTable
 					columns={ANOMALY_COLUMNS}
 					isEmpty={(anomalies?.flagged.length ?? 0) === 0}
-					empty={anomaliesLoading ? m('common.loading') : m('adaptive.anomalies.empty')}
+					loading={anomaliesLoading}
+					empty={m('adaptive.anomalies.empty')}
 				>
 					{#snippet body()}
 						{#each anomalies?.flagged ?? [] as a (a.invoice_id)}

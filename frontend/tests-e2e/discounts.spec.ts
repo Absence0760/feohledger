@@ -104,7 +104,7 @@ test.describe('/discounts (admin)', () => {
 		if (rowCount === 0) {
 			// No seeded offers (or router not wired) → friendly empty state.
 			await expect(page.locator('td.empty')).toBeVisible();
-			await expect(page.locator('td.empty')).toContainText(/No discount offers|Loading offers/);
+			await expect(page.locator('td.empty')).toContainText(/No discount offers|Loading…/);
 			return;
 		}
 

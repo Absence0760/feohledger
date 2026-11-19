@@ -475,11 +475,10 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
-		empty={loading
-			? m('common.loading')
-			: statusFilter === 'pending'
-					? m('vendors.changeRequests.empty.pending')
-					: m('vendors.changeRequests.empty.filtered')}
+		{loading}
+		filtered={statusFilter !== 'pending'}
+		emptyFiltered={m('vendors.changeRequests.empty.filtered')}
+		empty={m('vendors.changeRequests.empty.pending')}
 	>
 		{#snippet body()}
 			{#each items as r (r.id)}

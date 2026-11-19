@@ -611,13 +611,6 @@
 	 * the tenant has open ones.
 	 */
 	// (A failed fetch never reaches this line: `LoadError` replaces the table.)
-	let emptyMessage = $derived(
-		loading
-			? m('common.loading')
-			: filtered
-				? m('creditMemos.empty.filtered')
-				: m('creditMemos.empty')
-	);
 
 	// Only the true zero-data case gets the illustrated onboarding block: a
 	// filter that matched nothing keeps the plain in-table line, since "create
@@ -672,7 +665,14 @@
 			testId="credit-memos-load-error"
 		/>
 	{:else}
-		<DataTable isEmpty={memos.length === 0} empty={emptyMessage} colspan={8}>
+		<DataTable
+			isEmpty={memos.length === 0}
+			{loading}
+			{filtered}
+			emptyFiltered={m('creditMemos.empty.filtered')}
+			empty={m('creditMemos.empty')}
+			colspan={8}
+		>
 			{#snippet header()}
 				<tr>
 					<SortableHeader

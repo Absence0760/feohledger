@@ -394,7 +394,8 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={catalogs.length === 0}
-		empty={loading ? m('common.loading') : m('catalogs.empty')}
+		{loading}
+		empty={m('catalogs.empty')}
 	>
 		{#snippet body()}
 			{#each catalogs as c (c.id)}

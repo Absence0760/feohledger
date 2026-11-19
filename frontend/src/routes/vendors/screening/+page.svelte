@@ -555,11 +555,10 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
-		empty={loading
-			? m('common.loading')
-			: search.trim()
-					? m('vendors.screening.queue.empty.filtered')
-					: m('vendors.screening.queue.empty.clean')}
+		{loading}
+		filtered={!!search.trim()}
+		emptyFiltered={m('vendors.screening.queue.empty.filtered')}
+		empty={m('vendors.screening.queue.empty.clean')}
 	>
 		{#snippet body()}
 			{#each items as it (it.vendor_id)}

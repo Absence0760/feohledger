@@ -470,7 +470,8 @@
 			<DataTable
 				columns={SAVED_COLUMNS}
 				isEmpty={saved.length === 0}
-				empty={savedLoading ? m('common.loading') : m('reports.saved.empty')}
+				loading={savedLoading}
+				empty={m('reports.saved.empty')}
 			>
 				{#snippet body()}
 					{#each saved as def (def.id)}

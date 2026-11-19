@@ -139,7 +139,7 @@ Use **`<DataTable>`** (`#lib/components/ui/DataTable.svelte`) for every
 grid page instead of hand-rolling `<div class="grid-container"><table>`:
 
 ```svelte
-<DataTable columns={COLUMNS} isEmpty={items.length === 0} empty="No items.">
+<DataTable columns={COLUMNS} isEmpty={items.length === 0} {loading} {errored} empty={m('items.empty')}>
     {#snippet body()}
         {#each items as item (item.id)}
             <tr class:row-selected={selected.has(item.id)}>
@@ -159,11 +159,19 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
 - `isEmpty` + `empty` render the centred `td.empty` row, tagged
   `data-testid="table-empty"` so e2e specs can assert *which* empty state is
   showing.
-- **`empty` must distinguish loading / errored / genuinely-empty.** A list that
-  renders its "nothing here" copy while a fetch is in flight — or forever after
-  a failed one — is asserting something it never established. Compose it:
-  `empty={loading ? m('common.loading') : errored ? m('…empty.errored') : normalEmpty}`,
-  and set both flags in the fetch's `try`/`catch`/`finally`. `/notifications`,
+- **`empty` must distinguish loading / errored / filtered / genuinely-empty,
+  and DataTable does the distinguishing.** A list that renders its "nothing
+  here" copy while a fetch is in flight — or forever after a failed one — is
+  asserting something it never established. Pass the states as props and give
+  each message as a key; the component picks one, in this order:
+  `loading` → `common.loading` (rendered in a `role="status"` span, so it is
+  announced), `errored` → `emptyErrored` (default `common.loadFailed`),
+  `filtered` → `emptyFiltered` (default `common.emptyFiltered`), else `empty`
+  (default `common.empty`). Never hand-build `empty={loading ? m('common.loading') : …}`,
+  pass a page-private "Loading cards…" key, or give `empty` an English
+  literal: `src/lib/dataTableEmpty.test.ts` refuses all three (its `ALLOWED`
+  list may only shrink). A page that shows `ui/LoadError` in the table's place
+  on failure need not pass `errored`. `/notifications`,
   `/exceptions` and the dashboard are the reference implementations; on
   `/exceptions` in particular the empty copy ("Everything looks good!") is a
   claim about open fraud flags and compliance holds, so getting this wrong is a

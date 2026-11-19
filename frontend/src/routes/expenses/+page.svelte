@@ -587,9 +587,6 @@
 	// The failed state renders `ui/LoadError` (with a Retry) in the table's
 	// place. The search term reaches the server, so once the fetch settles the
 	// plain empty message is a true statement about the whole filtered set.
-	let expensesEmptyMessage = $derived(
-		expenseStore.loading ? m('expenses.loading') : m('expenses.empty')
-	);
 
 	const reportsSequence = createRequestSequencer();
 
@@ -1316,7 +1313,8 @@
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={expenseStore.all.length === 0}
-			empty={expensesEmptyMessage}
+			loading={expenseStore.loading}
+			empty={m('expenses.empty')}
 		>
 			{#snippet header()}
 				<tr>
@@ -1593,7 +1591,8 @@
 					{ label: m('expenses.reports.col.total'), class: 'right' }
 				]}
 				isEmpty={reports.length === 0}
-				empty={reportsLoading ? m('expenses.loading') : m('expenses.reports.empty')}
+				loading={reportsLoading}
+				empty={m('expenses.reports.empty')}
 			>
 				{#snippet body()}
 					{#each reports as r (r.id)}
@@ -1641,7 +1640,8 @@
 				{ label: '', class: 'actions-col' }
 			]}
 			isEmpty={policies.length === 0}
-			empty={policiesLoading ? m('expenses.loading') : m('expenses.policies.empty')}
+			loading={policiesLoading}
+			empty={m('expenses.policies.empty')}
 		>
 			{#snippet body()}
 				{#each policies as p (p.id)}
@@ -1705,7 +1705,8 @@
 				{ label: '', class: 'actions-col' }
 			]}
 			isEmpty={preapprovals.length === 0}
-			empty={preapprovalsLoading ? m('expenses.loading') : m('expenses.preapprovals.empty')}
+			loading={preapprovalsLoading}
+			empty={m('expenses.preapprovals.empty')}
 		>
 			{#snippet body()}
 				{#each preapprovals as pa (pa.id)}
@@ -1785,7 +1786,8 @@
 				{ label: '', class: 'actions-col' }
 			]}
 			isEmpty={cardTxns.length === 0}
-			empty={cardsLoading ? m('expenses.loading') : m('expenses.cards.empty')}
+			loading={cardsLoading}
+			empty={m('expenses.cards.empty')}
 		>
 			{#snippet body()}
 				{#each cardTxns as txn (txn.id)}

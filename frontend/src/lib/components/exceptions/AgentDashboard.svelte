@@ -371,11 +371,10 @@
 		<DataTable
 			columns={RUN_COLUMNS}
 			isEmpty={candidates.length === 0}
-			empty={candidatesLoading
-				? m('exceptions.agents.run.empty.loading')
-				: candidatesErrored
-					? m('exceptions.agents.run.empty.errored')
-					: m('exceptions.agents.run.empty.none')}
+			loading={candidatesLoading}
+			errored={candidatesErrored}
+			emptyErrored={m('exceptions.agents.run.empty.errored')}
+			empty={m('exceptions.agents.run.empty.none')}
 			colspan={6}
 		>
 			{#snippet body()}

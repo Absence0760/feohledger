@@ -544,11 +544,10 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={!loading && templates.length === 0}
-		empty={loading
-			? m('common.loading')
-			: noActiveFilters
-				? m('recurring.empty.fresh')
-				: m('recurring.empty')}
+		{loading}
+		filtered={!noActiveFilters}
+		emptyFiltered={m('recurring.empty')}
+		empty={m('recurring.empty.fresh')}
 		colspan={8}
 	>
 		{#snippet body()}
