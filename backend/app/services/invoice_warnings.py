@@ -1603,9 +1603,9 @@ def _beyond_receipt_worsened(previous: list | None, flag: dict) -> bool:
         if not isinstance(w, dict) or w.get("code") != "po_billed_beyond_receipt":
             continue
         before = w.get("params") or {}
-        if before.get("poNumber") != params.get("poNumber") or before.get(
+        if before.get("poNumber") != params.get("poNumber") or before.get("currency") != params.get(
             "currency"
-        ) != params.get("currency"):
+        ):
             continue
         try:
             received_before = Decimal(str(before["receivedValue"]))
