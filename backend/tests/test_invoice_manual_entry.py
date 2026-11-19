@@ -399,16 +399,21 @@ async def test_an_edit_cannot_clear_or_garble_the_currency(realdb):
         assert changed.status_code == 200, changed.text
         assert changed.json()["currency"] == "EUR"
 
-        # A legacy row already holding "" (written before this refusal) is not
-        # held hostage: an edit that leaves the currency out still saves.
+        # A row whose currency is unknown (NULL: an upload extraction found no
+        # code in, or a pre-0136 "" blank) is not held hostage: an edit that
+        # leaves the currency out still saves, and reads back as unknown.
         async with realdb.sessionmaker("a")() as s:
             await s.execute(
-                update(Invoice).where(Invoice.id == uuid.UUID(inv_id)).values(currency="")
+                update(Invoice).where(Invoice.id == uuid.UUID(inv_id)).values(currency=None)
             )
             await s.commit()
         other = await c.patch(f"/api/invoices/{inv_id}", json={"description": "still editable"})
         assert other.status_code == 200, other.text
-        assert other.json()["currency"] == ""
+        assert other.json()["currency"] is None
+        # Naming no currency explicitly is still refused, not written as NULL.
+        cleared = await c.patch(f"/api/invoices/{inv_id}", json={"currency": None})
+        assert cleared.status_code == 422, cleared.text
+        assert cleared.json()["detail"]["code"] == "invoice_currency_required"
         # ...and naming a real code is how it gets one.
         fixed = await c.patch(f"/api/invoices/{inv_id}", json={"currency": "GBP"})
         assert fixed.status_code == 200, fixed.text

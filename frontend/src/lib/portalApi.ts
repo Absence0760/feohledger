@@ -171,7 +171,8 @@ export interface PortalInvoiceListItem {
 	id: string;
 	invoice_number: string;
 	amount: number | string;
-	currency: string;
+	/** `null` until extraction reads a currency off the document. */
+	currency: string | null;
 	status: string;
 	invoice_date: string | null;
 	due_date: string | null;

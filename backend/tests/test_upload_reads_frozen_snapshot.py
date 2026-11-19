@@ -216,3 +216,30 @@ async def test_upload_does_not_mint_a_second_definition(realdb, stub_upload):
         )
     assert resp.status_code == 202, resp.text
     assert await _count() == before
+
+
+async def test_upload_records_the_currency_as_unknown_not_usd(realdb, stub_upload):
+    """Nothing has read the document when the row is created, so the upload
+    records no currency (NULL) rather than the USD default (decisions §160 /
+    §196 / §200, §TBD-currency). The invoice reads back with `currency: null`
+    on the detail and the list, rather than a 500 or a guessed code."""
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/upload",
+            files={"file": ("inv.pdf", b"%PDF-1.4 fake", "application/pdf")},
+        )
+        assert resp.status_code == 202, resp.text
+        inv_id = resp.json()["id"]
+        detail = await c.get(f"/api/invoices/{inv_id}")
+        listing = await c.get("/api/invoices", params={"page_size": 100})
+
+    async with realdb.sessionmaker(TENANT)() as s:
+        invoice = await s.get(Invoice, uuid.UUID(inv_id))
+        assert invoice.currency is None
+
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["currency"] is None
+    assert listing.status_code == 200, listing.text
+    rows = listing.json()
+    rows = rows["items"] if isinstance(rows, dict) else rows
+    assert [r["currency"] for r in rows if r["id"] == inv_id] == [None]

@@ -187,7 +187,7 @@ class PortalInvoiceListItem(BaseModel):
     id: str
     invoice_number: str
     amount: Decimal
-    currency: str
+    currency: str | None  # None = not yet known (extraction pending or found none)
     status: str
     invoice_date: date | None = None
     due_date: date | None = None

@@ -127,10 +127,11 @@ async def test_payment_run_allows_same_currency_invoices(realdb):
 # ---------------------------------------------------------------------------
 
 
-async def _blank_currency(mk, invoice_id, value: str = "") -> None:
-    """The invoice PATCH's legacy "no currency" value, written past the API the
-    way a concurrent PATCH would land between `/draft-run`'s read and the
-    builder's lock."""
+async def _blank_currency(mk, invoice_id, value: str | None = None) -> None:
+    """An invoice that records no currency: NULL, the one spelling since
+    migration 0136 (an upload extraction found no code in), or the pre-0136
+    `""` sentinel. Written past the API the way a concurrent change would land
+    between `/draft-run`'s read and the builder's lock."""
     from sqlalchemy import update
 
     async with mk() as s:
@@ -149,7 +150,7 @@ async def _payment_rows(mk, invoice_ids):
         )
 
 
-@pytest.mark.parametrize("blank", ["", "   "])
+@pytest.mark.parametrize("blank", [None, "", "   "])
 async def test_payment_run_refuses_an_invoice_with_no_currency(realdb, blank):
     """A blank currency used to be read as USD and staged; now it is the coded
     `currency_unknown` 409 naming the invoice, and nothing is booked. Batched
@@ -157,13 +158,14 @@ async def test_payment_run_refuses_an_invoice_with_no_currency(realdb, blank):
     either: it is no currency."""
     info = realdb.info("a")
     mk = realdb.sessionmaker("a")
+    tag = "N" if blank is None else len(blank)
     async with mk() as s:
         ent = await _default_entity_id(s, info.org_id)
     blank_id = await _seed_vendor_and_invoice(
-        mk, info.org_id, ent, number=f"NOCUR-{len(blank)}", amount="100.00", currency="USD"
+        mk, info.org_id, ent, number=f"NOCUR-{tag}", amount="100.00", currency="USD"
     )
     usd_id = await _seed_vendor_and_invoice(
-        mk, info.org_id, ent, number=f"NOCUR-USD-{len(blank)}", amount="100.00", currency="USD"
+        mk, info.org_id, ent, number=f"NOCUR-USD-{tag}", amount="100.00", currency="USD"
     )
     await _blank_currency(mk, blank_id, blank)
 
@@ -177,8 +179,8 @@ async def test_payment_run_refuses_an_invoice_with_no_currency(realdb, blank):
         assert resp.status_code == 409, resp.text
         detail = resp.json()["detail"]
         assert detail.startswith("currency_unknown:"), detail
-        assert f"NOCUR-{len(blank)}" in detail
-        assert f"NOCUR-USD-{len(blank)}" not in detail
+        assert f"NOCUR-{tag}" in detail
+        assert f"NOCUR-USD-{tag}" not in detail
     assert await _payment_rows(mk, [blank_id, usd_id]) == []
 
 
