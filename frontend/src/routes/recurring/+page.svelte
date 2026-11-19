@@ -9,6 +9,7 @@
 		skipReasonKey
 	} from '#lib/types/recurring.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { ApiError } from '#lib/api.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import {
 		listRecurring,
@@ -237,13 +238,39 @@
 
 	// Deep-link: `/recurring?id=<uuid>` opens that template's detail modal.
 	let deepLinkLoaded = $state<string | null>(null);
+	// The deep-linked template that could not be fetched for a reason other
+	// than "it does not exist". Only a 404 may say "not found"; a 500 or an
+	// offline backend is a failed load, stated in place with a Retry.
+	let deepLinkFailedId = $state<string | null>(null);
+
+	function openDeepLink(id: string) {
+		deepLinkFailedId = null;
+		getRecurring(id)
+			.then((t) => {
+				// Don't open a modal for a link the user has since left.
+				if (page.url.searchParams.get('id') === id) editing = t;
+			})
+			.catch((err) => {
+				if (page.url.searchParams.get('id') !== id) return;
+				if (err instanceof ApiError && err.status === 404) {
+					toast(m('recurring.notFound'), 'error');
+				} else {
+					deepLinkFailedId = id;
+				}
+			});
+	}
+
 	$effect(() => {
 		const id = page.url.searchParams.get('id');
-		if (!id || deepLinkLoaded === id) return;
-		deepLinkLoaded = id;
-		getRecurring(id)
-			.then((t) => (editing = t))
-			.catch(() => toast(m('recurring.notFound'), 'error'));
+		if (!id) {
+			untrack(() => (deepLinkFailedId = null));
+			return;
+		}
+		if (untrack(() => deepLinkLoaded) === id) return;
+		untrack(() => {
+			deepLinkLoaded = id;
+			openDeepLink(id);
+		});
 	});
 
 	async function openDetail(t: RecurringTemplate) {
@@ -458,6 +485,14 @@
 			<HelpTip term="recurring-invoice" />
 		</div>
 	</div>
+
+	{#if deepLinkFailedId}
+		<LoadError
+			message={m('recurring.deepLink.loadFailed')}
+			onretry={() => deepLinkFailedId && openDeepLink(deepLinkFailedId)}
+			testId="recurring-deeplink-error"
+		/>
+	{/if}
 
 	{#if loadErrored}
 		<LoadError
