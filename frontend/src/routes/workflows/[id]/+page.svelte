@@ -13,6 +13,7 @@
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import type { MoneyAmount } from '#lib/utils/money.ts';
 	import { isMoneyInput } from '#lib/utils/moneyInput.ts';
+	import { formatPercent } from '#lib/utils/percent.ts';
 	import ApprovalMatrixEditor from '#lib/components/modals/ApprovalMatrixEditor.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
@@ -447,6 +448,9 @@
 										<label for="threshold">{m('workflows.builder.extraction.confidenceThreshold')}</label>
 										<HelpTip term="confidence-score" />
 									</div>
+									<!-- The threshold is a 0–1 ratio; formatPercent takes 0–100
+									     points, hence ×100. aria-valuetext so a screen reader
+									     announces "95%", not the raw "0.95". -->
 									<div class="range-row">
 										<input
 											id="threshold"
@@ -455,9 +459,10 @@
 											max="1"
 											step="0.01"
 											value={cfg.auto_approve_threshold}
+											aria-valuetext={formatPercent(Math.round(cfg.auto_approve_threshold * 100))}
 											oninput={(e) => updateStepConfig(selectedIndex, 'auto_approve_threshold', parseFloat(e.currentTarget.value))}
 										/>
-										<span class="range-value">{Math.round(cfg.auto_approve_threshold * 100)}%</span>
+										<span class="range-value">{formatPercent(Math.round(cfg.auto_approve_threshold * 100))}</span>
 									</div>
 									<p class="field-hint">
 										{m('workflows.builder.extraction.thresholdHint')}

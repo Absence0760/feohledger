@@ -7,6 +7,7 @@ import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
 
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
+import { formatPercent } from '#lib/utils/percent.ts';
 
 // --- Run status -----------------------------------------------------------
 
@@ -247,8 +248,8 @@ export interface CloseReadinessResponse {
  * non-numeric value renders the placeholder rather than `NaN%`, and an
  * out-of-range value is clamped rather than shown as `140%` — a reviewer
  * weighing a machine's reading must never be handed a nonsense number.
- * Deliberately NOT locale-formatted: it is a provenance qualifier, not a
- * measured figure, and it must not be confused with money.
+ * Rounded to a whole percent (a provenance qualifier, not a measured figure),
+ * then rendered by `formatPercent` so the sign spacing follows the locale.
  */
 export function formatExtractionConfidence(
 	confidence: number | null | undefined,
@@ -256,7 +257,8 @@ export function formatExtractionConfidence(
 ): string {
 	if (typeof confidence !== 'number' || !Number.isFinite(confidence)) return placeholder;
 	const clamped = Math.min(1, Math.max(0, confidence));
-	return `${Math.round(clamped * 100)}%`;
+	// A 0..1 ratio; `formatPercent` takes 0–100 points, hence ×100.
+	return formatPercent(Math.round(clamped * 100));
 }
 
 /** Were this run's lines read off a document by an extraction adapter? */

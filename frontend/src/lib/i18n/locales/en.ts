@@ -488,7 +488,7 @@ export const en = {
 	'dashboard.discount.missed': 'Missed',
 	'dashboard.discount.pending': 'Still capturable',
 	'dashboard.discount.count': '{n, plural, one {# invoice} other {# invoices}}',
-	'dashboard.discount.rate': '{pct}% of decided discount windows captured.',
+	'dashboard.discount.rate': '{pct} of decided discount windows captured.',
 	'dashboard.discount.rateUnknown':
 		'No discount window has closed yet — there is no capture rate to report.',
 	'dashboard.discount.unconverted':
@@ -3307,7 +3307,7 @@ export const en = {
 	'bankRecon.state.confirmed': 'Confirmed',
 	'bankRecon.state.probable': 'Probable',
 	'bankRecon.state.suggested': 'Suggested',
-	'bankRecon.confidence': '{confidence}% confidence',
+	'bankRecon.confidence': '{confidence} confidence',
 	'bankRecon.suggestedHelp':
 		'Matched on vendor-name similarity alone — a suggestion, not a fact. Confirm it or clear it.',
 	'bankRecon.method.provider_id': 'Reference match',
@@ -4598,7 +4598,7 @@ export const en = {
 	'adaptive.routing.intro': 'Rank the approvers who could take one invoice, from their own approval history. Advisory: nothing is assigned until you apply it, and applying goes through the normal audited assignment path.',
 	'adaptive.routing.noInvoices': 'No invoices are awaiting review right now.',
 	'adaptive.routing.noPenalty': 'no down-weight ({n} decisions on record)',
-	'adaptive.routing.penalty': '−{points} for an overturn rate of {pct}% over {n} decisions',
+	'adaptive.routing.penalty': '−{points} for an overturn rate of {pct} over {n} decisions',
 	'adaptive.routing.pickInvoice': 'Invoice awaiting review',
 	'adaptive.routing.pickPlaceholder': 'Pick an invoice…',
 	'adaptive.suggestions.col.confidence': 'Confidence',

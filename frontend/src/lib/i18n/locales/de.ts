@@ -421,7 +421,7 @@ export const messages = {
 	'dashboard.discount.missed': 'Verpasst',
 	'dashboard.discount.pending': 'Noch nutzbar',
 	'dashboard.discount.count': '{n, plural, one {# Rechnung} other {# Rechnungen}}',
-	'dashboard.discount.rate': '{pct} % der entschiedenen Skontofristen genutzt.',
+	'dashboard.discount.rate': '{pct} der entschiedenen Skontofristen genutzt.',
 	'dashboard.discount.rateUnknown':
 		'Bisher ist keine Skontofrist abgelaufen — es gibt keine Nutzungsquote zu melden.',
 	'dashboard.discount.unconverted':
@@ -3142,7 +3142,7 @@ export const messages = {
 	'bankRecon.state.confirmed': 'Bestätigt',
 	'bankRecon.state.probable': 'Wahrscheinlich',
 	'bankRecon.state.suggested': 'Vorschlag',
-	'bankRecon.confidence': '{confidence} % Konfidenz',
+	'bankRecon.confidence': '{confidence} Konfidenz',
 	'bankRecon.suggestedHelp':
 		'Nur über Ähnlichkeit des Lieferantennamens zugeordnet — ein Vorschlag, keine Tatsache. Bestätigen oder aufheben.',
 	'bankRecon.method.provider_id': 'Referenztreffer',
@@ -4421,7 +4421,7 @@ export const messages = {
 	'adaptive.routing.intro': 'Reiht die möglichen Freigebenden für eine Rechnung nach deren eigener Freigabehistorie. Nur eine Empfehlung: es wird nichts zugewiesen, bis Sie es anwenden, und die Anwendung läuft über den normalen protokollierten Zuweisungsweg.',
 	'adaptive.routing.noInvoices': 'Derzeit wartet keine Rechnung auf Prüfung.',
 	'adaptive.routing.noPenalty': 'keine Abwertung ({n} erfasste Entscheidungen)',
-	'adaptive.routing.penalty': '−{points} wegen einer Revisionsquote von {pct}% über {n} Entscheidungen',
+	'adaptive.routing.penalty': '−{points} wegen einer Revisionsquote von {pct} über {n} Entscheidungen',
 	'adaptive.routing.pickInvoice': 'Rechnung in Prüfung',
 	'adaptive.routing.pickPlaceholder': 'Rechnung wählen…',
 	'adaptive.suggestions.col.confidence': 'Konfidenz',

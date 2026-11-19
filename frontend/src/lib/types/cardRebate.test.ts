@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 import {
 	formatRebateRate,
 	nextRebateTransition,
@@ -6,6 +7,9 @@ import {
 	REBATE_STATUSES,
 	type CardRebate
 } from './cardRebate';
+
+// Intl spaces a French percent sign with a narrow no-break space (U+202F).
+const spaces = (s: string) => s.replace(/[\u00a0\u202f]/g, ' ');
 
 describe('CardRebate.currency', () => {
 	// `rebateAmountCurrency` used to live here: it derived, from the envelope's
@@ -64,9 +68,19 @@ describe('rebateTone', () => {
 });
 
 describe('formatRebateRate', () => {
+	// The figure is locale-formatted; pin the locale so the assertions do not
+	// depend on the runner's.
+	beforeEach(() => setActiveFormatLocale('en-US'));
+	afterEach(() => setActiveFormatLocale(undefined));
+
 	it('renders a ratio as the percentage the rate was negotiated in', () => {
 		expect(formatRebateRate(0.0125)).toBe('1.25%');
 		expect(formatRebateRate('0.01')).toBe('1.00%');
+	});
+
+	it('follows the active locale rather than pinning English punctuation', () => {
+		setActiveFormatLocale('fr-FR');
+		expect(spaces(formatRebateRate(0.0125))).toBe('1,25 %');
 	});
 
 	it('renders the placeholder rather than NaN% for absent / unreadable input', () => {

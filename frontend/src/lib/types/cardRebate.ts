@@ -1,5 +1,6 @@
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 import type { MoneyAmount } from '#lib/utils/money.ts';
+import { formatPercent } from '#lib/utils/percent.ts';
 
 /**
  * Card-rebate shapes and the pure helpers the `/payments` Cards tab reads.
@@ -128,5 +129,7 @@ export function formatRebateRate(rate: MoneyAmount, placeholder = '—'): string
 	const n = typeof rate === 'number' ? rate : Number(rate);
 	if (!Number.isFinite(n)) return placeholder;
 	// Two decimals of a percent: a negotiated card rate is quoted like "1.25%".
-	return `${(n * 100).toFixed(2)}%`;
+	// `formatPercent` takes 0–100 points and this is a ratio, hence ×100; the
+	// locale then owns the separator and sign spacing ("1,25 %" in fr).
+	return formatPercent(n * 100, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

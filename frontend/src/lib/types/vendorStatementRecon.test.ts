@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 import {
 	RECON_CLASSIFICATION_LABEL_KEYS,
 	RECON_RESOLUTION_LABEL_KEYS,
@@ -21,10 +22,20 @@ import { EN_ALL } from '#lib/i18n/allMessages.ts';
 // they are defensive rather than trusting.
 
 describe('formatExtractionConfidence', () => {
+	// The figure is locale-formatted; pin the locale so the assertions do not
+	// depend on the runner's.
+	beforeEach(() => setActiveFormatLocale('en-US'));
+	afterEach(() => setActiveFormatLocale(undefined));
+
 	it('renders a 0..1 confidence as a whole percentage', () => {
 		expect(formatExtractionConfidence(0.6)).toBe('60%');
 		expect(formatExtractionConfidence(0)).toBe('0%');
 		expect(formatExtractionConfidence(1)).toBe('100%');
+	});
+
+	it('follows the active locale rather than pinning English punctuation', () => {
+		setActiveFormatLocale('fr-FR');
+		expect(formatExtractionConfidence(0.6).replace(/[\u00a0\u202f]/g, ' ')).toBe('60 %');
 	});
 
 	it('rounds rather than truncating', () => {

@@ -416,7 +416,7 @@ export const messages = {
 	'dashboard.discount.missed': '逸失',
 	'dashboard.discount.pending': 'まだ獲得可能',
 	'dashboard.discount.count': '{n, plural, other {# 件の請求書}}',
-	'dashboard.discount.rate': '判定済みの割引期限のうち {pct}% を獲得しました。',
+	'dashboard.discount.rate': '判定済みの割引期限のうち {pct} を獲得しました。',
 	'dashboard.discount.rateUnknown':
 		'まだ終了した割引期限がないため、報告できる獲得率はありません。',
 	'dashboard.discount.unconverted':
@@ -3085,7 +3085,7 @@ export const messages = {
 	'bankRecon.state.confirmed': '確認済み',
 	'bankRecon.state.probable': '有力候補',
 	'bankRecon.state.suggested': '候補',
-	'bankRecon.confidence': '確度{confidence}%',
+	'bankRecon.confidence': '確度{confidence}',
 	'bankRecon.suggestedHelp':
 		'取引先名の類似度だけによる照合です。事実ではなく候補なので、確認するか解除してください。',
 	'bankRecon.method.provider_id': '参照番号一致',
@@ -4352,7 +4352,7 @@ export const messages = {
 	'adaptive.routing.intro': '1 件の請求書を承認できる担当者を、各自の承認履歴に基づいて順位づけします。これは助言であり、適用するまで割り当ては行われません。適用は通常の監査対象の割り当て経路を通ります。',
 	'adaptive.routing.noInvoices': '現在レビュー待ちの請求書はありません。',
 	'adaptive.routing.noPenalty': '減点なし（記録上 {n} 件の判断）',
-	'adaptive.routing.penalty': '{n} 件の判断で覆された割合 {pct}% により −{points}',
+	'adaptive.routing.penalty': '{n} 件の判断で覆された割合 {pct} により −{points}',
 	'adaptive.routing.pickInvoice': 'レビュー待ちの請求書',
 	'adaptive.routing.pickPlaceholder': '請求書を選択…',
 	'adaptive.suggestions.col.confidence': '信頼度',
