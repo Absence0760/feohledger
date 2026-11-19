@@ -52,7 +52,7 @@ from app.models.credit_memo import CreditMemo
 from app.models.discount import DiscountOffer
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.invoice_embedding import InvoiceEmbedding
-from app.models.invoice_status import PRE_APPROVAL_STATUSES
+from app.models.invoice_status import PRE_APPROVAL_STATUSES, SETTLED_STATUSES
 from app.models.organization import Organization
 from app.models.procurement import PurchaseOrder
 from app.models.sanctions_check import SanctionsCheck
@@ -322,7 +322,7 @@ async def _screen_best_effort(
 
 
 # Where money has already left: nothing for the flag to stop.
-_MONEY_MOVED_STATUSES = frozenset({InvoiceStatus.paid, InvoiceStatus.done})
+_MONEY_MOVED_STATUSES = frozenset(SETTLED_STATUSES)
 
 
 def _bank_change_flag_statuses() -> frozenset[InvoiceStatus]:

@@ -650,3 +650,46 @@ async def test_inbound_invoice_gets_a_frozen_workflow_instance(realdb):
         # The snapshot is FROZEN at ingest — a non-empty config copied off the
         # definition, not a null placeholder resolved later.
         assert instance.steps_config_snapshot
+
+
+# ---------------------------------------------------------------------------
+# Currency: never a guessed code (decisions §473)
+# ---------------------------------------------------------------------------
+
+
+async def _receive(realdb, payload: bytes) -> int:
+    ref = realdb.info("a").org_id
+    body = _envelope(message_id=f"as4-{uuid.uuid4().hex}", payload=payload)
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(
+            f"/api/peppol/inbound/{ref}",
+            content=body,
+            headers={"X-Peppol-Signature": _sign(body)},
+        )
+    return resp.status_code
+
+
+@pytest.mark.asyncio
+async def test_a_document_without_a_currency_code_books_no_invoice(realdb):
+    """UBL requires `DocumentCurrencyCode`. A document that omits it fails the
+    structural validator (`currency: missing`) and is soft-rejected like any
+    malformed document: no invoice at all, and certainly not a USD one."""
+    mk = realdb.sessionmaker("a")
+    payload = _ubl_bytes(currency=None)
+    assert b"DocumentCurrencyCode" not in payload
+    assert await _receive(realdb, payload) == 204
+    assert await _count(mk, Invoice) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_currency_code_no_reader_can_use_is_recorded_as_unknown(realdb):
+    """`ÉUR` passes the validator's `isalpha()` length check but is not an
+    ISO 4217 shape (`iso_currency_or_none`): the invoice is booked with its
+    currency NULL, the one spelling of unknown, never the code as sent nor a
+    borrowed USD."""
+    mk = realdb.sessionmaker("a")
+    assert await _receive(realdb, _ubl_bytes(currency="ÉUR")) == 204
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice))).scalar_one()
+    assert inv.currency is None
+    assert inv.amount == Decimal("119.00")

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import ROLE_ADMIN, ROLE_CFO, require_roles
+from app.api.refusals import coded_refusal
 from app.config import settings
 from app.database import get_control_db
 from app.models.billing import Plan
@@ -51,7 +52,7 @@ from app.services.billing.ai_invoice_meter import (
     summarize,
 )
 from app.services.billing_adapters import get_billing_adapter
-from app.services.billing_adapters.stripe_billing import BillingNotConfigured
+from app.services.billing_adapters.base import BillingNotConfigured
 from app.tenant import get_tenant, get_tenant_db, lock_organization
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,10 @@ logger = logging.getLogger(__name__)
 #: failed. Distinct from "not configured", which is the empty / `configured=false`
 #: shape: an outage reported as "no saved cards" or "no receipts" is a wrong
 #: answer an admin acts on (adds a second card), not a safe default.
-BILLING_PROVIDER_UNAVAILABLE_DETAIL = "Billing provider is unavailable; please retry."
+BILLING_PROVIDER_UNAVAILABLE = "billing_provider_unavailable"
+BILLING_PROVIDER_UNAVAILABLE_DETAIL = coded_refusal(
+    BILLING_PROVIDER_UNAVAILABLE, "Billing provider is unavailable; please retry."
+)
 
 
 def _provider_unavailable(op: str, exc: Exception) -> HTTPException:

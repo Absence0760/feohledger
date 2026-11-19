@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
 from app.models.virtual_card import VirtualCard
+from app.utils.currency_code import iso_currency_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +75,10 @@ def build_card_idempotency_key(
 
 def _money_label(currency: str | None, amount) -> str:
     """``"EUR 1,234.00"``, or the bare figure when the invoice records no
-    currency (decisions §473): never a borrowed USD."""
-    return f"{currency} {amount:,.2f}" if currency else f"{amount:,.2f}"
+    usable currency — NULL, blank or a malformed legacy value (decisions §473):
+    never a borrowed USD, and never a code no reader could use."""
+    code = iso_currency_or_none(currency)
+    return f"{code} {amount:,.2f}" if code else f"{amount:,.2f}"
 
 
 async def _reissue_sequence(db: AsyncSession, invoice_id) -> int:

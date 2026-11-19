@@ -670,11 +670,11 @@ async def applied_credit_totals(
 ) -> dict[uuid.UUID, Decimal]:
     """Sum of the credit memos already APPLIED against each of ``invoice_ids``.
 
-    One grouped query for the whole batch. The single-invoice form below
-    delegates here so "what counts as applied credit" has exactly one
-    definition — the run builder needs this for a page of invoices at a time
-    and the payment queue for a page of ROWS, and neither should be issuing a
-    query per invoice to find out.
+    One grouped query for the whole batch, and the one definition of "what
+    counts as applied credit": a single invoice is asked for as a one-element
+    batch. The run builder needs this for a page of invoices at a time and the
+    payment queue for a page of ROWS, and neither should be issuing a query per
+    invoice to find out.
 
     Invoices with no applied memo are absent from the mapping (callers default
     to zero) rather than carrying a 0 row, so the result reflects what the

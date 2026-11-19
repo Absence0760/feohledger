@@ -100,8 +100,12 @@ def build_invoice_context(invoice: Any) -> dict:
 
     return {
         "amount": _to_decimal(_get("amount")),
-        # None when the invoice records no currency (decisions §473): a
-        # condition on `currency` then matches nothing rather than USD.
+        # None when the invoice records no currency (decisions §473), never
+        # a borrowed USD. `_evaluate_rule` reads None as "", so `eq` / `in`
+        # against a code never match it while `ne` / `not_in` always do: an
+        # unknown currency is treated as "not that currency", which routes it
+        # into the branch a rule like "currency ne USD -> extra approval"
+        # reserves for the unfamiliar case. That is the fail-safe direction.
         "currency": _get("currency") or None,
         "vendor_id": _str_or_none(_get("vendor_id")),
         "gl_account": _str_or_none(_get("gl_account")),

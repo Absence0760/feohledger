@@ -267,3 +267,40 @@ async def test_currency_blanked_after_the_run_is_built_stops_dispatch(realdb):
     assert retry.status_code == 200, retry.text
     assert retry.json()["payments_retried"] == 0, retry.json()
     assert "currency_unknown" in retry.json()["skip_reasons"], retry.json()
+
+
+async def test_queue_rollup_keeps_an_unknown_currency_invoice_in_its_own_group(realdb):
+    """The payment queue's whole-set rollup (`_payment_queue_rollup`) groups a
+    NULL-currency invoice under a `None` key of its own (decisions §473): the
+    700.00 is never part of the USD group's 1000.00, and it counts once in
+    `unconverted_count`. The reporting total still adds its face value — the
+    flagged fallback every spend rollup makes — which is why the count is there."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        ent = await _default_entity_id(s, info.org_id)
+    usd_id = await _seed_vendor_and_invoice(
+        mk, info.org_id, ent, number="GRP-USD", amount="1000.00", currency="USD"
+    )
+    unknown_id = await _seed_vendor_and_invoice(
+        mk, info.org_id, ent, number="GRP-NULL", amount="700.00", currency="USD"
+    )
+    await _blank_currency(mk, unknown_id, None)
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get("/api/payments/queue")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    groups = {g["currency"]: g for g in body["by_currency"]}
+    assert set(groups) == {"USD", None}
+    assert groups["USD"]["count"] == 1
+    assert Decimal(groups["USD"]["total_amount"]) == Decimal("1000.00")
+    assert groups[None]["count"] == 1
+    assert Decimal(groups[None]["total_amount"]) == Decimal("700.00")
+    # The unknown group sorts last.
+    assert [g["currency"] for g in body["by_currency"]] == ["USD", None]
+    assert body["unconverted_count"] == 1
+    assert body["currency"] == "USD"
+    assert Decimal(body["total_amount"]) == Decimal("1700.00")
+    ids = {row["id"] for row in body["items"]}
+    assert {usd_id, unknown_id} <= ids

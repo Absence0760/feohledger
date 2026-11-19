@@ -55,6 +55,8 @@ export const messages = {
 	'refusal.creditMemoVendorUnresolved': "請求書に仕入先がリンクされていないため、クレジットメモの仕入先を確認できません。先に請求書の仕入先を解決し（請求書で仕入先を保存し直してください）、その後クレジットを適用してください。",
 	'refusal.creditMemoEntityMismatch': "クレジットメモと請求書は異なるエンティティに属しています。クレジットで別の子会社の買掛金を減らすことはできません。",
 	'refusal.creditMemoCurrencyMismatch': "クレジットメモの通貨が請求書の通貨と一致しません。",
+	'refusal.creditMemoInvoiceCurrencyUnknown': "請求書に通貨が記録されていないため、クレジットを残高と照合できません。先に請求書の通貨を設定してから、クレジットを適用してください。",
+	'refusal.billingProviderUnavailable': "請求プロバイダーを利用できません。もう一度お試しください。",
 	'refusal.creditMemoInvoiceSettled': "請求書のステータスは {status} です。今後この請求書への支払いは行われないため、クレジットを適用しても何も減りません。クレジットメモは未適用のままにして、仕入先の次の請求書に適用してください。",
 	'refusal.creditMemoNotEditable': "編集できるのは、一度も適用されていない未適用のクレジットメモだけです（このメモのステータスは {status} です）。",
 	'refusal.creditMemoNotApplicable': "ステータスが {status} のクレジットメモは適用できません。",

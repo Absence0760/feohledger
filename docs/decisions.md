@@ -23895,17 +23895,34 @@ it carries; `materialize_reporting_amount` never locks one and clears a 1:1
 lock written before this decision; the payment-amount resolver behind the
 1099, risk and cash-flow totals reads it as not expressible; and the
 unrealized-FX report counts it without valuing it. **More doors closed.** Email
-intake creates its invoice with `currency=None`; inbound PEPPOL records a
-missing or malformed `DocumentCurrencyCode` as NULL (UBL requires the code, so
-it is a malformed document, not a USD one); a PO flip on a PO with no currency
+intake creates its invoice with `currency=None`; inbound PEPPOL never guesses
+one (UBL requires `DocumentCurrencyCode`: a missing or short code fails the
+structural validator and books no invoice, and a code that passes it but is
+not an ISO shape, such as `ÉUR`, is recorded as NULL — corrected in the round
+29 gate review, which found the first half was a rejection, not a NULL); a PO flip on a PO with no currency
 books NULL; an invoice warning carries an unknown currency as `""`, which both
 clients render as bare digits; the supplier portal's payment list, the
 email-approval page, the virtual-card email and the workflow builder's context
-omit the code instead of saying USD; and a linked credit memo or
-invoice-scoped discount offer on such an invoice is refused
-(`credit_memo_currency_required`, `discount_offer_currency_required`) unless
-the caller names a currency. `tests/test_invoice_currency_explicit.py` also
+omit the code instead of saying USD; and an invoice-scoped discount offer on
+such an invoice is refused (`discount_offer_currency_required`) unless the
+caller names a currency. `tests/test_invoice_currency_explicit.py` also
 refuses a literal or `or`-defaulted currency, `Invoice(**kwargs)` and
 `module.Invoice(...)` at an application construction site. `InvoiceCreate`
 still defaults `currency` to USD for an API caller that omits it (the web form
 no longer relies on it); that is tracked in `docs/followups.md`.
+
+Amended in the round 29 gate review. **A credit takes no unknown-currency
+invoice.** A linked credit-memo create and `POST /credit-memos/{id}/apply` on
+an invoice whose currency is unknown (NULL, blank or malformed, by
+`payable_currency_code`) are refused with 409
+`credit_memo_invoice_currency_unknown`, whether or not the caller names a
+currency, until the invoice's own currency is set; both eligible-invoice
+pickers leave such an invoice out (`invoice_currency_key_sql` is not NULL).
+The round 28 form admitted the create once the caller named a currency
+(`credit_memo_currency_required` otherwise, now gone): that compared a EUR
+memo with a balance in no stated currency, and since the run builder refuses
+the invoice as `currency_unknown` until someone sets a code, the applied EUR
+credit then all but decided which code that would be. This supersedes the
+"blank invoice currency admitted" clause of the currency leg in §202 for
+create, apply and both pickers. §214's edit guard keeps its legacy-blank
+admission, which now only ever covers a credit applied before this amendment.

@@ -196,6 +196,7 @@ def test_consumers_read_the_owner():
     from app.api import invoices as api_invoices
     from app.api import payments as api_payments
     from app.api import vendor_statement_recon as api_statement_recon
+    from app.api import vendors as api_vendors
     from app.services import analytics as svc_analytics
     from app.services import (
         budget_service,
@@ -227,8 +228,8 @@ def test_consumers_read_the_owner():
     assert invoice_warnings._ERP_SYNC_SKIPPED_STATUSES == ("paid", "done")
     assert erp_status_sync.PAYABLE_HERE == frozenset(PAYABLE_STATUSES)
     assert payment_reconciler.TERMINAL_STATUSES is payment_base.TERMINAL_STATUSES
-    # Not yet repointed (see `_AWAITING_REPOINT`), but already the same set.
     assert api_payments.PAYABLE_INVOICE_STATUSES == tuple(s.value for s in PAYABLE_STATUSES)
+    assert api_vendors._MONEY_MOVED_STATUSES == frozenset(SETTLED_STATUSES)
 
 
 # ---------------------------------------------------------------------------
@@ -253,13 +254,7 @@ _GROUPS = {
 #: Restatements a later change repoints at the named set; each entry is
 #: `(path relative to backend/, group)`. Shrink only: an entry whose literal is
 #: gone fails `test_awaiting_repoint_entries_are_still_live`.
-_AWAITING_REPOINT = frozenset(
-    {
-        ("app/api/payments.py", "PAYABLE_STATUSES"),
-        ("app/api/vendors.py", "SETTLED_STATUSES"),
-        ("app/services/discount_offers.py", "SETTLED_STATUSES"),
-    }
-)
+_AWAITING_REPOINT: frozenset[tuple[str, str]] = frozenset()
 
 #: `PaymentStatus` members by name; matched only in attribute form, since
 #: `"failed"` is an invoice status string too.

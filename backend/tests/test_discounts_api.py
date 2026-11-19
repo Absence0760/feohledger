@@ -186,6 +186,44 @@ async def test_create_invoice_offer_defaults_base_amount_and_audits(realdb):
         assert audit.entity_type == "discount_offer"
 
 
+async def test_an_invoice_offer_on_an_unknown_currency_invoice_needs_a_named_currency(realdb):
+    """An invoice that records no currency (decisions §473) leaves an
+    invoice-scoped offer nothing to inherit: a coded 422, never the org's
+    reporting currency stamped onto a payable nobody stated a currency for,
+    and no offer row written."""
+    from sqlalchemy import update
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    invoice_id = await _add_invoice(mk, org_id, amount="1000.00")
+    async with mk() as s:
+        await s.execute(
+            update(Invoice).where(Invoice.id == uuid.UUID(invoice_id)).values(currency=None)
+        )
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/discounts/offers",
+            json={"scope": "invoice", "invoice_id": invoice_id, "tiers": _tiers()},
+        )
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "discount_offer_currency_required"
+    assert detail["params"] == {}
+    async with mk() as s:
+        offers = (
+            (
+                await s.execute(
+                    select(DiscountOffer).where(DiscountOffer.invoice_id == uuid.UUID(invoice_id))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert offers == []
+
+
 async def test_create_offer_422s_a_malformed_id(realdb):
     """A bad id is a 422, not the 500 an unguarded `uuid.UUID(str)` raised.
 
