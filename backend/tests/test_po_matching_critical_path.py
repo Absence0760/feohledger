@@ -1013,7 +1013,7 @@ async def test_realdb_another_vendors_same_numbered_po_does_not_count(realdb):
 
 
 # ===========================================================================
-# Cumulative billing against RECEIPTS (decisions §TBD-receipts): the receipt
+# Cumulative billing against RECEIPTS (decisions §470): the receipt
 # leg compares ONE invoice with the received slice of the PO, so two invoices
 # for the same 400.00 that arrived each fit it. The over-billing refresh sums
 # the same siblings against `received_value` and raises

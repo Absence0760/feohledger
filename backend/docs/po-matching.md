@@ -623,7 +623,7 @@ comparison uses the exact share) and the currency code.
   second.
 
 Receipts are still valued pro rata across the PO's lines, not per line; see
-`docs/followups.md`. Reasoning: `docs/decisions.md` §TBD-receipts.
+`docs/followups.md`. Reasoning: `docs/decisions.md` §470.
 
 ### Recording a goods receipt
 
@@ -744,7 +744,7 @@ the caller cleared the hold while not its approver, and the §422 re-judge would
 raise it again straight after stamping them. Neither door can leave an invoice
 `approved` with a PO-match hold open. So do the cumulative over-billing
 warnings above, past the total or past what was received, which raise no row:
-`"po_overbilled"` (decisions §469, §TBD-receipts). An
+`"po_overbilled"` (decisions §469, §470). An
 invoice with no PO reference has no such row, and the floor behaves as before.
 
 ### In the Review Step

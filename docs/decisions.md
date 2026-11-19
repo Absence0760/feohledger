@@ -23589,7 +23589,7 @@ land at review with `po_overbilled`); `backend/tests/test_exception_agents.py`
 `backend/tests/test_portal_self_service.py` (a rejected flip's verdict, its
 replay, and the reopened flip's verdict, with one invoice throughout).
 
-## §TBD-receipts. Invoices billing past what was received of a PO is the same review warning (round 26, 2026-11-19)
+## 470. Invoices billing past what was received of a PO is the same review warning (round 26, 2026-11-19)
 
 **Problem.** §469 made the amount leg cumulative and left the receipt leg
 per-invoice. The matcher measures ONE invoice against the received slice of

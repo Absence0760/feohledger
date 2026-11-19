@@ -1272,7 +1272,7 @@ async def _refresh_po_match(
 
     # Cumulative billing: this invoice plus the others already citing the PO
     # take it past its total (decisions §469), or past the received slice of
-    # it (§TBD-receipts). Independent of the amount and receipt legs, which
+    # it (§470). Independent of the amount and receipt legs, which
     # compare this invoice alone with the PO.
     await _refresh_po_overbilling(db, invoice, warnings, match, rule.tolerance_pct)
 
@@ -1422,7 +1422,7 @@ async def _refresh_po_overbilling(
       (``MatchResult.received_value``, the figure the per-invoice receipt leg
       measures against) raises ``po_billed_beyond_receipt``: two invoices of
       400.00 against 400.00 received each fit on their own (decisions
-      §TBD-receipts). Skipped when this invoice alone bills beyond receipt,
+      §470). Skipped when this invoice alone bills beyond receipt,
       which the matcher already holds. One finding at most: past the total,
       no receipt could cure it, so only that sentence is written.
 
@@ -1530,7 +1530,7 @@ async def _refresh_po_overbilling(
         # Past the whole PO: no receipt can cure that, so the receipt
         # sentence below would only repeat it with a smaller figure.
         return
-    # The receipt leg (decisions §TBD-receipts): the same siblings measured
+    # The receipt leg (decisions §470): the same siblings measured
     # against the received slice of the PO instead of its total. Only on a
     # SHORT receipt (`received_value` is set only then; a full one is the PO
     # total, which the check above already measured), and only when this
@@ -2611,7 +2611,7 @@ async def po_match_hold_refusal(
       approve an invoice the next statement re-holds. Asked with the would-be
       approver added to the approver set, the question
       :func:`_finding_cleared_by_a_person` asks after the stamp.
-    * a cumulative over-billing warning (decisions §469, §TBD-receipts): this
+    * a cumulative over-billing warning (decisions §469, §470): this
       invoice and the others billing its PO pass the PO's total, or what has
       been received of it. It raises no hold, so only a person reading it may
       approve.

@@ -323,7 +323,7 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
     ),
     # Cumulative, receipt leg: the same siblings plus this invoice bill past
     # the received slice of the PO (`po_total × received / ordered`), though
-    # each fits it alone (decisions §TBD-receipts). Same type, so it stops
+    # each fits it alone (decisions §470). Same type, so it stops
     # every unattended approval as the total leg does.
     WarningSpec(
         "po_billed_beyond_receipt",
