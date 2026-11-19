@@ -553,6 +553,7 @@ export const messages = {
 	'invoices.bulk.delete': 'Supprimer',
 	'invoices.bulk.confirmDelete': 'Confirmer la suppression',
 	'invoices.bulk.changeStatus': 'Changer le statut',
+	'invoices.bulk.export': 'Exporter',
 	'invoices.bulk.cannotDelete': 'Impossible de supprimer des factures dans un statut géré par le système',
 	'invoices.bulk.noTransitions': 'Aucune transition de statut commune pour les factures sélectionnées',
 	'invoices.bulk.newStatusAria': 'Nouveau statut pour les factures sélectionnées',

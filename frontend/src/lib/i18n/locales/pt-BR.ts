@@ -554,6 +554,7 @@ export const messages = {
 	'invoices.bulk.delete': 'Excluir',
 	'invoices.bulk.confirmDelete': 'Confirmar exclusão',
 	'invoices.bulk.changeStatus': 'Alterar status',
+	'invoices.bulk.export': 'Exportar',
 	'invoices.bulk.cannotDelete': 'Não é possível excluir faturas em status gerenciados pelo sistema',
 	'invoices.bulk.noTransitions': 'Nenhuma transição de status comum para as faturas selecionadas',
 	'invoices.bulk.newStatusAria': 'Novo status para as faturas selecionadas',

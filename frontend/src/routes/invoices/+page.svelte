@@ -21,6 +21,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import BulkDeleteButton from '#lib/components/ui/BulkDeleteButton.svelte';
 	import BulkBar from '#lib/components/ui/BulkBar.svelte';
+	import MenuButton from '#lib/components/ui/MenuButton.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
@@ -865,7 +866,14 @@
 		}
 	}
 
-	async function bulkExport(format: string) {
+	// Format names, not prose: they read the same in every locale.
+	const BULK_EXPORT_FORMATS = [
+		{ value: 'csv', label: 'CSV' },
+		{ value: 'json', label: 'JSON' },
+		{ value: 'xml', label: 'XML' }
+	] as const;
+
+	async function bulkExport(format: (typeof BULK_EXPORT_FORMATS)[number]['value']) {
 		bulkBusy = true;
 		try {
 			// Through the shared client (`api.downloadBlobPost`), not a hand-rolled
@@ -1124,9 +1132,15 @@
 
 			<div class="bulk-divider"></div>
 
-			<button class="btn-secondary" disabled={bulkBusy} onclick={() => bulkExport('csv')}>CSV</button>
-			<button class="btn-secondary" disabled={bulkBusy} onclick={() => bulkExport('json')}>JSON</button>
-			<button class="btn-secondary" disabled={bulkBusy} onclick={() => bulkExport('xml')}>XML</button>
+			<!-- One trigger, not three buttons: the three formats on their own
+			     wrapped the bar to three rows at 375px. -->
+			<MenuButton
+				label={m('invoices.bulk.export')}
+				items={BULK_EXPORT_FORMATS}
+				disabled={bulkBusy}
+				onselect={(format) => bulkExport(format)}
+				testId="invoices-bulk-export"
+			/>
 		{/snippet}
 	</BulkBar>
 
