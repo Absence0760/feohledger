@@ -63,7 +63,7 @@ class ReportingAgingBuckets(AgingBuckets):
     face-value cross-currency sum in its entirety, so "N rows could not be
     converted" would understate it, while these bands are converted apart from
     the rows this counts. One count for the band set rather than five — see
-    `api/dashboard.py` for why.
+    `services/dashboard_metrics.aging` for why.
     """
 
     unconverted_count: int = 0
@@ -194,7 +194,7 @@ class DashboardResponse(BaseModel):
     total_paid: MoneyAmount
     total_pending: MoneyAmount
     # Reporting-currency counterparts of `total_paid` / `total_pending` — see
-    # `app/api/dashboard.py`'s `payment_reporting_amount_sql` comment.
+    # `services/dashboard_metrics.payment_totals`.
     total_paid_reporting: MoneyAmount
     total_pending_reporting: MoneyAmount
     total_paid_unconverted_count: int

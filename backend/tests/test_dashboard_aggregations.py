@@ -66,8 +66,9 @@ def _mk_db(*results):
 
 
 # The dashboard makes queries in this order — pinning here so the
-# test layout stays sane. Don't change the order without updating the
-# endpoint AND the comments below.
+# test layout stays sane. The queries live in `services/dashboard_metrics`, one
+# function per section, and `api/dashboard.get_dashboard` awaits the sections in
+# this order. Don't change the order without updating both AND the list below.
 #
 # Aging bands, the monthly-trend buckets, the currency rollup and the top-vendor
 # tile are now aggregated in SQL (GROUP BY), so those result rows are already

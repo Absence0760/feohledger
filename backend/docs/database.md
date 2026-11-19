@@ -294,7 +294,7 @@ on `created_at` or `action`, so five callers seq-scanned the whole table:
 |---|---|---|
 | `GET /api/audit/verify-signatures` (SOX signature sweep) | `action = 'invoice.approved' AND created_at` range | `ix_audit_log_action_created_at` |
 | `GET /api/audit/export` (auditor date-range export) | `created_at` range `ORDER BY created_at` | `ix_audit_log_created_at` |
-| `api/dashboard.py` approval-timing leg (every dashboard load) | `entity_type='invoice' AND action='invoice.approved'` | `ix_audit_log_action_created_at` |
+| `services/dashboard_metrics.py` approval-timing leg (`GET /api/dashboard`, every load) | `entity_type='invoice' AND action='invoice.approved'` | `ix_audit_log_action_created_at` |
 | `api/adaptive_workflows.py` feedback reads | `action IN (…) AND created_at >= :since` | `ix_audit_log_action_created_at` |
 | `services/retention_sweep.py` overdue count | `created_at < :cutoff`, and `… AND shipped_at IS NULL` | `ix_audit_log_created_at` / `ix_audit_log_shipped_at_null` |
 

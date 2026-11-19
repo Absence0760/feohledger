@@ -619,7 +619,7 @@ _COLLAPSING_REDUCERS = {
     # verdict (captured / missed / still-capturable) rather than a per-currency
     # sum, so it could not become a plain `GROUP BY`. True of a per-currency
     # GROUP BY, but the verdict is two comparisons and expresses fine as a
-    # `CASE` — see `api/dashboard`, which now groups by that CASE and reduces
+    # `CASE` — see `services/dashboard_metrics`, which now groups by that CASE and reduces
     # via `discount_capture_from_grouped_rows`. Streaming every
     # discount-scheduled invoice into Python (no LIMIT, no date bound) is the
     # same unbounded shape as the five vendor-spend folds, so it is guarded the
