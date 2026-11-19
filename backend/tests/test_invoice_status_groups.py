@@ -373,7 +373,7 @@ def test_scan_catches_the_new_groups():
             'H = ("completed", "failed", "cancelled")',
         ]
     )
-    assert _restatements_in(ast.parse(src)) == [
+    assert sorted(_restatements_in(ast.parse(src))) == [
         (1, "SETTLED_STATUSES"),
         (2, "SETTLED_STATUSES"),
         (3, "SETTLED_STATUSES"),
