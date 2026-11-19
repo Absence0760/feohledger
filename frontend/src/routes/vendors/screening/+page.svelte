@@ -483,7 +483,7 @@
 <PageHeader title={m('vendors.screening.queue.title')}>
 	{#snippet actions()}
 		<button
-			class="btn-outline"
+			class="btn-secondary"
 			onclick={() => {
 				loadQueue();
 				loadCounts();
@@ -668,7 +668,7 @@
 			     `tests-e2e/vendors/screening-modal-identity.spec.ts`. -->
 			<div class="review-actions" data-testid="screening-actions" data-vendor-id={selected.vendor_id}>
 				{#if canRescreen}
-					<button class="btn-outline" onclick={rescreen} disabled={selectedBusy !== null}>
+					<button class="btn-secondary" onclick={rescreen} disabled={selectedBusy !== null}>
 						{selectedBusy === 'rescreen'
 							? m('vendors.screening.queue.action.rescreening')
 							: m('vendors.screening.queue.action.rescreen')}
@@ -759,27 +759,6 @@
 
 <style>
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
-	.btn-outline {
-		padding: 8px 18px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-	.btn-outline:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-outline:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
 	.vendor-name {
 		font-weight: 500;
 	}

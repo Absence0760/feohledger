@@ -1472,25 +1472,6 @@
 		flex-shrink: 0;
 	}
 
-	.btn-secondary {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-		flex-shrink: 0;
-	}
-
-	.btn-secondary:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
 	/* --- Checkbox column --- */
 
 	.checkbox-col {

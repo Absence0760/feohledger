@@ -429,7 +429,7 @@
 <PageHeader title={m('vendors.changeRequests.title')}>
 	{#snippet actions()}
 		<button
-			class="btn-outline"
+			class="btn-secondary"
 			onclick={() => {
 				load().catch(() => {});
 				loadCounts().catch(() => {});
@@ -700,27 +700,6 @@
 
 <style>
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
-	.btn-outline {
-		padding: 8px 18px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-	.btn-outline:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-outline:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
 	.intro {
 		margin: 0;
 		font-size: 0.85rem;
