@@ -129,8 +129,8 @@
 		if (!retryToken) return;
 		// The button unmounts with the error branch; park focus on the live
 		// region that replaces it so a keyboard user is not thrown back to
-		// <body> (the auth shell has no <main> to fall back on, as `ui/LoadError`
-		// does in the app).
+		// <body>. The region rather than the shell's <main> (`ui/LoadError`'s
+		// target): it is the next thing that changes, and it sits first in it.
 		stack?.focus();
 		void complete(retryToken);
 	}
