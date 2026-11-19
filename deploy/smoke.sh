@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Post-deploy smoke check: is the deployed stack serving, and serving as it is
-# configured? The last step of deploy.sh, and of the ECS release workflow
-# (.github/workflows/aws-deploy.yml) — one script, so the two cannot drift
-# (#575). Safe to run by hand at any time.
+# configured? The last step of deploy.sh, and of both release workflows
+# (.github/workflows/vm-deploy.yml and aws-deploy.yml, from the runner through
+# public DNS) — one script, so they cannot drift (#575). Safe to run by hand at any time.
 #
 #   smoke.sh --vm
 #       On the VM, from anywhere. Everything comes from deploy/.env and

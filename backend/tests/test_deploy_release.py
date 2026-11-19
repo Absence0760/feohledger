@@ -320,7 +320,8 @@ def _workflow() -> dict:
 def _job() -> dict:
     jobs = _workflow()["jobs"]
     # build-frontend is the ungated SPA build; test_frontend_publish.py owns it.
-    assert list(jobs) == ["build-frontend", "deploy"]
+    # smoke is the public-DNS check after it; test_deploy_smoke.py owns it.
+    assert list(jobs) == ["build-frontend", "deploy", "smoke"]
     return jobs["deploy"]
 
 
