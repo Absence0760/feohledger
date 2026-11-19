@@ -51,7 +51,6 @@ from app.api.deps import (
     ROLE_CFO,
     require_roles,
 )
-from app.api.payments import PAYABLE_INVOICE_STATUSES
 from app.api.refusals import coded_refusal
 from app.config import settings
 from app.database import get_control_db
@@ -107,6 +106,7 @@ from app.services.currency_conversion import (
     resolve_reporting_currency,
 )
 from app.services.discount_auto_trigger import settled_invoice_status
+from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 from app.services.payment_runs import PaymentRunItemInput, create_payment_run_for_invoices
 from app.tenant import (
     apply_entity_scope,

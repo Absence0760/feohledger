@@ -4,7 +4,7 @@ append-only audit rows.
 An AP ``Exception`` is a *control*, not a note. Six of the types the queue
 carries — ``duplicate``, ``fraud_flag``, ``line_total_mismatch``,
 ``payment_reconciliation``, ``quality_hold`` and ``po_mismatch`` — block a
-payment run outright (``api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES``), and
+payment run outright (``services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES``), and
 invoice approval gates on none of them. Clearing one is therefore the human
 sign-off that lets money move, and it has to leave a trace an auditor can trust.
 
@@ -111,6 +111,29 @@ EXCEPTION_TYPES: tuple[str, ...] = (
     "payment_compliance_hold",
     "payment_reconciliation",
 )
+
+#: Friendly label per ``Exception.exception_type`` for the queue UI. Must cover
+#: ``EXCEPTION_TYPES`` exactly — a missing entry silently
+#: renders the raw snake_case key, and two of these types are the ones that block
+#: a payment run, so the queue must not label them like debug output.
+#: ``tests/test_exception_type_labels`` is the guard.
+EXCEPTION_TYPE_LABELS = {
+    "duplicate": "Duplicate Invoice",
+    "po_mismatch": "PO Mismatch",
+    "fraud_flag": "Fraud Flag",
+    "extraction_failed": "Extraction Failed",
+    "unverified_vendor": "Unverified Vendor",
+    "review_rejected": "Rejected",
+    "amount_exceeded": "Amount Exceeded",
+    "missing_data": "Missing Data",
+    "quality_hold": "Quality Hold",
+    "price_variance": "Price Variance",
+    "contract_noncompliant": "Contract Non-Compliant",
+    "erp_reconciliation": "ERP Reconciliation",
+    "line_total_mismatch": "Line Total Mismatch",
+    "payment_compliance_hold": "Compliance Hold",
+    "payment_reconciliation": "Payment Reconciliation",
+}
 
 #: Types on the roster that NOTHING in ``app/`` raises any more. They stay on the
 #: roster — and keep their queue label — because historical ``exceptions`` rows
@@ -274,11 +297,11 @@ def mark_refound(exception_id: uuid.UUID) -> None:
 def is_payment_blocking(exception_type: str) -> bool:
     """True when an unresolved exception of this type stops a payment run.
 
-    Reads ``api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`` (the one definition;
+    Reads ``services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`` (the one definition;
     ``services/payment_runs`` imports it the same lazy way) so the audit row's
     ``payment_blocking`` flag can never drift from the gate it describes.
     """
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     return exception_type in PAYMENT_BLOCKING_EXCEPTION_TYPES
 

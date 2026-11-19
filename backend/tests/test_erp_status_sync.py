@@ -427,7 +427,7 @@ async def test_a_credit_settled_bill_at_sent_to_erp_books_no_cash_and_blocks(rea
     credit branch, not fall through to the cash one (decisions §303, §399):
     a QuickBooks bill settled by a vendor credit books no `Payment` and opens
     the payment-blocking `payment_reconciliation` row, invoice unmoved."""
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     inv_id, corr = await _seed(realdb, status=InvoiceStatus.sent_to_erp)
     report = _report(corr, ErpBillState.paid, reduced_outside=True, settled_by_credit=True)

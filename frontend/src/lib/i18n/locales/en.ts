@@ -1612,7 +1612,7 @@ export const en = {
 
 	// Exception-type labels (#lib/types/exception.ts::EXCEPTION_TYPE_LABEL_KEYS).
 	// Each ENGLISH value is byte-identical to
-	// `backend/app/api/exceptions.py::EXCEPTION_TYPE_LABELS`, which is what the
+	// `backend/app/services/exception_lifecycle.py::EXCEPTION_TYPE_LABELS`, which is what the
 	// queue still renders through the wire's `type_label`; `exception.test.ts`
 	// pins that equality so the two surfaces can't disagree in English.
 	'exceptions.type.duplicate': 'Duplicate Invoice',

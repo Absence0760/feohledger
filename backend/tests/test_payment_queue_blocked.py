@@ -24,10 +24,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.api.payments import PAYABLE_INVOICE_STATUSES
 from app.models.exception import Exception as ExceptionModel
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment
+from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 
 pytestmark = pytest.mark.asyncio
 
@@ -209,7 +209,7 @@ async def test_payment_reconciliation_blocks_without_the_queue_restating_the_tup
     after the queue was written. It blocks here only because the queue IMPORTS
     the tuple instead of restating it — this test fails the moment someone
     inlines a literal list of types."""
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     assert "payment_reconciliation" in PAYMENT_BLOCKING_EXCEPTION_TYPES
 
@@ -226,7 +226,7 @@ async def test_payment_reconciliation_blocks_without_the_queue_restating_the_tup
 async def test_every_blocking_type_is_reported(realdb):
     """Whatever the tuple holds, each member must actually block — so adding a
     type can't leave the queue silently offering rows a run will refuse."""
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     mk = realdb.sessionmaker(TENANT)
     org_id = realdb.info(TENANT).org_id
@@ -244,7 +244,7 @@ async def test_every_blocking_type_is_reported(realdb):
 async def test_reason_is_deterministic_when_several_exceptions_are_open(realdb):
     """Two blocking exceptions on one invoice must not make the reason depend
     on row order — the answer is the earliest member of the tuple."""
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     mk = realdb.sessionmaker(TENANT)
     org_id = realdb.info(TENANT).org_id
@@ -720,8 +720,8 @@ async def test_every_queue_reason_code_is_one_the_run_builder_can_actually_raise
     non-exception codes are exactly `payment_runs`' own reason constants, every
     one of them has an operator-facing 409 message, and the rail-conditional one
     is derived from `CARD_CONVERGING_METHODS` rather than restated."""
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
     from app.services import payment_runs
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     non_exception = {
         payment_runs.REFUSAL_VENDOR_NOT_ACTIVE,

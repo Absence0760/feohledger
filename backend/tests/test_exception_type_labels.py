@@ -1,6 +1,6 @@
 """Guard: every exception type the platform raises has a friendly label.
 
-`app/api/exceptions.py::EXCEPTION_TYPE_LABELS` maps `Exception.exception_type`
+`app/services/exception_lifecycle.py::EXCEPTION_TYPE_LABELS` maps `Exception.exception_type`
 values to the human-readable strings the exception-queue UI shows (`type_label`
 in `_exception_dict`). A missing entry isn't a crash — `.get()` falls back to
 the raw string — so it silently renders as e.g. `line_total_mismatch` instead of
@@ -29,9 +29,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from app.api.exceptions import EXCEPTION_TYPE_LABELS
 from app.services.exception_lifecycle import (
     EXCEPTION_SEVERITY_RANK,
+    EXCEPTION_TYPE_LABELS,
     EXCEPTION_TYPES,
     LEGACY_EXCEPTION_TYPES,
 )
@@ -159,7 +159,7 @@ def test_label_map_has_no_entries_for_unknown_types():
 def test_payment_blocking_types_are_on_the_roster():
     """The three types that stop a payment run must be first-class members of
     the roster — they are the ones an AP manager reads under time pressure."""
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     off_roster = sorted(set(PAYMENT_BLOCKING_EXCEPTION_TYPES) - set(EXCEPTION_TYPES))
     assert not off_roster, f"payment-blocking types missing from the roster: {off_roster}"

@@ -1,7 +1,7 @@
 """PO-match exceptions block payment only for over-billing, and lift on their own.
 
 `po_mismatch` and `quality_hold` are payment-blocking
-(`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`). Two consequences are pinned
+(`services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`). Two consequences are pinned
 here against real Postgres rows:
 
 * **Only over-billing holds.** An invoice billing the share of a split or

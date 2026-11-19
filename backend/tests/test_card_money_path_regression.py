@@ -389,7 +389,7 @@ async def test_the_expired_refusal_is_reached_before_any_money_state_changes(rea
     assert out.run.executed_at is not None
     # The invoice is still in a payable state, so AP can cancel the dead card
     # and pay it properly — the failure is recoverable, not a dead end.
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
+    from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 
     assert out.invoice.status.value in PAYABLE_INVOICE_STATUSES
 

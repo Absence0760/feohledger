@@ -616,8 +616,8 @@ async def generate_cards(
 
     refuse_record_only(org)
 
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
     from app.config import settings as app_settings
+    from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 
     # Refuse the whole batch up front when the configured provider names no
     # registered adapter. `issue_card_for_invoice` would refuse each invoice
@@ -645,12 +645,12 @@ async def generate_cards(
     # invoice holds the locks for one provider call, not the whole batch, and
     # makes each card durable as soon as the provider has issued it. See
     # `card_issuance.lock_invoices_for_mint`, decisions §265.
-    from app.api.payments import INVOICE_LOCKED_DETAIL
     from app.services.card_issuance import (
         CARD_SKIP_LOCK_TIMEOUT,
         card_skip,
         lock_invoices_for_mint,
     )
+    from app.services.payment_gates import INVOICE_LOCKED_DETAIL
     from app.utils.db_locks import LockWaitTimeout
 
     cards: list[VirtualCard] = []

@@ -50,12 +50,12 @@ import httpx
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.exceptions import EXCEPTION_TYPE_LABELS
 from app.config import settings
 from app.models.invoice import Invoice, InvoiceExtractionResult
 from app.models.user import User
 from app.models.workflow import AuditLog
 from app.services import provider_credentials
+from app.services.exception_lifecycle import EXCEPTION_TYPE_LABELS
 
 logger = logging.getLogger(__name__)
 

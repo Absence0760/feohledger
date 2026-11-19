@@ -204,7 +204,7 @@ def _assert_refusal(res, exception_type: str) -> None:
 
 
 def test_the_set_is_duplicate_and_fraud_and_a_subset_of_the_payment_set():
-    from app.api.payments import (
+    from app.services.payment_gates import (
         ERP_EXPORT_BLOCKING_EXCEPTION_TYPES,
         PAYMENT_BLOCKING_EXCEPTION_TYPES,
     )
@@ -1551,8 +1551,8 @@ async def test_a_run_refuses_invoice_locked_past_the_bound_and_books_nothing(rea
     """A holder of the invoice lock (a dispatch across its processor call)
     makes the run wait at most `payment_invoice_lock_timeout_ms`, then refuse by
     name with nothing booked. Retry-safe: once the holder is gone it stages."""
-    from app.api.payments import INVOICE_LOCKED_DETAIL
     from app.config import settings
+    from app.services.payment_gates import INVOICE_LOCKED_DETAIL
 
     monkeypatch.setattr(settings, "payment_invoice_lock_timeout_ms", 200)
     info = realdb.info(TENANT)

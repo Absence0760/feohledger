@@ -80,7 +80,7 @@ SETTLED_STATUSES: tuple[InvoiceStatus, ...] = (
 #: The statuses a payment may be created against: approved and able to move
 #: straight to `payment_scheduled` (or already there, a re-attempt). Not
 #: `sending_to_erp` / `sent_to_erp`: a push in flight must reach
-#: `posted_in_erp` first. `api/payments.PAYABLE_INVOICE_STATUSES` is this set
+#: `posted_in_erp` first. `services/payment_gates.PAYABLE_INVOICE_STATUSES` is this set
 #: as strings.
 PAYABLE_STATUSES: tuple[InvoiceStatus, ...] = (
     InvoiceStatus.approved,

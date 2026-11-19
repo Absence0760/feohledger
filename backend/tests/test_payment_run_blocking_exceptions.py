@@ -4,7 +4,7 @@
 it stubs the blocking query's *result* and therefore proves nothing about which
 `exception_type` values actually match. These tests insert real `Exception` rows
 and drive the real query, so the membership of
-`payments.PAYMENT_BLOCKING_EXCEPTION_TYPES` is pinned by behaviour.
+`payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES` is pinned by behaviour.
 
 That membership matters because **approval does not gate on any of it**: nothing
 in `services/review.py` or `workflow_engine.py` reads warning severity, so an
@@ -28,11 +28,11 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
-from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment, PaymentRun
 from app.models.vendor import Vendor
+from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
 pytestmark = pytest.mark.asyncio
 

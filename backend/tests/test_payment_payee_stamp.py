@@ -759,7 +759,7 @@ async def test_the_payee_flag_is_raised_once_while_open(realdb):
     await _merge(realdb, canonical, duplicate)
     await _void(realdb, payment_id)
 
-    from app.api.vendors import flag_invoice_for_bank_change
+    from app.services.vendor_bank_change import flag_invoice_for_bank_change
 
     async with mk() as s:
         await flag_invoice_for_bank_change(

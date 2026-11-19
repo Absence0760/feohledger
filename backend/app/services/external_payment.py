@@ -237,7 +237,7 @@ async def check_recordable(
     very record answers, which therefore do not refuse it — see
     :func:`record_invoice_paid_outside`.
     """
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
+    from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 
     if invoice.status.value not in PAYABLE_INVOICE_STATUSES:
         return Refusal(

@@ -4,7 +4,7 @@ Approval gates on no payment-blocking exception, so an approved invoice can
 still carry an open ``duplicate`` or ``fraud_flag``. Our payment runs refuse
 it, but the ERP push used to post it anyway: the bill then lived in the ERP's
 books, where a bookkeeper can pay it directly and our run gate never sees it.
-The push now refuses while one of ``api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES``
+The push now refuses while one of ``services/payment_gates.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES``
 is open or escalated (decisions §286).
 
 Two places ask, with one predicate (``payment_runs.blocking_exception_types``):
@@ -123,7 +123,7 @@ async def erp_export_blocking_exception(db: AsyncSession, invoice_id: uuid.UUID)
     When an invoice carries both, the one earliest in
     ``ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`` is named.
     """
-    from app.api.payments import ERP_EXPORT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import ERP_EXPORT_BLOCKING_EXCEPTION_TYPES
     from app.services.payment_runs import blocking_exception_types
 
     blocked = await blocking_exception_types(

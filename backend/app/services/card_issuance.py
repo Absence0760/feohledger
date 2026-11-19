@@ -848,7 +848,7 @@ async def notify_vendor_of_card(
 #: Not visible in the caller's entity scope, or does not exist. One code for
 #: both, so the answer cannot be used to probe another entity's invoices.
 CARD_SKIP_NOT_FOUND = "card_skip_not_found"
-#: Not at a payable status (`api/payments.PAYABLE_INVOICE_STATUSES`). `status`.
+#: Not at a payable status (`services/payment_gates.PAYABLE_INVOICE_STATUSES`). `status`.
 CARD_SKIP_NOT_PAYABLE = "card_skip_not_payable"
 #: The vendor changed between the unlocked read and the lock, so the invoice
 #: could not be checked against a stable vendor. Nothing minted; retry.
