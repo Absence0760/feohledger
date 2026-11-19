@@ -3355,7 +3355,7 @@
 					</button>
 					<button
 						type="submit"
-						class="btn-danger"
+						class="btn-danger armed"
 						data-testid="void-confirm"
 						disabled={voiding}
 					>
@@ -3422,7 +3422,7 @@
 				{:else}
 					<button
 						type="submit"
-						class="btn-danger"
+						class="btn-danger armed"
 						disabled={complianceBusy}
 					>
 						{complianceBusy
@@ -3502,7 +3502,7 @@
 				</button>
 				<button
 					type="submit"
-					class="btn-danger"
+					class="btn-danger armed"
 					data-testid="settlement-confirm"
 					disabled={settlementBusy}
 				>

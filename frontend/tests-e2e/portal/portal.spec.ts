@@ -461,6 +461,10 @@ test.describe("/portal — self-service (PO flip, remittance, company)", () => {
       await expect(closedRow).toBeVisible();
       await expect(closedRow).toContainText("Closed");
       await expect(closedRow).not.toContainText("closed");
+      // The pill keeps the raw wire value as a class hook (`<Badge
+      // variant="status-badge {status}">`) while its text is the label.
+      await expect(closedRow.locator(".status-badge.closed")).toHaveText("Closed");
+      await expect(openRow.locator(".status-badge.open")).toHaveText("Open");
       await expect(
         closedRow.getByRole("button", { name: "Create invoice" }),
       ).toHaveCount(0);

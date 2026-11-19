@@ -103,6 +103,14 @@
 	// silently arm the other).
 	let approveArmedId = $state<string | null>(null);
 	let rejectArmedId = $state<string | null>(null);
+
+	/** Arm one commit and retract the other: two armed red buttons at once is
+	 *  how a mis-click becomes the wrong irreversible decision (the same rule
+	 *  `RunDetailModal` keeps for Execute / Cancel run). */
+	function arm(kind: 'approve' | 'reject', id: string) {
+		approveArmedId = kind === 'approve' ? id : null;
+		rejectArmedId = kind === 'reject' ? id : null;
+	}
 	let busyId = $state<string | null>(null);
 
 	// Detail modal — the selected request plus its REVEALED proposed value, which
@@ -516,7 +524,7 @@
 								onclick={(e) => {
 									e.stopPropagation();
 									if (approveArmedId === r.id) decide(r, 'approve');
-									else approveArmedId = r.id;
+									else arm('approve', r.id);
 								}}
 							>
 								{approveArmedId === r.id
@@ -530,7 +538,7 @@
 								onclick={(e) => {
 									e.stopPropagation();
 									if (rejectArmedId === r.id) decide(r, 'reject');
-									else rejectArmedId = r.id;
+									else arm('reject', r.id);
 								}}
 							>
 								{rejectArmedId === r.id
@@ -673,7 +681,7 @@
 					onclick={(e) => {
 						e.stopPropagation();
 						if (rejectArmedId === current.id) decide(current, 'reject');
-						else rejectArmedId = current.id;
+						else arm('reject', current.id);
 					}}
 				>
 					{rejectArmedId === current.id
@@ -688,7 +696,7 @@
 					onclick={(e) => {
 						e.stopPropagation();
 						if (approveArmedId === current.id) decide(current, 'approve');
-						else approveArmedId = current.id;
+						else arm('approve', current.id);
 					}}
 				>
 					{approveArmedId === current.id

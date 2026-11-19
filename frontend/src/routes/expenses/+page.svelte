@@ -1460,7 +1460,7 @@
 							bind:value={rejectReason}
 							aria-label={m('expenses.reports.rejectAria')}
 						/>
-						<button class="btn-danger" disabled={reportBusy} onclick={rejectActiveReport}>{m('expenses.reports.confirmReject')}</button>
+						<button class="btn-danger armed" disabled={reportBusy} onclick={rejectActiveReport}>{m('expenses.reports.confirmReject')}</button>
 						<button class="btn-secondary" disabled={reportBusy} onclick={() => { showReject = false; rejectReason = ''; }}>{m('expenses.reports.cancel')}</button>
 					</div>
 				{/if}

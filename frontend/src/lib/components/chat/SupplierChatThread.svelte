@@ -9,9 +9,12 @@
 	import type { ChatMentionCandidate } from '#lib/api/supplierChat.ts';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { formatDate, timeAgo } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 
 	// A message is one of the two surface shapes. Reads are guarded so the
@@ -137,7 +140,7 @@
 			selectedMentions = [];
 			clearFile();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('supplierChat.error.send'), 'error');
+			toast(apiErrorMessage(err, m('supplierChat.error.send')), 'error');
 		} finally {
 			sending = false;
 		}
@@ -149,7 +152,7 @@
 		try {
 			await onresolve();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('supplierChat.error.resolve'), 'error');
+			toast(apiErrorMessage(err, m('supplierChat.error.resolve')), 'error');
 		} finally {
 			busyStatus = false;
 		}
@@ -161,7 +164,7 @@
 		try {
 			await onreopen();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('supplierChat.error.reopen'), 'error');
+			toast(apiErrorMessage(err, m('supplierChat.error.reopen')), 'error');
 		} finally {
 			busyStatus = false;
 		}
@@ -179,6 +182,8 @@
 		resolved: 'supplierChat.status.resolved',
 	};
 	let statusLabel = $derived(STATUS_LABEL_KEYS[status] ? m(STATUS_LABEL_KEYS[status]) : status);
+	const STATUS_TONES: Record<string, BadgeTone> = { open: 'accent', resolved: 'success' };
+	let statusTone = $derived<BadgeTone>(STATUS_TONES[status] ?? 'neutral');
 
 	const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -237,7 +242,7 @@
 			try {
 				await ondownload(fileUrl, filename);
 			} catch (err) {
-				toast(err instanceof Error ? err.message : m('supplierChat.error.download'), 'error');
+				toast(apiErrorMessage(err, m('supplierChat.error.download')), 'error');
 			}
 		}
 	}
@@ -246,8 +251,11 @@
 <section class="chat" data-testid="supplier-chat" aria-label={m('supplierChat.region')}>
 	<div class="chat-head">
 		<span class="chat-title">{m('supplierChat.title')}</span>
-		<span class="chat-status-pill {status}" data-testid="chat-status" data-status={status}
-			>{statusLabel}</span
+		<!-- The wrapper carries the e2e hooks (`<Badge>` takes no arbitrary
+		     attributes): the label is the text, the raw wire value is
+		     `data-status`. -->
+		<span class="chat-status" data-testid="chat-status" data-status={status}
+			><Badge tone={statusTone} variant="chat-status-pill {status}">{statusLabel}</Badge></span
 		>
 		{#if isAp}
 			<div class="chat-status-actions">
@@ -257,7 +265,7 @@
 							variant="success"
 							disabled={busyStatus || !thread?.messages?.length}
 							onclick={resolve}
-							ariaLabel={m('supplierChat.resolveAria')}
+							ariaLabel={busyStatus ? undefined : m('supplierChat.resolveAria')}
 						>
 							{busyStatus ? m('supplierChat.resolving') : m('supplierChat.resolve')}
 						</RowAction>
@@ -266,7 +274,7 @@
 					<RowAction
 						disabled={busyStatus}
 						onclick={reopen}
-						ariaLabel={m('supplierChat.reopenAria')}
+						ariaLabel={busyStatus ? undefined : m('supplierChat.reopenAria')}
 					>
 						{busyStatus ? m('supplierChat.reopening') : m('supplierChat.reopen')}
 					</RowAction>
@@ -458,33 +466,6 @@
 
 	.chat-status-actions {
 		margin-left: auto;
-	}
-
-	/* Not `<Badge>`: the pill carries `data-testid="chat-status"`, which the
-	   supplier-chat e2e reads the thread state off — `<Badge>` takes a tone, a
-	   variant class and a title, deliberately not arbitrary attributes, so
-	   converting would mean either wrapping it in a second element or widening
-	   the primitive's API for one caller. It keeps its own smaller metrics
-	   (0.7rem, sitting inline in the thread header) and takes its colour from
-	   the palette pairs. */
-	.chat-status-pill {
-		display: inline-block;
-		padding: 2px 9px;
-		border-radius: 12px;
-		font-size: 0.7rem;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-	}
-
-	.chat-status-pill.open {
-		background: var(--accent-tint);
-		color: var(--accent-on-tint);
-	}
-
-	.chat-status-pill.resolved {
-		background: var(--success-tint);
-		color: var(--success-on-tint);
 	}
 
 	.chat-list {

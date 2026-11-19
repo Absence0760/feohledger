@@ -101,7 +101,17 @@ describe('shared button classes', () => {
 
 	it('app.css declares every shared class, and the armed state', () => {
 		for (const cls of SHARED) expect(appCss).toMatch(new RegExp(`^\\.${cls}\\b`, 'm'));
-		expect(appCss).toMatch(/^\.btn-primary\.armed,\n\.btn-danger\.armed \{/m);
+		// The red fill holds through .btn-primary's own :hover (which would
+		// otherwise swap the ring for its lift shadow) …
+		expect(appCss).toMatch(
+			/^\.btn-primary\.armed,\n\.btn-danger\.armed,\n\.btn-primary\.armed:hover:not\(:disabled\) \{/m
+		);
+		// … and busy stays red without `opacity` (.btn-primary:disabled's 0.5).
+		const busy = appCss.match(/^\.btn-primary\.armed:disabled,\n\.btn-danger\.armed:disabled \{([^}]*)\}/m);
+		expect(busy, 'the armed busy state is declared').not.toBeNull();
+		expect(busy![1]).toMatch(/opacity: 1;/);
+		expect(busy![1]).toMatch(/background: var\(--danger-tint\);/);
+		expect(busy![1]).toMatch(/color: var\(--danger-on-tint\);/);
 	});
 
 	it.each(COVERED)('%s carries no local button class', (path) => {

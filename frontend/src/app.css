@@ -892,16 +892,33 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
    undone, so the button turns into a red fill one step before it commits,
    whatever it looked like unarmed. --danger-strong, not --danger: it is a
    fill under white text (5.37:1 dark, 7.89:1 light), the call every red fill in
-   this file makes. Two classes, so it holds through :hover and through the
-   busy (disabled) state while the request is in flight. Pair the class
-   with a distinct armed LABEL: the colour alone tells a screen reader
-   nothing. */
+   this file makes. Two classes, so it outranks .btn-primary's own :hover
+   (whose lift shadow would otherwise drop the red ring) and its :disabled.
+   Pair the class with a distinct armed LABEL: the colour alone tells a
+   screen reader nothing.
+
+   Busy (disabled while the request is in flight): still red, never
+   `opacity` — .btn-primary:disabled's 0.5 took white on --danger-strong
+   to a wash. It turns to the danger tint with --danger-on-tint text and
+   keeps the --danger-strong border, so "armed, and working" reads as one
+   state. Measured, dark / light, worst of --bg and --surface:
+     --danger-on-tint over --danger-tint   5.36 / 5.77 */
 .btn-primary.armed,
-.btn-danger.armed {
+.btn-danger.armed,
+.btn-primary.armed:hover:not(:disabled) {
 	border-color: var(--danger-strong);
 	background: var(--danger-strong);
 	color: #fff;
 	box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.btn-primary.armed:disabled,
+.btn-danger.armed:disabled {
+	border: 1px solid var(--danger-strong);
+	background: var(--danger-tint);
+	color: var(--danger-on-tint);
+	box-shadow: none;
+	opacity: 1;
+	cursor: not-allowed;
 }
 
 /* --- Ghost button ---
@@ -909,9 +926,19 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
    the sentence that explains it. No box, so it sits inline in running text
    without changing the line's height. Underlined as well as coloured, so it
    is not told apart from the text around it by colour alone (WCAG 1.4.1).
-   --accent on --surface 5.55 / 6.37 (dark / light, measured above);
-   disabled swaps to --text-muted (5.38 / 5.75), never `opacity`. */
+   --accent on --surface 5.55 / 6.95 (dark / light; on --bg 6.04 / 6.37);
+   disabled swaps to --text-muted (5.38 / 5.75), never `opacity`.
+
+   Target size (WCAG 2.5.8): standing alone (Back out of a detail view) it
+   is a control of its own and gets a 24px-tall box. Inside a sentence,
+   inline-flex with no padding keeps it on the text baseline (its baseline
+   is its text's), at the cost of a few pixels on a line set tighter than
+   24px and of not wrapping mid-label; 2.5.8's inline exception would cover
+   it there, but one rule for both uses beats a modifier nobody remembers. */
 .btn-ghost {
+	display: inline-flex;
+	align-items: center;
+	min-height: 24px;
 	padding: 0;
 	border: none;
 	background: none;
