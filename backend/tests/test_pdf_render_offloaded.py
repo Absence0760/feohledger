@@ -187,17 +187,18 @@ SYNC_PDF_CORES = {
     "extract_invoice_text",
     "extract_embedded_cii_xml",
     "_detect_structured_format",
+    # The structured e-invoice entry points: an XML mime is only a hint, and
+    # `detect_format` trusts the `%PDF` magic, so either one can open a hybrid
+    # Factur-X with PyMuPDF. PEPPOL receive and the `einvoice` adapter both
+    # take arbitrary sender bytes.
+    "detect_format",
+    "parse_e_invoice",
 }
 
-# Known coroutine callers still on a sync core. `run_extraction` runs on the
-# extraction dispatcher's worker thread, inside that thread's own event loop,
-# never on a request loop; moving its two probes onto the awaitable forms
-# (`rag.read_invoice_text`, `asyncio.to_thread(_detect_structured_format, ...)`)
-# is the remaining step. This list may only shrink.
-KNOWN_SYNC_CORE_CALLERS = {
-    ("app/services/extraction.py", "extract_invoice_text"),
-    ("app/services/extraction.py", "_detect_structured_format"),
-}
+# Known coroutine callers still on a sync core: none. `run_extraction` awaits
+# `rag.read_invoice_text` and hands `_detect_structured_format` to
+# `asyncio.to_thread`. Keep it empty — a new entry is a regression.
+KNOWN_SYNC_CORE_CALLERS: set[tuple[str, str]] = set()
 
 
 def _calls_in_coroutine_body(fn: ast.AsyncFunctionDef):
@@ -262,6 +263,42 @@ def test_no_coroutine_calls_a_sync_pdf_core_directly():
         "A coroutine must await pdf_reader.pdf_text / rasterize_pages (or pass the "
         "sync core to asyncio.to_thread): " + ", ".join(offenders)
     )
+
+
+def test_no_coroutine_is_allowlisted_onto_a_sync_pdf_core():
+    """The allowlist emptied when `run_extraction` moved onto the awaitable
+    forms; it may not grow back."""
+    assert KNOWN_SYNC_CORE_CALLERS == set()
+
+
+def test_an_xml_mime_does_not_stop_detect_format_opening_a_pdf(monkeypatch):
+    """Why `parse_e_invoice` is a sync PDF core even where the caller passes an
+    XML mime (PEPPOL receive): the `%PDF` magic wins, and the Factur-X probe
+    opens the bytes."""
+    from app.services.e_invoice import detect
+
+    probed: list[bytes] = []
+    monkeypatch.setattr(detect, "extract_embedded_cii_xml", lambda b: probed.append(b) or None)
+    payload = b"%PDF-1.7\n not really a pdf"
+    fmt = detect.detect_format(payload, mime_type="application/xml", filename="inbound.xml")
+    assert fmt is detect.DetectedFormat.NONE
+    assert probed == [payload]
+
+
+def test_peppol_receive_hands_parse_e_invoice_to_to_thread():
+    """Pin the PEPPOL shape: the payload parse is `asyncio.to_thread`'s first
+    argument, not a call on the public webhook's loop."""
+    tree = ast.parse((APP_DIR / "services" / "peppol_receive.py").read_text())
+    offloaded = [
+        call
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call)
+        and _call_name(call) == "to_thread"
+        and call.args
+        and isinstance(call.args[0], ast.Name)
+        and call.args[0].id == "parse_e_invoice"
+    ]
+    assert offloaded, "peppol_receive must parse the inbound payload via asyncio.to_thread"
 
 
 def test_the_awaitable_pdf_api_is_a_to_thread_hand_off():

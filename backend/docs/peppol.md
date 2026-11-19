@@ -294,7 +294,9 @@ log line or the body.
    `InboundPeppolMessage` (message id, sender scheme/value, doc type, process
    id, payload). `None` / missing message id → 204 (can't dedupe → refuse).
 6. In a short-lived tenant session: dedupe pre-check → parse/validate the
-   payload with the **existing** `e_invoice.parse_e_invoice` (malformed →
+   payload with the **existing** `e_invoice.parse_e_invoice`, on a worker
+   thread (`asyncio.to_thread`: a payload starting `%PDF` is probed as a
+   Factur-X hybrid with PyMuPDF whatever mime is passed; malformed →
    204, no invoice) → create `Invoice(status=new)` (vendor/amount/currency from
    the UBL; **amount is `Decimal`**) → freeze the invoice's `WorkflowInstance`
    snapshot (`create_workflow_instance`, same as every other ingress — without
