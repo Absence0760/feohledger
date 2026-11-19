@@ -217,6 +217,15 @@ env:
   # ~15 KB of the main catalogue, give refusal sentences their own lazy
   # slice the way help (§261) and settings (§300) were split.
   # MAX_LARGEST_CHUNK_KB is unchanged at 100 (largest chunk 92).
+  # 2026-11-19 — no ceiling change. Round PR #736 took the largest chunk (the
+  # ja main catalogue) to ~106 KB, over the per-chunk 100: ~359 /audit action
+  # labels (`audit.action.*`, `audit.actionPattern.*`) per locale. They moved
+  # to a fifth lazy slice, `locales/audit/<l>.ts`, loaded by /audit's
+  # +layout.ts. Measured locally: largest chunk 100 KB (ja main, 101,680 bytes
+  # gzipped by gzip -6), audit slice 6 KB, gated total 464 of 480. That leaves
+  # well under 1 KB on the per-chunk ceiling, so the next catalogue growth
+  # binds it again: the trigger named above for `refusal.*` (~10 KB of ja main
+  # now) should be taken before then, not the ceiling raised.
   MAX_TOTAL_KB: 480
   MAX_LARGEST_CHUNK_KB: 100
 
