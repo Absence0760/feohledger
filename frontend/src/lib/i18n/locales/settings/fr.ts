@@ -153,7 +153,7 @@ export const messages = {
 	'org.chat.webhook.saving': 'Enregistrement…',
 	'org.chat.webhook.remove': 'Supprimer le webhook',
 	'org.chat.webhook.confirmRemove': 'Confirmer la suppression',
-	'org.chat.webhook.removeAria': 'Supprimer l’URL de webhook entrant de discussion',
+	'org.chat.webhook.removeAria': 'Supprimer le webhook : URL de webhook entrant de discussion',
 	'org.chat.webhook.rotateHint':
 		'Le remplacement prend effet immédiatement, sans période de recouvrement — nous publions vers une seule URL, donc garder l’ancienne active continuerait d’y publier. Supprimez aussi l’ancien webhook chez votre fournisseur : lui seul peut le révoquer.',
 	'org.chat.webhook.toast.saved': 'Webhook de discussion enregistré',

@@ -91,7 +91,7 @@ test.describe('/gl-accounts — an unlinked row waiting for a decision', () => {
 			'1 account needs a decision'
 		);
 
-		await row.getByRole('button', { name: `Choose the ERP account for ${code}` }).click();
+		await row.getByRole('button', { name: `Choose ERP account for ${code}` }).click();
 		const modal = page.locator('div.modal[role="dialog"]', {
 			hasText: `Which ERP account is ${code}?`
 		});

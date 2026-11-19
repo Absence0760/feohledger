@@ -71,7 +71,7 @@ export const messages = {
 	'shell.primaryNav': 'Navigation principale',
 	'shell.sectionNav': 'Sections : {group}',
 	'shell.sectionMore': 'Plus',
-	'shell.sectionMoreAria': '{count} autres sections',
+	'shell.sectionMoreAria': 'Plus : {count} autres sections',
 	'shell.profileMenu': 'Menu profil et compte',
 	'shell.profileMenuNamed': '{name} — menu profil et compte',
 	'shell.profile': 'Profil',

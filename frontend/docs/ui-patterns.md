@@ -925,7 +925,11 @@ accessible:
    label from the visible string rather than retyping it — the catalogue
    template takes it as a parameter, so every locale keeps the match:
    `m('payments.quotes.openAria', { action: m('payments.quotes.open'), invoice })`
-   with `'{action} for invoice {invoice}'`. Keep a badge or other extra
+   with `'{action} for invoice {invoice}'`. Where the label is a separate
+   `<key>Aria` message beside the visible `<key>`, start it with the visible
+   words (`Choose ERP account for {code}`, not `Choose the ERP account for
+   {code}`): `frontend/src/lib/a11y/labelInName.test.ts` checks every such
+   pair in every locale, with no list of tolerated gaps. Keep a badge or other extra
    text *beside* the link, not inside it, or it becomes visible text the
    label lacks (the `/workflows` "Default" badge).
 

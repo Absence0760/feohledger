@@ -30,19 +30,6 @@ const NOT_A_PAIR: Record<string, string> = {
 	'assistant.thinkingAria': 'names the typing indicator image, which shows no text',
 };
 
-/** Real Label-in-Name gaps found when this guard landed, tracked in
- *  docs/followups.md. Remove a key from here in the change that fixes it;
- *  a new pair never joins this list. */
-const KNOWN_GAPS = new Set<string>([
-	'shell.sectionMoreAria',
-	'vendors.modal.erp.unlinkAria',
-	'vendors.modal.erp.confirmUnlinkAria',
-	'vendors.modal.erp.find.confirmLinkAria',
-	'glAccounts.erpLink.chooseAria',
-	'org.chat.webhook.removeAria',
-	'org.emailIntake.rotateAria',
-]);
-
 function visibleCore(text: string): string {
 	return text
 		.replace(/\{[^}]*\}/g, '')
@@ -58,20 +45,19 @@ function containsVisible(aria: string, visible: string): boolean {
 }
 
 describe('WCAG 2.5.3 Label in Name: every <key>Aria contains <key>', () => {
-	test('the exemption lists name keys that exist and do not overlap', async () => {
+	test('the exemption list names keys that exist', async () => {
 		const en = await loadAllMessages('en');
-		for (const key of [...Object.keys(NOT_A_PAIR), ...KNOWN_GAPS]) {
+		for (const key of Object.keys(NOT_A_PAIR)) {
 			expect(key in en, `${key} is not a message key`).toBe(true);
 			expect(key.slice(0, -4) in en, `${key} has no visible sibling`).toBe(true);
 		}
-		for (const key of KNOWN_GAPS) expect(key in NOT_A_PAIR, key).toBe(false);
 	});
 
 	test('the supplier chat status buttons are covered (not exempted)', async () => {
 		const en = await loadAllMessages('en');
 		for (const key of ['supplierChat.resolveAria', 'supplierChat.reopenAria']) {
 			expect(key in en, key).toBe(true);
-			expect(key in NOT_A_PAIR || KNOWN_GAPS.has(key), key).toBe(false);
+			expect(key in NOT_A_PAIR, key).toBe(false);
 		}
 	});
 
@@ -80,7 +66,7 @@ describe('WCAG 2.5.3 Label in Name: every <key>Aria contains <key>', () => {
 			const dict = await loadAllMessages(locale);
 			const failures: string[] = [];
 			for (const [key, aria] of Object.entries(dict)) {
-				if (!key.endsWith('Aria') || key in NOT_A_PAIR || KNOWN_GAPS.has(key)) continue;
+				if (!key.endsWith('Aria') || key in NOT_A_PAIR) continue;
 				const visible = (dict as Record<string, string>)[key.slice(0, -4)];
 				if (visible === undefined) continue;
 				if (!containsVisible(aria, visible)) {
