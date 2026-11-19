@@ -274,6 +274,7 @@ export const messages = {
 	'profile.passkeys.lastUsed': 'Dernière utilisation {date}',
 	'profile.passkeys.neverUsed': 'Jamais utilisée',
 	'profile.passkeys.remove': 'Supprimer',
+	'profile.passkeys.confirmRemove': 'Confirmer la suppression',
 	'profile.passkeys.loadFailed':
 		'Impossible de charger vos clés d’accès : nous ne pouvons donc pas dire lesquelles sont enregistrées.',
 	'profile.passkeys.none': 'Aucune clé d’accès pour l’instant',

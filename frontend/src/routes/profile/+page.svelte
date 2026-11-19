@@ -76,6 +76,7 @@
 	// Notification preferences
 	let prefsLoaded = $state(false);
 	let savingPrefs = $state(false);
+	let prefsBusy = $state(false);
 
 	$effect(() => {
 		// `prefsLoaded` is the already-fetched guard; the section check is what
@@ -96,7 +97,23 @@
 		}
 	}
 
-	async function togglePref(event: NotificationEventType, channel: 'email' | 'in_app') {
+	/** Retry wrapper, the same shape as `retrySessions` / `retryPasskeys`: a
+	 * failed preferences load used to leave the panel on a warning with no way
+	 * back but a full reload. */
+	async function retryPrefs() {
+		prefsBusy = true;
+		try {
+			await loadPrefs();
+		} finally {
+			prefsBusy = false;
+		}
+	}
+
+	async function togglePref(
+		event: NotificationEventType,
+		channel: 'email' | 'in_app',
+		box: HTMLInputElement
+	) {
 		if (!notificationStore.prefs) return;
 		// Read through the same normalisation the grid renders from, so an event
 		// the server omitted toggles off its shown (default-on) state rather than
@@ -110,6 +127,10 @@
 		try {
 			await notificationStore.updatePrefs({ [event]: next });
 		} catch {
+			// The click already flipped the box, and the store never changed, so
+			// the one-way `checked` binding has nothing to re-render: put the box
+			// back by hand, or it shows a preference the server never saved.
+			box.checked = current[channel];
 			toast(m('profile.notifications.updateFailed'), 'error');
 		} finally {
 			savingPrefs = false;
@@ -448,7 +469,13 @@
 		}
 	}
 
+	// Removing a passkey is armed two-click, like signing a session out: the
+	// step-up proof is often typed once for the whole card, so without the arm
+	// a single stray click deleted a sign-in factor.
+	let armedPasskeyId = $state<string | null>(null);
+
 	async function removePasskey(id: string) {
+		armedPasskeyId = null;
 		try {
 			// Removing a passkey always needs the step-up — the passkey itself is
 			// a live factor, so the backend refuses a bare-session delete.
@@ -933,9 +960,17 @@
 											type="button"
 											class="danger small"
 											disabled={!canStepUp}
-											onclick={() => removePasskey(pk.id)}
+											onclick={() => {
+												if (armedPasskeyId === pk.id) {
+													removePasskey(pk.id);
+												} else {
+													armedPasskeyId = pk.id;
+												}
+											}}
 										>
-											{m('profile.passkeys.remove')}
+											{armedPasskeyId === pk.id
+												? m('profile.passkeys.confirmRemove')
+												: m('profile.passkeys.remove')}
 										</button>
 									</li>
 								{/each}
@@ -1088,7 +1123,7 @@
 												type="checkbox"
 												checked={prefs[event].in_app}
 												disabled={savingPrefs}
-												onchange={() => togglePref(event, 'in_app')}
+												onchange={(e) => togglePref(event, 'in_app', e.currentTarget)}
 												aria-label={m('profile.notifications.inAppFor', { event: label })}
 											/>
 										</td>
@@ -1097,7 +1132,7 @@
 												type="checkbox"
 												checked={prefs[event].email}
 												disabled={savingPrefs}
-												onchange={() => togglePref(event, 'email')}
+												onchange={(e) => togglePref(event, 'email', e.currentTarget)}
 												aria-label={m('profile.notifications.emailFor', { event: label })}
 											/>
 										</td>
@@ -1107,6 +1142,11 @@
 						</table>
 					{:else}
 						<p class="warn">{m('profile.notifications.loadFailed')}</p>
+						<div class="actions">
+							<button type="button" class="secondary" disabled={prefsBusy} onclick={retryPrefs}>
+								{prefsBusy ? m('common.retrying') : m('common.tryAgain')}
+							</button>
+						</div>
 					{/if}
 				</section>
 			{/if}

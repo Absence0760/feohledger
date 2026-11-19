@@ -6,13 +6,38 @@
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
-	import { goto } from '$app/navigation';
-	import { timeAgo } from '#lib/utils/time.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import { untrack } from 'svelte';
+	import { page as pageStore } from '$app/state';
+	import { afterNavigate, goto, replaceState } from '$app/navigation';
+	import { formatDate, timeAgo } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { EVENT_LABELS } from '#lib/types/notification.ts';
+	import { EVENT_LABEL_KEYS } from '#lib/types/notification.ts';
 	import type { Notification } from '#lib/types/notification.ts';
 
-	let filter = $state<'all' | 'unread'>('all');
+	// The relative "When" cell carries the exact instant in its title, in the
+	// active locale — never the raw ISO string.
+	const DATETIME_OPTS: Intl.DateTimeFormatOptions = {
+		month: 'short',
+		day: 'numeric',
+		year: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	};
+
+	type Filter = 'all' | 'unread';
+
+	/**
+	 * The one READER of `?filter=` (the counterpart of `syncUrl()`), clamped to
+	 * the chips' own keys so a hand-edited value cannot leave no chip pressed.
+	 * Used at mount and by `afterNavigate` for a navigation that reuses this
+	 * page (Back/Forward between two filtered views).
+	 */
+	function readUrlFilter(params: Pick<URLSearchParams, 'get'>): Filter {
+		return params.get('filter') === 'unread' ? 'unread' : 'all';
+	}
+
+	let filter = $state<Filter>(readUrlFilter(pageStore.url.searchParams));
 	let errored = $state(false);
 	let initialLoaded = $state(false);
 
@@ -28,10 +53,27 @@
 	let loading = $derived(notificationStore.loading);
 	let hasMore = $derived(notificationStore.hasMore);
 
+	/** The one WRITER of this route's query string. Untracked: it is called from
+	 *  the filter effect and must never become one of its dependencies. */
+	function syncUrl() {
+		untrack(() => {
+			const qs = filter === 'unread' ? '?filter=unread' : '';
+			replaceState(`${pageStore.url.pathname}${qs}`, {});
+		});
+	}
+
 	$effect(() => {
-		// Re-fetch whenever the filter changes.
+		// Re-fetch whenever the filter changes, and keep the address bar on the
+		// view so reload / Back / a shared link land on the same filter.
 		filter;
+		syncUrl();
 		void reload();
+	});
+
+	afterNavigate(({ from, to, type }) => {
+		if (type === 'enter' || !from || !to || from.route.id !== to.route.id) return;
+		const next = readUrlFilter(to.url.searchParams);
+		if (next !== filter) filter = next;
 	});
 
 	async function reload() {
@@ -90,11 +132,7 @@
 	]);
 
 	let emptyMessage = $derived(
-		errored
-			? m('notifications.empty.errored')
-			: filter === 'unread'
-				? m('notifications.empty.unread')
-				: m('notifications.empty.all')
+		filter === 'unread' ? m('notifications.empty.unread') : m('notifications.empty.all')
 	);
 </script>
 
@@ -107,7 +145,10 @@
 
 	<FilterChips {chips} bind:active={filter} />
 
-	{#if !initialLoaded && loading}
+	{#if errored}
+		<!-- A failed load is not an empty inbox: say so in place, with a way back. -->
+		<LoadError message={m('notifications.empty.errored')} onretry={reload} testId="notifications-error" />
+	{:else if !initialLoaded && loading}
 		<p class="state-msg">{m('common.loading')}</p>
 	{:else}
 		<DataTable columns={COLUMNS} isEmpty={items.length === 0} empty={emptyMessage} colspan={2}>
@@ -126,11 +167,13 @@
 										<span class="notif-title">{n.title}</span>
 									</RowLink>
 									{#if n.body}<span class="notif-body">{n.body}</span>{/if}
-									<span class="notif-event">{EVENT_LABELS[n.event_type] ?? n.event_type}</span>
+									<span class="notif-event">
+										{EVENT_LABEL_KEYS[n.event_type] ? m(EVENT_LABEL_KEYS[n.event_type]) : n.event_type}
+									</span>
 								</div>
 							</div>
 						</td>
-						<td class="muted-cell" title={n.created_at}>{timeAgo(n.created_at)}</td>
+						<td class="muted-cell" title={formatDate(n.created_at, '', DATETIME_OPTS)}>{timeAgo(n.created_at)}</td>
 					</tr>
 				{/each}
 			{/snippet}
