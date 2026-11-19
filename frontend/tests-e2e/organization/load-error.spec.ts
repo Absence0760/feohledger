@@ -47,4 +47,38 @@ test.describe('/organization load error', () => {
 		await expect(page.getByRole('heading', { name: 'Getting started' })).toBeVisible();
 		await expect(page.getByTestId('org-load-error')).toHaveCount(0);
 	});
+
+	// A panel that loads its own data (residency, custom domains, chat, SSO,
+	// email intake) used to print its failure as a bare line with no way out
+	// but a full reload. It renders the same LoadError, and Retry re-runs that
+	// panel's own load.
+	test('a failed panel load offers Retry, and Retry loads the panel', async ({ page }) => {
+		let failed = false;
+		await page.route(
+			(url) => url.pathname === '/api/organization/data-residency',
+			async (route) => {
+				if (!failed && route.request().method() === 'GET') {
+					failed = true;
+					return route.fulfill({
+						status: 500,
+						contentType: 'application/json',
+						body: JSON.stringify({ detail: 'boom' })
+					});
+				}
+				return route.fallback();
+			}
+		);
+
+		await page.goto('/organization?section=residency');
+
+		const error = page.getByTestId('residency-load-error');
+		await expect(error).toBeVisible();
+		await error.getByRole('button', { name: 'Retry' }).click();
+
+		await expect(page.getByTestId('residency-load-error')).toHaveCount(0);
+		const card = page.locator('section.card', {
+			has: page.getByRole('heading', { name: 'Data Residency' })
+		});
+		await expect(card.getByText('Deployment alignment')).toBeVisible();
+	});
 });
