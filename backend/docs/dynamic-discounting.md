@@ -645,7 +645,7 @@ discounts are still on the table:
 | `analytics.bucket_outflows` (`discount_eligible_amount`) | same rule — **this was the outlier** |
 
 The commitment rows the forecast consumes are bounded on their DUE date only
-(`api/analytics._commitment_rows`), so an in-horizon invoice on 2/10-net-60
+(`ap_commitments.commitment_rows`), so an in-horizon invoice on 2/10-net-60
 terms routinely arrives carrying a `discount_date` that passed weeks ago.
 Counting it made `/analytics/cashflow_forecast` report a saving nobody can
 still take — and the copilot narrates off that figure. `bucket_outflows` now

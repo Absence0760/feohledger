@@ -730,7 +730,7 @@ def test_bucket_outflows_discount_eligible_amount():
 
 def test_bucket_outflows_excludes_an_elapsed_discount_window():
     """An in-horizon invoice on 2/10-net-60 terms routinely arrives with a
-    `discount_date` that passed weeks ago — `_commitment_rows` bounds only the
+    `discount_date` that passed weeks ago — `commitment_rows` bounds only the
     DUE date. Counting it reported a saving nobody can still take, and told a
     CFO to fund a payment run against it. Same rule the discount optimizer and
     the `early` what-if scenario already apply."""
@@ -752,7 +752,7 @@ def test_bucket_outflows_drops_rows_without_due_date():
 
 
 def test_bucket_outflows_counts_unconvertible_rows():
-    """`_commitment_rows` includes a foreign invoice with no usable FX lock at
+    """`commitment_rows` includes a foreign invoice with no usable FX lock at
     FACE VALUE and flags it `unconverted`. The flag was computed on every row
     and read by nobody, so a ¥10,000,000 invoice silently entered a USD curve
     as 10,000,000 — enough to drag a $250k opening balance to a projected

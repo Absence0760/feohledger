@@ -6,7 +6,7 @@ latent rather than live. That is exactly what makes it easy to keep
 reintroducing, and it stops being latent the moment anything runs off a non-UTC
 host, because these modules derive more than a display value from "today":
 
-  * `api/analytics._commitment_rows` bounds its horizon on it, so the `/cfo`
+  * `ap_commitments.commitment_rows` bounds its horizon on it, so the `/cfo`
     chart and a copilot answer built minutes apart can be assembled from
     different row sets for part of each day;
   * `services/cash_flow_plan.compute_plan_id` hashes it, so a plan proposed near

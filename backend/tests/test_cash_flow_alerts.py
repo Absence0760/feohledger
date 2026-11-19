@@ -525,7 +525,7 @@ async def test_project_tenant_detects_a_real_breach(realdb):
 @pytest.mark.asyncio
 async def test_project_tenant_counts_overdue_ap(realdb):
     """AP already past due is the most certain outflow there is. The sweep used
-    to drop it (it reads `_commitment_rows`), so an org whose only problem was
+    to drop it (it reads `commitment_rows`), so an org whose only problem was
     a stack of late bills was never warned. It now lands in the first period."""
     info = realdb.info("a")
     mk = realdb.sessionmaker("a")

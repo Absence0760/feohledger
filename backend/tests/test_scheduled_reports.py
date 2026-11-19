@@ -546,13 +546,13 @@ async def test_execute_schedule_first_failure_does_not_disable():
 async def test_aging_snapshot_runs_the_api_exports_builder(monkeypatch):
     """The emailed snapshot used to be a hand-copied loop (it once lost the
     61-90 band, then summed raw amounts across currencies). It now delegates to
-    `api.analytics._aging_snapshot_buckets` — the export route's own builder —
+    `services.ap_commitments.aging_snapshot_buckets` — the export route's own builder —
     with the caller's reporting currency, the whole tenant, and the SAME `today`
     the as-of label carries. The band edges and the conversion are pinned on
     real SQL in `tests/test_analytics_aging_reconciliation.py`."""
     from decimal import Decimal
 
-    import app.api.analytics as analytics_api
+    import app.services.scheduled_reports as scheduled_reports
     from app.services.scheduled_reports import _materialise_rows
 
     seen: dict = {}
@@ -561,7 +561,7 @@ async def test_aging_snapshot_runs_the_api_exports_builder(monkeypatch):
         seen.update(today=today, reporting_currency=reporting_currency, entity_id=entity_id)
         return {"days_90": Decimal("40.00"), "reporting_currency": reporting_currency}
 
-    monkeypatch.setattr(analytics_api, "_aging_snapshot_buckets", _fake_builder)
+    monkeypatch.setattr(scheduled_reports, "aging_snapshot_buckets", _fake_builder)
 
     captured: dict = {}
 
@@ -629,7 +629,7 @@ async def test_cashflow_forecast_dispatches_to_the_commitment_query_not_aging():
     feed a bucket dict into the cashflow exporter and crash)."""
     from app.services.scheduled_reports import _materialise_rows
 
-    # Shape consumed by `_commitment_rows`:
+    # Shape consumed by `commitment_rows`:
     # (amount, status, invoice due_date, sched_due, discount_date, discount_percent)
     result = MagicMock()
     result.all = MagicMock(return_value=[])

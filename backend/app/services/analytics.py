@@ -1065,7 +1065,7 @@ def compute_forecast_variance(
 # `committed` distinguishes firm commitments (approved → payment_scheduled)
 # from the still-in-flight pipeline (new / pending / ready_for_review).
 # `overdue` marks a row already past due on the day the rows were read
-# (`api/analytics._commitment_rows`): it is timed on `today`, in the first
+# (`ap_commitments.commitment_rows`): it is timed on `today`, in the first
 # period, and reported on its own `overdue_amount` / `overdue_count` rather
 # than inside `committed_amount` / `pending_amount`. It is an explicit flag,
 # not "`due_date` < `today`", because `bucket_outflows` also buckets
@@ -1152,7 +1152,7 @@ def bucket_outflows(rows: list[dict], *, granularity: str = "week", today=None) 
     ``unconverted_count`` is how many of the period's rows arrived with a
     truthy ``unconverted`` flag — a foreign invoice whose reporting-currency
     figure could not be established, which
-    ``api/analytics.py::_commitment_rows`` includes at FACE VALUE rather than
+    ``services/ap_commitments.py::commitment_rows`` includes at FACE VALUE rather than
     dropping (dropping would understate the outflow). That face value is a
     different currency's number sitting in a reporting-currency total, so the
     count is what stops it being silent: a single unconverted ¥10,000,000
@@ -1210,7 +1210,7 @@ def bucket_outflows(rows: list[dict], *, granularity: str = "week", today=None) 
         # still be paid early for a discount". An ELAPSED window can't be, so
         # counting it told a CFO to fund a run against savings that no longer
         # exist. The commitment rows this consumes are bounded on their DUE
-        # date only (`api/analytics._commitment_rows`), so an in-horizon
+        # date only (`ap_commitments.commitment_rows`), so an in-horizon
         # invoice on 2/10-net-60 terms routinely arrives with a `discount_date`
         # that passed weeks ago. Same rule the discount optimizer
         # (`discount_optimizer.optimize`: "capturable only while the deadline
@@ -1271,7 +1271,7 @@ def apply_payment_timing_scenario(
 
     The elapsed-window guard is load-bearing, not defensive coding. The
     commitment rows this consumes are bounded on their DUE date only (see
-    ``api/analytics.py::_commitment_rows``), so an in-horizon invoice on
+    ``services/ap_commitments.py::commitment_rows``), so an in-horizon invoice on
     ``2/10 net 60`` terms routinely arrives with a ``discount_date`` that
     passed weeks ago. Without the guard the ``early`` card claimed a
     discount nobody can still take, timed the outflow on a date in the

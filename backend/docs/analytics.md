@@ -735,7 +735,7 @@ Five surfaces answer "what did we spend, by vendor":
 | its drill-through | `GET /api/analytics/drill/spend_concentration` | not `rejected` |
 | CSV export | `GET /api/analytics/export/vendor_spend` | not `rejected` |
 | emailed scheduled report | `services/scheduled_reports.py` | not `rejected` |
-| assistant `get_vendor_spend` tool | `services/assistant/tools/vendor_spend.py` | `_COMMITTED_STATUSES` |
+| assistant `get_vendor_spend` tool | `services/assistant/tools/vendor_spend.py` | `open_ap_due.COMMITTED_STATUSES` |
 
 The four AP surfaces run **one** builder,
 `currency_conversion.vendor_spend_grouped_select`, and reduce its output with
@@ -823,7 +823,7 @@ fails on both shapes:
    either spelling (`totals[k] += x` or `totals[k] = totals.get(k, 0) + x`).
 
 A **projection** — one output row per input row — is deliberately not matched,
-because three legitimate call sites are projections: `_commitment_rows`' cash
+because three legitimate call sites are projections: `commitment_rows`' cash
 commitments, the dashboard's ten upcoming payments, and its per-row discount
 economics all need the converted value on each row, not a total. Neither is a
 bounded scalar `total += x`. The detector is itself tested against synthetic
@@ -1081,7 +1081,7 @@ unconverted_count}` plus a `totals` rollup. Weeks are Monday-anchored. Default
 ### Overdue AP is carried into the first period
 
 An open invoice whose effective due date is already **before today** is the
-most certain outflow the business has: it is owed now. `_commitment_rows` used
+most certain outflow the business has: it is owed now. `commitment_rows` used
 to drop it (`due < today → continue`), so the forecast, `/cash_position`'s
 curve, the what-if, every copilot planning tool, the `get_payment_forecast`
 assistant tool and the shortfall-alert sweep all overstated cash by exactly the
@@ -1090,7 +1090,7 @@ AP the business was already late paying. Probed: USD 1,000 due yesterday + USD
 
 The rule now:
 
-- `_commitment_rows` keeps the row, flags it `overdue: True` and leaves its real
+- `commitment_rows` keeps the row, flags it `overdue: True` and leaves its real
   `due_date` alone. The SQL bound is on the future edge only.
 - `services/analytics.bucket_outflows` times a flagged row on **today** — it
   cannot leave in the past — so it lands in the period containing today, the
@@ -1130,7 +1130,7 @@ endpoints), `tests/test_analytics.py` (pure bucketing / what-if / position),
 
 ### One commitment row per invoice, whatever its schedule count
 
-`_commitment_rows` outer-joins `payment_schedules` for the authoritative due
+`commitment_rows` outer-joins `payment_schedules` for the authoritative due
 date + early-pay discount terms. That join was **un-deduped**: it returns one
 row per schedule, and the loop appends a commitment row for each — so an invoice
 carrying two `PaymentSchedule` rows was counted **twice, at its full amount**.
@@ -1159,7 +1159,7 @@ does not invent an ordering. Guard:
 ### `unconverted_count` — the outflow-side currency caveat
 
 Every commitment row is expressed in the org's **reporting** currency via the
-rate locked on the invoice (`_commitment_rows` → `reporting_amount_for_row`).
+rate locked on the invoice (`commitment_rows` → `reporting_amount_for_row`).
 A foreign invoice with no usable lock is included at **face value** — dropping
 it would understate the outflow — and flagged. That flag is now surfaced as
 `unconverted_count`: per period on `/cashflow_forecast` and `/cash_position`,
@@ -1267,7 +1267,7 @@ returning "no threshold" rather than raising.
 | `invoice_register` | invoice_id, invoice_number, vendor_name, amount, currency, status, invoice_date, due_date, created_at, po_number |
 | `vendor_spend` | vendor_name, invoice_count, total_amount, currencies, unconverted_count |
 | `payment_register` | payment_id, invoice_id, invoice_number, vendor_name, amount, currency, method, status, provider, reference, submitted_at, completed_at |
-| `aging_snapshot` | as_of_date, current, days_30, days_60, days_90, days_90_plus, total, reporting_currency, unconverted_count. The bands are in the org's **reporting currency** — the rate locked on each invoice, else face value, with those face-value rows counted on `unconverted_count` (the dashboard `aging_reporting` rule, and the figure the CFO `reporting_accounts_payable_balance` they reconcile with uses). Both the export route and the emailed report call ONE builder, `api/analytics._aging_snapshot_buckets`; they used to be two hand-copied loops that summed raw `Invoice.amount` across currencies, so a ¥1,000,000 invoice sat in a band as "1000000.00" beside dollars in a file that names no currency. `as_of_date` defaults to `utc_today()` — neither caller passes `snapshot_date`, and both bucket against a UTC `today`, so a local-time default labelled the file with one date while the buckets were computed as of another |
+| `aging_snapshot` | as_of_date, current, days_30, days_60, days_90, days_90_plus, total, reporting_currency, unconverted_count. The bands are in the org's **reporting currency** — the rate locked on each invoice, else face value, with those face-value rows counted on `unconverted_count` (the dashboard `aging_reporting` rule, and the figure the CFO `reporting_accounts_payable_balance` they reconcile with uses). Both the export route and the emailed report call ONE builder, `ap_commitments.aging_snapshot_buckets`; they used to be two hand-copied loops that summed raw `Invoice.amount` across currencies, so a ¥1,000,000 invoice sat in a band as "1000000.00" beside dollars in a file that names no currency. `as_of_date` defaults to `utc_today()` — neither caller passes `snapshot_date`, and both bucket against a UTC `today`, so a local-time default labelled the file with one date while the buckets were computed as of another |
 | `cashflow_forecast` | period, period_start, period_end, scheduled_amount, committed_amount, pending_amount, discount_eligible_amount, count, overdue_amount, overdue_count. The last two are the AP already past due, carried into the first period (inside `scheduled_amount`, outside committed / pending — see [Overdue AP](#overdue-ap-is-carried-into-the-first-period)); a caller reporting no overdue figure exports them blank, not `0` |
 | `expense_register` | date, merchant, category, amount, currency, gl_code, payment_method, status, report_number |
 
