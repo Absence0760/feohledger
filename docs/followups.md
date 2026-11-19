@@ -753,24 +753,6 @@ honestly fold in: each is a product call, needs a tenant migration or an operato
 or is a sibling of a fix that needs its own pass.
 
 
-- [ ] **(c) A PO flip still books its invoice in USD when the PO records no currency.**
-      `POST /api/portal/purchase-orders/{id}/flip` now takes the PO's own currency (§197), but
-      `invoices.currency` is `NOT NULL`, so a PO with none falls back to the column's historical
-      `"USD"` — a supplier flipping a currency-less EUR order gets a USD invoice carrying the EUR
-      figure. The pairing is never mistaken for proof (the matcher reads the PO's NULL, not the
-      invoice's placeholder, and reports the leg unverified), and the same `"USD"` is what
-      `portal.submit_invoice` writes for an un-extracted upload — but it is still a claim nobody
-      made, on the one row the payment path ultimately funds.
-      **Durable fix:** the honest version is `invoices.currency` nullable, which is a tenant
-      migration plus an audit of every consumer that assumes a code (the reporting-currency
-      materialization, `payment_runs.one_currency`, the e-invoice writers, every serializer), and
-      is worth doing once rather than per-surface. The cheap intermediate — resolving the org's
-      `invoice_defaults.currency` at flip time — is explicitly NOT the fix: it is the org-currency
-      proxy §196/§197 refused, applied to a row that then looks established.
-      **Trigger:** the first tenant running the supplier portal in more than one currency, or the
-      next change to `invoices.currency`.
-
-
 ### Surfaced by panelising the settings pages (2026-09-22, decisions §205)
 
 - [ ] **(c) `/organization` is still one file, and it is growing — 4,186
