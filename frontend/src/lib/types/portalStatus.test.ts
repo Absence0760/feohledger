@@ -14,6 +14,10 @@ import {
 	portalPaymentPhase,
 	portalInvoiceStatusLabelKey,
 	portalPaymentStatusLabelKey,
+	portalInvoiceStatusTone,
+	portalPaymentStatusTone,
+	PORTAL_INVOICE_PHASE_TONES,
+	PORTAL_PAYMENT_PHASE_TONES,
 	type PortalInvoicePhase,
 	type PortalPaymentPhase
 } from './portalStatus';
@@ -265,5 +269,36 @@ describe('phase ids are locale-independent', () => {
 		for (const phase of PORTAL_PAYMENT_PHASE_ORDER) {
 			expect(EN_ALL[PORTAL_PAYMENT_PHASE_LABEL_KEYS[phase]]).not.toBe(phase);
 		}
+	});
+});
+
+describe('portal status badge tones', () => {
+	it('tones every status through its phase, so one label is one colour', () => {
+		for (const status of INVOICE_STATUSES) {
+			expect(portalInvoiceStatusTone(status)).toBe(
+				PORTAL_INVOICE_PHASE_TONES[PORTAL_INVOICE_STATUS_PHASES[status]]
+			);
+		}
+		for (const status of PAYMENT_STATUSES) {
+			expect(portalPaymentStatusTone(status)).toBe(
+				PORTAL_PAYMENT_PHASE_TONES[PORTAL_PAYMENT_STATUS_PHASES[status]]
+			);
+		}
+	});
+
+	it('keeps the outcomes the old pills distinguished', () => {
+		// The hand-rolled pills tinted exactly these: paid / completed green,
+		// rejected / failed red. The primitive must not flatten them.
+		expect(portalInvoiceStatusTone('paid')).toBe('success');
+		expect(portalInvoiceStatusTone('rejected')).toBe('danger');
+		expect(portalPaymentStatusTone('completed')).toBe('success');
+		expect(portalPaymentStatusTone('failed')).toBe('danger');
+		// A reversal is inert, not a failure the supplier should chase.
+		expect(portalPaymentStatusTone('voided')).toBe('muted');
+	});
+
+	it('fails soft with the fallback phase tone for an unknown status', () => {
+		expect(portalInvoiceStatusTone('some_future_status')).toBe(PORTAL_INVOICE_PHASE_TONES.processing);
+		expect(portalPaymentStatusTone('some_future_status')).toBe(PORTAL_PAYMENT_PHASE_TONES.processing);
 	});
 });

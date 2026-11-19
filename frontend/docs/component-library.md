@@ -167,6 +167,12 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
   go through `#lib/api/supplierChat.ts` (over `api`); portal calls through
   `#lib/portalChat.ts` (over `portalApi`). Types in `#lib/types/supplierChat.ts`
   (full `Chat*` for AP, masked `PortalChat*` for the portal — no internal id).
+  **Every string is a `supplierChat.*` key in the MAIN catalogue** (not the
+  `portal.` slice: the AP modal mounts it too, and never loads that slice).
+  Message times go through the shared formatters — `timeAgo` inside a week,
+  `formatDate` after it — in a `<time datetime>` whose `title` is the exact
+  instant. The status pill's text is the localized label; the thread state is
+  on `data-status` (the raw `open` / `resolved`), which is what e2e reads.
   **The `members` prop — the @mention picker's candidates — comes from
   `GET /api/invoices/chat/mentionable-users`
   (`#lib/api/supplierChat.ts::getChatMentionableUsers`), NOT from
@@ -201,6 +207,11 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
   state. The phase→raw-status maps are `PORTAL_INVOICE_PHASES` /
   `PORTAL_PAYMENT_PHASES` in `#lib/types/portalStatus.ts`, both **derived from**
   the existing label maps so they can't drift.
+  The portal's status pills are `<Badge>`s whose tone comes from
+  `portalInvoiceStatusTone` / `portalPaymentStatusTone` (keyed on the PHASE,
+  beside those maps, so one label is one colour) and, for POs, the shared
+  `poStatusTone` in `#lib/types/purchaseOrder.ts` that `/purchase-orders` reads
+  too.
 
 **`assistant/` — Conversational AP Assistant (`/assistant`):**
 - `ChatMessage.svelte` — one chat bubble (own-role right-aligned). Renders the

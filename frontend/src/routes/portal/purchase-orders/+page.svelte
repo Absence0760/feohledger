@@ -15,7 +15,8 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { isAllowed } from '#lib/api/actionVerdicts.ts';
-	import { poStatusLabel } from '#lib/types/purchaseOrder.ts';
+	import { poStatusLabel, poStatusTone } from '#lib/types/purchaseOrder.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
 	import { PO_TOTAL_UNVERIFIABLE, poFlipRefusalText } from '#lib/types/portalPurchaseOrder.ts';
 
 	// `flip_verdict` is the server's answer to "would the flip mint an invoice
@@ -155,7 +156,9 @@
 								label={m('portal.po.totalUnverifiable')}
 							/>
 						</td>
-						<td><span class="status">{poStatusLabel(po.status, m)}</span></td>
+						<td><Badge tone={poStatusTone(po.status)} variant="status-badge {po.status}"
+								>{poStatusLabel(po.status, m)}</Badge
+							></td>
 						<td class="actions">
 							{#if isAllowed(po.flip_verdict)}
 								<button
@@ -281,13 +284,6 @@
 		color: var(--text-muted);
 		font-size: 0.82rem;
 		white-space: normal;
-	}
-	.status {
-		padding: 2px 8px;
-		border-radius: 3px;
-		font-size: 0.75rem;
-		background: var(--bg);
-		border: 1px solid var(--border);
 	}
 	.empty,
 	.loading {

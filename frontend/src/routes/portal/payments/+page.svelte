@@ -14,7 +14,12 @@
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { portalPaymentStatusLabelKey, PORTAL_PAYMENT_PHASES } from '#lib/types/portalStatus.ts';
+	import {
+		portalPaymentStatusLabelKey,
+		portalPaymentStatusTone,
+		PORTAL_PAYMENT_PHASES
+	} from '#lib/types/portalStatus.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
 	import PortalListFilters from '#lib/components/portal/PortalListFilters.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { paymentMethodLabelKey } from '#lib/types/payment.ts';
@@ -238,7 +243,9 @@
 						<td>{formatDate(p.completed_at, m('portal.common.dash'))}</td>
 						<td>{methodLabel(p.method)}</td>
 						<td class="right"><Money amount={p.amount} currency={p.currency} mono /></td>
-						<td><span class="status s-{p.status}">{m(portalPaymentStatusLabelKey(p.status))}</span></td>
+						<td><Badge tone={portalPaymentStatusTone(p.status)} variant="status-badge {p.status}"
+								>{m(portalPaymentStatusLabelKey(p.status))}</Badge
+							></td>
 						<td>{p.reference || m('portal.common.dash')}</td>
 						<td class="actions">
 							{#if p.status === 'completed'}
@@ -308,21 +315,6 @@
 	.remit-btn:disabled {
 		opacity: 0.6;
 		cursor: default;
-	}
-	.status {
-		padding: 2px 8px;
-		border-radius: 3px;
-		font-size: 0.75rem;
-		background: var(--bg);
-		border: 1px solid var(--border);
-	}
-	.s-completed {
-		background: color-mix(in srgb, var(--success) 15%, transparent);
-		border-color: color-mix(in srgb, var(--success) 40%, transparent);
-	}
-	.s-failed {
-		background: color-mix(in srgb, var(--danger) 12%, transparent);
-		border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 	}
 	.empty,
 	.loading {

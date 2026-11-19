@@ -11,7 +11,6 @@
 	import LineDescription from '#lib/components/ui/LineDescription.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import UnverifiedMoney from '#lib/components/ui/UnverifiedMoney.svelte';
 	import { poUnverifiableReasonKey } from '#lib/types/poUnverifiable.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
@@ -21,7 +20,7 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { invoiceStatusLabelKey } from '#lib/types/invoice.ts';
-	import { poStatusLabel } from '#lib/types/purchaseOrder.ts';
+	import { poStatusLabel, poStatusTone } from '#lib/types/purchaseOrder.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { untrack } from 'svelte';
 
@@ -104,25 +103,6 @@
 	let errored = $state(false);
 	let search = $state('');
 	let statusFilter = $state<'all' | 'open' | 'unissued' | 'closed' | 'cancelled'>('all');
-	/**
-	 * Badge tone per PO status.
-	 *
-	 * `cancelled` keeps the tinted grey (`muted`) it had, distinct from the
-	 * flat `neutral` an unrecognised status falls back to — the old CSS drew
-	 * exactly that line (a `rgba(150,150,150,.15)` tint for cancelled, a bare
-	 * `--bg` fill for everything else), and it is worth keeping: a cancelled PO
-	 * is a decision somebody made, an unknown status is one nobody has told us
-	 * about. `PurchaseOrder.status` is a free-form column, hence the fallback.
-	 */
-	const STATUS_TONES: Record<string, BadgeTone> = {
-		open: 'accent',
-		// Not approved or issued in the ERP yet: it syncs, but nothing matches
-		// against it until the ERP issues it (decisions §394).
-		unissued: 'warning',
-		closed: 'success',
-		cancelled: 'muted'
-	};
-
 	// The badge text is the shared PO status label (`poStatusLabel`), not the
 	// raw column value — `open` is a database token, "Open" is what a clerk
 	// reads, and `partially_received` / `received` / `voided` read as words
@@ -429,7 +409,7 @@
 							mono
 						/>
 					</td>
-					<td><Badge tone={STATUS_TONES[po.status] ?? 'neutral'} variant={po.status}>{statusLabel(po.status)}</Badge></td>
+					<td><Badge tone={poStatusTone(po.status)} variant={po.status}>{statusLabel(po.status)}</Badge></td>
 					<td class="muted">{po.line_items.length}</td>
 					<td class="muted">{formatDate(po.created_at)}</td>
 				</tr>
@@ -465,7 +445,7 @@
 				<HelpTip term="purchase-order" />
 				{#if detail}
 					<span class="po-number-badge">{detail.po_number}</span>
-					<Badge tone={STATUS_TONES[detail.status] ?? 'neutral'} variant={detail.status}>{statusLabel(detail.status)}</Badge>
+					<Badge tone={poStatusTone(detail.status)} variant={detail.status}>{statusLabel(detail.status)}</Badge>
 				{/if}
 			</div>
 			<button class="close-btn" onclick={() => (detailId = null)} aria-label={m('purchaseOrders.modal.close')}>&times;</button>

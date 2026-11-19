@@ -176,7 +176,15 @@ const CONVERTED = [
 	'routes/organization/+page.svelte',
 	'routes/purchase-orders/+page.svelte',
 	'routes/vendors/change-requests/+page.svelte',
-	'routes/workflows/+page.svelte'
+	'routes/workflows/+page.svelte',
+	// The supplier portal's status pills (round 25). They were never counted
+	// here: `.status` / `.s-paid` are not badge-shaped names and set a tinted
+	// border instead of a colour, so the scan could not see them. Their tones
+	// now live beside the phase label maps (`types/portalStatus.ts`) and the
+	// shared PO map (`types/purchaseOrder.ts`).
+	'routes/portal/invoices/+page.svelte',
+	'routes/portal/payments/+page.svelte',
+	'routes/portal/purchase-orders/+page.svelte'
 ];
 
 const counts = countByFile(findHandRolledBadgeRules(sources));
