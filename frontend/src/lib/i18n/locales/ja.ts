@@ -4206,6 +4206,7 @@ export const messages = {
 	'discounts.modal.noTiers': 'この提示にはスライド式の段階がありません。承諾するとそのまま確定します。',
 	'discounts.modal.save': '節約',
 	'discounts.modal.tierOption': '{days} 日以内に支払うと {percent}% 割引',
+	'discounts.modal.tierOptionFormatted': '{days} 日以内に支払うと {percent} 割引',
 	'discounts.modal.title': '割引を承諾',
 	'discounts.opt.availableSavings': '利用可能な節約額：',
 	'discounts.opt.budgetAria': '現金予算',
@@ -4229,6 +4230,7 @@ export const messages = {
 	'discounts.opt.unrankableNote': '{n, plural, other {# 件の割引}}に正味支払期日がないため、年率換算する期間が定まりません。割引額は実数で表示していますが、年率は 0 % と報告せずに保留しています。上のどの合計にも含まれず、選択もされていません。請求書の支払期日を登録するとランキングに入ります。',
 	'discounts.opt.aprUnknown': '年率不明 — 支払期日なし',
 	'discounts.opt.apr': '年率 {pct}',
+	'discounts.opt.tierTerms': '{percent} / {days}日',
 	'discounts.opt.notRanked': '対象外',
 
 	'discounts.redirecting': 'リダイレクト中…',

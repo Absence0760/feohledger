@@ -4275,6 +4275,7 @@ export const messages = {
 	'discounts.modal.noTiers': 'Dieses Angebot hat keine gestaffelten Stufen; die Annahme bestätigt es unverändert.',
 	'discounts.modal.save': 'spart',
 	'discounts.modal.tierOption': '{percent}% Rabatt bei Zahlung innerhalb von {days} Tagen',
+	'discounts.modal.tierOptionFormatted': '{percent} Rabatt bei Zahlung innerhalb von {days} Tagen',
 	'discounts.modal.title': 'Skonto annehmen',
 	'discounts.opt.availableSavings': 'Verfügbare Einsparungen:',
 	'discounts.opt.budgetAria': 'Liquiditätsbudget',
@@ -4298,6 +4299,7 @@ export const messages = {
 	'discounts.opt.unrankableNote': '{n, plural, one {# Angebot hat} other {# Angebote haben}} kein Nettofälligkeitsdatum, also gibt es keinen Zeitraum, über den sich die Rendite hochrechnen lässt. Die Ersparnis ist real und wird angezeigt; die Rendite wird zurückgehalten statt als 0 % gemeldet. Sie fließen in keine Summe oben ein und wurden nie ausgewählt — hinterlegen Sie das Rechnungsfälligkeitsdatum, um sie zu bewerten.',
 	'discounts.opt.aprUnknown': 'Rendite unbekannt — kein Fälligkeitsdatum',
 	'discounts.opt.apr': '{pct} effektiver Jahreszins',
+	'discounts.opt.tierTerms': '{percent} / {days} T',
 	'discounts.opt.notRanked': 'Nicht bewertet',
 
 	'discounts.redirecting': 'Weiterleitung…',

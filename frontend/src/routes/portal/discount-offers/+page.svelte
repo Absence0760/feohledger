@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
-	import { focusTrap } from '#lib/actions/focusTrap.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
@@ -10,6 +10,7 @@
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { DISCOUNT_STATUS_TONES, type DiscountStatus } from '#lib/types/discounts.ts';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { formatPercent } from '#lib/utils/percent.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -79,17 +80,6 @@
 	// The offer whose tier the vendor is choosing in the accept dialog.
 	let accepting = $state<PortalDiscountOffer | null>(null);
 	let chosenTierDays = $state<number | null>(null);
-
-	// Freeze background page scroll while the accept dialog is open (restored on
-	// close), so a wheel event over the backdrop can't scroll the offers behind it.
-	$effect(() => {
-		if (!accepting) return;
-		const prev = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			document.body.style.overflow = prev;
-		};
-	});
 
 	const hasMore = $derived(items.length < total);
 
@@ -205,8 +195,11 @@
 		}
 	}
 
+	// Tier percents arrive as 0–100 numbers; the shared formatter puts the
+	// sign where the vendor's locale does ("2 %" in French), keeping up to two
+	// places so a 1.25 % tier is not rounded into its neighbour.
 	function fmtPct(n: number): string {
-		return `${n}%`;
+		return formatPercent(n, { maximumFractionDigits: 2 });
 	}
 
 	// The chosen tier object for the accept dialog (for the live savings preview).
@@ -365,61 +358,54 @@
 	{/if}
 </div>
 
-{#if accepting}
-	<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-	<div
-		class="backdrop"
-		role="presentation"
-		onclick={(e) => {
-			if (e.target === e.currentTarget) closeAccept();
-		}}
-	>
-		<!-- focusTrap handles Esc + focus trap/restore. -->
-		<div
-			use:focusTrap={{ onEscape: closeAccept }}
-			class="dialog"
-			role="dialog"
-			tabindex="-1"
-			aria-modal="true"
-			aria-label={m('portal.discounts.dialog.title')}
-		>
-			<h2>{m('portal.discounts.dialog.title')}</h2>
-			<p class="dlg-sub">{m('portal.discounts.dialog.subtitle')}</p>
-			{#if acceptError}<div class="error" role="alert">{acceptError}</div>{/if}
+<!-- The shared Modal owns the backdrop, Esc, focus trap / restore and the
+     background scroll lock; the body (tier picker, savings preview, footer)
+     is this page's own. -->
+<Modal
+	open={accepting !== null}
+	ariaLabel={m('portal.discounts.dialog.title')}
+	title={m('portal.discounts.dialog.title')}
+	width="sm"
+	onclose={closeAccept}
+>
+	{#if accepting}
+		<p class="modal-hint">{m('portal.discounts.dialog.subtitle')}</p>
+		<!-- A failed accept is reported here, not in the page banner hidden
+		     behind the backdrop. -->
+		{#if acceptError}<div class="error" role="alert">{acceptError}</div>{/if}
 
-			{#if accepting.tiers.length > 1}
-				<label class="field">
-					<span>{m('portal.discounts.dialog.chooseTier')}</span>
-					<select bind:value={chosenTierDays}>
-						{#each accepting.tiers as t (t.days)}
-							<option value={t.days}>{m('portal.discounts.dialog.tierOption', { days: t.days, percent: fmtPct(t.percent) })}</option>
-						{/each}
-					</select>
-				</label>
-			{/if}
+		{#if accepting.tiers.length > 1}
+			<label class="field">
+				<span>{m('portal.discounts.dialog.chooseTier')}</span>
+				<select bind:value={chosenTierDays}>
+					{#each accepting.tiers as t (t.days)}
+						<option value={t.days}>{m('portal.discounts.dialog.tierOption', { days: t.days, percent: fmtPct(t.percent) })}</option>
+					{/each}
+				</select>
+			</label>
+		{/if}
 
-			{#if chosenTier}
-				<div class="preview">
-					<span>{m('portal.discounts.dialog.youSave')}</span>
-					<strong><Money amount={chosenTier.savings} currency={accepting.currency} /></strong>
-					<span class="muted">{m('portal.discounts.dialog.savingsDetail', { percent: fmtPct(chosenTier.percent), days: chosenTier.days })}</span>
-				</div>
-			{/if}
-
-			<div class="dlg-footer">
-				<button type="button" class="btn-cancel" onclick={closeAccept}>{m('portal.discounts.dialog.cancel')}</button>
-				<button
-					type="button"
-					class="btn-primary"
-					disabled={busy === accepting.id || chosenTierDays === null}
-					onclick={confirmAccept}
-				>
-					{busy === accepting.id ? m('portal.discounts.dialog.accepting') : m('portal.discounts.dialog.accept')}
-				</button>
+		{#if chosenTier}
+			<div class="preview">
+				<span>{m('portal.discounts.dialog.youSave')}</span>
+				<strong><Money amount={chosenTier.savings} currency={accepting.currency} /></strong>
+				<span class="muted">{m('portal.discounts.dialog.savingsDetail', { percent: fmtPct(chosenTier.percent), days: chosenTier.days })}</span>
 			</div>
+		{/if}
+
+		<div class="modal-footer">
+			<button type="button" class="btn-cancel" onclick={closeAccept}>{m('portal.discounts.dialog.cancel')}</button>
+			<button
+				type="button"
+				class="btn-primary"
+				disabled={busy === accepting.id || chosenTierDays === null}
+				onclick={confirmAccept}
+			>
+				{busy === accepting.id ? m('portal.discounts.dialog.accepting') : m('portal.discounts.dialog.accept')}
+			</button>
 		</div>
-	</div>
-{/if}
+	{/if}
+</Modal>
 
 <style>
 	.page {
@@ -545,33 +531,8 @@
 		margin-bottom: 12px;
 	}
 
-	/* Accept dialog — the portal has no AP shared Modal, so it carries its own
-	   small backdrop+dialog (matching the portal's self-contained styling). */
-	.backdrop {
-		position: fixed;
-		inset: 0;
-		background: var(--overlay);
-		display: grid;
-		place-items: center;
-		z-index: 50;
-	}
-	.dialog {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		padding: 20px 22px;
-		width: 440px;
-		max-width: calc(100vw - 32px);
-	}
-	.dialog h2 {
-		margin: 0 0 6px;
-		font-size: 1.05rem;
-	}
-	.dlg-sub {
-		margin: 0 0 14px;
-		color: var(--text-muted);
-		font-size: 0.83rem;
-	}
+	/* Accept dialog body. The shell (.backdrop / .modal / h2 / .modal-hint /
+	   .modal-footer) and the .btn-primary / .btn-cancel buttons are app.css's. */
 	.field {
 		display: flex;
 		flex-direction: column;
@@ -598,32 +559,5 @@
 	.preview .muted {
 		color: var(--text-muted);
 		font-size: 0.8rem;
-	}
-	.dlg-footer {
-		display: flex;
-		justify-content: flex-end;
-		gap: 8px;
-	}
-	.btn-cancel {
-		padding: 7px 14px;
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		background: transparent;
-		color: var(--text);
-		cursor: pointer;
-		font-size: 0.85rem;
-	}
-	.btn-primary {
-		padding: 7px 14px;
-		border: 1px solid var(--accent-strong);
-		border-radius: 4px;
-		background: var(--accent-strong);
-		color: #fff;
-		cursor: pointer;
-		font-size: 0.85rem;
-	}
-	.btn-primary:disabled {
-		opacity: 0.6;
-		cursor: default;
 	}
 </style>

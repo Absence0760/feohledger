@@ -4267,6 +4267,7 @@ export const messages = {
 	'discounts.modal.noTiers': 'Esta oferta no tiene niveles escalonados; al aceptarla se confirma tal cual.',
 	'discounts.modal.save': 'ahorra',
 	'discounts.modal.tierOption': '{percent}% de descuento si se paga en {days} días',
+	'discounts.modal.tierOptionFormatted': '{percent} de descuento si se paga en {days} días',
 	'discounts.modal.title': 'Aceptar descuento',
 	'discounts.opt.availableSavings': 'Ahorros disponibles:',
 	'discounts.opt.budgetAria': 'Presupuesto de efectivo',
@@ -4290,6 +4291,7 @@ export const messages = {
 	'discounts.opt.unrankableNote': '{n, plural, one {# oferta no tiene} other {# ofertas no tienen}} fecha de vencimiento neta, por lo que no hay horizonte sobre el que anualizar el rendimiento. El ahorro es real y se muestra; la TAE se omite en lugar de informarse como 0 %. No entran en ningún total de arriba y nunca se seleccionaron: registre la fecha de vencimiento de la factura para clasificarlas.',
 	'discounts.opt.aprUnknown': 'TAE desconocida: sin fecha de vencimiento',
 	'discounts.opt.apr': '{pct} TAE',
+	'discounts.opt.tierTerms': '{percent} / {days} d',
 	'discounts.opt.notRanked': 'Sin clasificar',
 
 	'discounts.redirecting': 'Redirigiendo…',

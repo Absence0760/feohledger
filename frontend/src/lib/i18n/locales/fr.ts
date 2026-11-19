@@ -4276,6 +4276,7 @@ export const messages = {
 	'discounts.modal.noTiers': 'Cette offre n\'a pas de paliers progressifs ; l\'accepter la confirme telle quelle.',
 	'discounts.modal.save': 'économise',
 	'discounts.modal.tierOption': '{percent}% de remise si payé sous {days} jours',
+	'discounts.modal.tierOptionFormatted': '{percent} de remise si payé sous {days} jours',
 	'discounts.modal.title': 'Accepter l\'escompte',
 	'discounts.opt.availableSavings': 'Économies disponibles :',
 	'discounts.opt.budgetAria': 'Budget de trésorerie',
@@ -4299,6 +4300,7 @@ export const messages = {
 	'discounts.opt.unrankableNote': '{n, plural, one {# offre n’a pas} other {# offres n’ont pas}} de date d’échéance nette : il n’y a donc pas d’horizon sur lequel annualiser le rendement. L’économie est réelle et affichée ; le TAEG est retenu plutôt que rapporté à 0 %. Elles n’entrent dans aucun total ci-dessus et n’ont jamais été sélectionnées — renseignez la date d’échéance de la facture pour les classer.',
 	'discounts.opt.aprUnknown': 'TAEG inconnu — pas de date d’échéance',
 	'discounts.opt.apr': '{pct} TAEG',
+	'discounts.opt.tierTerms': '{percent} / {days} j',
 	'discounts.opt.notRanked': 'Non classée',
 
 	'discounts.redirecting': 'Redirection…',

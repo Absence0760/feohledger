@@ -4271,6 +4271,7 @@ export const messages = {
 	'discounts.modal.noTiers': 'Esta oferta não tem níveis progressivos; aceitá-la a confirma como está.',
 	'discounts.modal.save': 'economiza',
 	'discounts.modal.tierOption': '{percent}% de desconto se pago em {days} dias',
+	'discounts.modal.tierOptionFormatted': '{percent} de desconto se pago em {days} dias',
 	'discounts.modal.title': 'Aceitar desconto',
 	'discounts.opt.availableSavings': 'Economia disponível:',
 	'discounts.opt.budgetAria': 'Orçamento de caixa',
@@ -4294,6 +4295,7 @@ export const messages = {
 	'discounts.opt.unrankableNote': '{n, plural, one {# oferta não tem} other {# ofertas não têm}} data de vencimento líquida, portanto não há horizonte para anualizar o retorno. A economia é real e aparece abaixo; a TIR fica retida em vez de ser informada como 0 %. Elas não entram em nenhum total acima e nunca foram selecionadas — registre a data de vencimento da fatura para classificá-las.',
 	'discounts.opt.aprUnknown': 'TIR desconhecida — sem data de vencimento',
 	'discounts.opt.apr': '{pct} ao ano',
+	'discounts.opt.tierTerms': '{percent} / {days}d',
 	'discounts.opt.notRanked': 'Sem classificação',
 
 	'discounts.redirecting': 'Redirecionando…',
