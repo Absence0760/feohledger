@@ -65,6 +65,13 @@ http.Response _json(Object body, [int status = 200]) => http.Response(
       headers: {'content-type': 'application/json'},
     );
 
+/// Answers the run POST with [post] and every refetch GET with an empty page.
+MockClient _runsClient(Map<String, dynamic> post) => MockClient(
+      (req) async => req.method == 'POST'
+          ? _json(post)
+          : _json({'items': [], 'total': 0, 'page': 1}),
+    );
+
 void main() {
   final store = PaymentQueueStore.instance;
 
@@ -381,6 +388,51 @@ void main() {
       expect(items, hasLength(1));
       expect(items.single['invoice_id'], '1');
       expect(items.single['method'], 'virtual_card');
+    });
+
+    test('createRunFromSelection states the run total in its currency, and '
+        'the CFO gate in the same sentence', () async {
+      ApiClient().debugConfigure(
+        client: _runsClient({
+          'id': 'run1',
+          'status': 'draft',
+          'payment_count': 2,
+          'total_amount': '1500.00',
+          'currency': 'USD',
+          'requires_cfo_approval': true,
+          'message': 'server English',
+        }),
+      );
+      store.toggleSelection(_item('1'));
+
+      final message =
+          await store.createRunFromSelection();
+
+      expect(
+        message,
+        r'Payment run created with 2 payments totalling $1,500.00. '
+        'CFO approval is required before it can be executed.',
+      );
+    });
+
+    test('createRunFromSelection states a bare total when the run has no '
+        'provable currency', () async {
+      ApiClient().debugConfigure(
+        client: _runsClient({
+          'id': 'run1',
+          'status': 'draft',
+          'payment_count': 1,
+          'total_amount': '250.00',
+          'currency': null,
+          'requires_cfo_approval': false,
+        }),
+      );
+      store.toggleSelection(_item('1'));
+
+      final message =
+          await store.createRunFromSelection();
+
+      expect(message, 'Payment run created with 1 payment totalling 250.00.');
     });
 
     test('returns null and keeps the selection when nothing is selected',
