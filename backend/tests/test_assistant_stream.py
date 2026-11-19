@@ -23,7 +23,7 @@ from app.services.assistant.sse import (
     iter_answer_chunks,
     sse_done,
     sse_error,
-    sse_text_deltas,
+    sse_text_delta,
     sse_tool_event,
 )
 
@@ -61,11 +61,11 @@ def test_chunks_reassemble_to_answer_exactly():
 
 def test_empty_answer_yields_no_delta_frames():
     assert iter_answer_chunks("") == []
-    assert sse_text_deltas("") == []
 
 
 def test_delta_frames_are_single_data_lines_with_valid_json():
-    frames = sse_text_deltas("hello world")
+    frames = [sse_text_delta(chunk) for chunk in iter_answer_chunks("hello world")]
+    assert frames
     for frame in frames:
         assert frame.startswith("event: delta\n")
         assert frame.endswith("\n\n")

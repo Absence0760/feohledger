@@ -200,11 +200,6 @@ def rule_codes() -> tuple[RuleCode, ...]:
     return tuple(sorted(catalog.values(), key=lambda rc: rc.code))
 
 
-def client_visible_rule_codes() -> tuple[RuleCode, ...]:
-    """The codes a client can identify from the 422 body — see :class:`RuleCode`."""
-    return tuple(rc for rc in rule_codes() if rc.client_visible)
-
-
 def opaque_rule_codes() -> tuple[RuleCode, ...]:
     """The codes the 422 body does not fold into ``msg``."""
     return tuple(rc for rc in rule_codes() if not rc.client_visible)

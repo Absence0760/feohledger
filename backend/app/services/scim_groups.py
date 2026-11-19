@@ -101,15 +101,6 @@ def managed_role_names(role_map: dict) -> set[str]:
     return set(role_map.values())
 
 
-def affected_member_ids(*member_lists: list[str] | None) -> set[str]:
-    """Union of member ids across snapshots — the users whose roles need
-    re-reconciling after a group create/replace/patch/delete."""
-    out: set[str] = set()
-    for members in member_lists:
-        out.update(members or [])
-    return out
-
-
 def _member_ids_from_value(value) -> list[str]:
     """Pull member ids out of a SCIM PATCH/PUT `value` (list of {value: id})."""
     out: list[str] = []

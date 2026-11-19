@@ -31,14 +31,6 @@ class OfferSource(StrEnum):
     financing = "financing"
 
 
-class OfferStatus(StrEnum):
-    offered = "offered"
-    accepted = "accepted"
-    captured = "captured"
-    declined = "declined"
-    expired = "expired"
-
-
 class DiscountTier(BaseModel):
     """One rung of a sliding-scale offer: pay within `days` for `percent` off."""
 
@@ -178,13 +170,6 @@ class DiscountOfferResponse(BaseModel):
             vendor_name=vendor_name,
             invoice_number=invoice_number,
         )
-
-
-class DiscountOfferListResponse(BaseModel):
-    items: list[DiscountOfferResponse]
-    total: int
-    page: int
-    page_size: int
 
 
 class DiscountROIResponse(BaseModel):

@@ -100,11 +100,6 @@ class AccessReviewRow:
     days_since: int | None  # None when never acted
 
 
-def _is_read_action(action: str) -> bool:
-    a = action.lower()
-    return any(a.endswith(suffix) for suffix in _READ_ACTION_SUFFIXES)
-
-
 async def compute_access_review(
     control_db: AsyncSession,
     tenant_db: AsyncSession,
