@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show IOException;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import 'package:feohledger_mobile/config.dart';
+import 'package:feohledger_mobile/l10n/ambient_localizations.dart';
 import 'package:feohledger_mobile/services/session.dart';
 
 class ApiException implements Exception {
@@ -23,14 +26,38 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
-/// User-facing text for anything thrown out of [ApiClient].
+/// User-facing text for anything thrown out of [ApiClient] — the one way a
+/// store turns a caught error into its `error` string.
 ///
-/// [ApiException.toString] prefixes the status code (`ApiException(403): ...`),
-/// which belongs in a log, not in a snackbar. Use this wherever an error is
-/// rendered to a person; [ApiException.message] is already the server's
-/// human-readable `detail` (see [ApiClient.errorMessage]).
-String describeApiError(Object error) =>
-    error is ApiException ? error.message : error.toString();
+/// [ApiException.toString] prefixes the status code (`ApiException(403): ...`)
+/// and any other exception's `toString` names its Dart type
+/// (`ClientException: ...`); both belong in a log, not in a snackbar. So:
+///
+/// * a refusal that carried the server's own `detail` → that sentence
+///   ([ApiException.message], see [ApiClient.errorMessage]); a screen that can
+///   state a coded refusal in the reader's language reads
+///   [ApiException.detail] instead;
+/// * a refusal with no `detail` (a bare 500, an HTML error page) → a localized
+///   "the server couldn't complete the request (HTTP n)";
+/// * the request never got an answer (offline, DNS, timeout, TLS) → a
+///   localized "couldn't reach the server";
+/// * anything else (an unreadable reply) → a localized generic failure.
+///
+/// Stores have no `BuildContext`, so the localized sentences come from
+/// [ambientLocalizations]. `test/stores/store_error_text_guard_test.dart` bans
+/// `e.toString()` / `$e` into a store's error field.
+String describeApiError(Object error) {
+  if (error is ApiException) {
+    if (error.detail != null) return error.message;
+    return ambientLocalizations().errorRequestFailed(error.statusCode);
+  }
+  if (error is IOException ||
+      error is http.ClientException ||
+      error is TimeoutException) {
+    return ambientLocalizations().errorNetworkUnreachable;
+  }
+  return ambientLocalizations().errorUnexpected;
+}
 
 class ApiClient {
   static final ApiClient _instance = ApiClient._();

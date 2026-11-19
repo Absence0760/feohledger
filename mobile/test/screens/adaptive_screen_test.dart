@@ -363,10 +363,9 @@ void main() {
     await _pumpUntil(tester, find.text('Could not load the suggestions.'));
 
     // The shared first-load state, carrying the localized sentence and never
-    // the exception the store holds
-    // (`ApiException(500): Request failed (500)`).
+    // the description the store holds (a bare 500 has no server sentence).
     expect(find.byType(LoadErrorState), findsOneWidget);
-    expect(AdaptiveStore.instance.suggestionsError, contains('ApiException'));
+    expect(AdaptiveStore.instance.suggestionsError, contains('HTTP 500'));
     expect(find.textContaining('boom'), findsNothing);
     expect(find.textContaining('ApiException'), findsNothing);
     expect(find.textContaining('Request failed'), findsNothing);

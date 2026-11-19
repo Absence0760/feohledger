@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/goods_receipt.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
@@ -71,7 +72,7 @@ class InspectionStore extends ChangeNotifier with SequencedFetch {
     } catch (e) {
       if (!isCurrentRequest(token)) return;
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }
@@ -82,7 +83,7 @@ class InspectionStore extends ChangeNotifier with SequencedFetch {
     try {
       return await InspectionApi.getById(id);
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -102,7 +103,7 @@ class InspectionStore extends ChangeNotifier with SequencedFetch {
       await fetch();
       return created;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -120,7 +121,7 @@ class InspectionStore extends ChangeNotifier with SequencedFetch {
     try {
       return await GoodsReceiptApi.list(pageSize: 50);
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }

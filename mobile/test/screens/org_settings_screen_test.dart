@@ -87,10 +87,9 @@ void main() {
     await _pumpUntil(tester, find.text('Could not load settings'));
 
     // The shared first-load state, carrying the localized sentence and never
-    // the exception the store holds
-    // (`ApiException(500): Request failed (500)`).
+    // the description the store holds (a bare 500 has no server sentence).
     expect(find.byType(LoadErrorState), findsOneWidget);
-    expect(OrgSettingsStore.instance.error, contains('ApiException'));
+    expect(OrgSettingsStore.instance.error, contains('HTTP 500'));
     expect(find.textContaining('boom'), findsNothing);
     expect(find.textContaining('ApiException'), findsNothing);
     expect(find.textContaining('Request failed'), findsNothing);

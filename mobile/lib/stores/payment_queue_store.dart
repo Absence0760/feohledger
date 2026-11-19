@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
+import 'package:feohledger_mobile/l10n/ambient_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
@@ -257,8 +258,8 @@ class PaymentQueueStore extends ChangeNotifier {
   }
 
   /// Create a draft run from the current selection. On success, clears the
-  /// selection and refreshes the queue + runs, and returns the server's
-  /// human-readable message (which flags CFO approval when required). Returns
+  /// selection and refreshes the queue + runs, and returns the run's
+  /// localized summary (which flags CFO approval when required). Returns
   /// null on failure with [error] set.
   Future<String?> createRunFromSelection() async {
     if (_selection.isEmpty) return null;
@@ -280,7 +281,7 @@ class PaymentQueueStore extends ChangeNotifier {
       _selection.clear();
       await fetch();
       await fetchRuns();
-      return result['message'] as String? ?? 'Payment run created';
+      return _runCreatedMessage(result);
     } catch (e) {
       _error = describeApiError(e);
       notifyListeners();
@@ -289,7 +290,7 @@ class PaymentQueueStore extends ChangeNotifier {
   }
 
   /// CFO sign-off on a draft run that trips the org's approval threshold.
-  /// Returns the server message, or null on failure with [error] set.
+  /// Returns a localized confirmation, or null on failure with [error] set.
   ///
   /// This authorizes execution; it moves no money. Refusals are routine — 409
   /// (not a draft / doesn't need sign-off / already signed off) and 403 (the
@@ -300,7 +301,7 @@ class PaymentQueueStore extends ChangeNotifier {
     try {
       final result = await PaymentApi.approveRun(runId);
       await fetchRuns();
-      return result['message'] as String? ?? 'Run approved by CFO';
+      return ambientLocalizations().payRunApproved;
     } catch (e) {
       _error = describeApiError(e);
       _runActionErrorDetail = e is ApiException ? e.detail : null;
@@ -309,7 +310,7 @@ class PaymentQueueStore extends ChangeNotifier {
     }
   }
 
-  /// Execute a draft run. Returns the server message, or null on failure.
+  /// Execute a draft run. Returns a localized summary, or null on failure.
   ///
   /// A refusal here is routine, not exceptional — the CFO-approval gate and the
   /// segregation-of-duties check both answer 403 — so [error] carries the
@@ -321,7 +322,7 @@ class PaymentQueueStore extends ChangeNotifier {
       final result = await PaymentApi.executeRun(runId);
       await fetch();
       await fetchRuns();
-      return result['message'] as String? ?? 'Payment run executed';
+      return _runExecutedMessage(result);
     } catch (e) {
       _error = describeApiError(e);
       _runActionErrorDetail = e is ApiException ? e.detail : null;
@@ -336,7 +337,7 @@ class PaymentQueueStore extends ChangeNotifier {
       final result = await PaymentApi.cancelRun(runId);
       await fetch();
       await fetchRuns();
-      return result['message'] as String? ?? 'Payment run cancelled';
+      return _runCancelledMessage(result);
     } catch (e) {
       _error = describeApiError(e);
       notifyListeners();
@@ -454,4 +455,39 @@ class PaymentQueueStore extends ChangeNotifier {
         'payable_amount': i.payableAmountDisplay,
         'erp_reported_payment': i.erpReportedPayment?.toJson(),
       };
+}
+
+// The run actions' success toasts, in the reader's language. The server's
+// `message` is an English sentence, so these are built from the structured
+// fields beside it (`backend/app/api/payments.py`); a reply missing a count
+// gets the plain sentence rather than a guessed figure.
+
+String _runCreatedMessage(Map<String, dynamic> result) {
+  final l = ambientLocalizations();
+  final count = result['payment_count'];
+  final created =
+      count is int ? l.payRunCreated(count) : l.payRunCreatedPlain;
+  return result['requires_cfo_approval'] == true
+      ? '$created ${l.payRunCreatedNeedsCfo}'
+      : created;
+}
+
+String _runExecutedMessage(Map<String, dynamic> result) {
+  final l = ambientLocalizations();
+  final completed = result['payments_completed'];
+  final inFlight = result['payments_in_flight'];
+  final failed = result['payments_failed'];
+  final executed = completed is int && inFlight is int && failed is int
+      ? l.payRunExecuted(completed, inFlight, failed)
+      : l.payRunExecutedPlain;
+  final cards = result['cards_issued'];
+  return cards is int && cards > 0
+      ? '$executed ${l.payRunExecutedCards(cards)}'
+      : executed;
+}
+
+String _runCancelledMessage(Map<String, dynamic> result) {
+  final l = ambientLocalizations();
+  final released = result['released_invoices'];
+  return released is int ? l.payRunCancelled(released) : l.payRunCancelledPlain;
 }
