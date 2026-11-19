@@ -39,12 +39,14 @@ export const CATALOGUE_LOADERS: Record<Locale, () => Promise<Messages>> = {
 //              `marketing.pricing.*` keys stay in the main catalogue, which
 //              `m()` reads first: `pricing.test.ts` holds them to the main
 //              catalogues by import.
-//   refusal  — the coded-refusal sentences (`api/codedRefusals.ts`). A refusal
-//              can follow any API call on any page, so no route can gate it:
-//              it is PRELOADED (below) — `initLocale` asks for it with the
-//              main catalogue at startup — and the registry, the only reader,
-//              treats a key that does not resolve yet as "cannot state this"
-//              and shows the server's English sentence instead. A `refusal.*`
+//   refusal  — the coded-refusal sentences (`api/codedRefusals.ts`) and the
+//              refused-ERP-push ones (`erpRefusal.*`, `api/erpRefusals.ts`). A
+//              refusal can follow any API call on any page, so no route can
+//              gate it: it is PRELOADED (below) — `initLocale` asks for it with
+//              the main catalogue at startup — and its two readers treat a key
+//              that does not resolve yet as "cannot state this"
+//              (`api/resolvedOnly.ts`), so the caller shows the server's
+//              sentence (or the stored `last_error`) instead. A `refusal.*`
 //              key a page renders through `m()` directly stays in the main
 //              catalogue (`refusal.expenseReportForeignLine`).
 //   audit    — the /audit console's action labels (`audit.action.*`, one per
@@ -126,7 +128,7 @@ export const SLICE_PREFIXES: Record<SliceName, readonly string[]> = {
 	settings: ['org.', 'orgSso.', 'admin.', 'billing.', 'sweepHealth.'],
 	portal: ['portal.'],
 	marketing: ['marketing.'],
-	refusal: ['refusal.'],
+	refusal: ['refusal.', 'erpRefusal.'],
 	audit: ['audit.action.', 'audit.actionPattern.'],
 };
 
