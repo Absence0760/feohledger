@@ -144,6 +144,7 @@ export const messages = {
 	'portal.po.col.status': 'Status',
 	'portal.po.createInvoice': 'Rechnung erstellen',
 	'portal.po.refusal.notInvoiceable': 'Nicht mehr fakturierbar',
+	'portal.po.refusal.alreadyInvoiced': 'Bereits in Rechnung gestellt',
 	'portal.po.totalUnverifiable': 'Wird bestätigt',
 	'portal.po.totalUnverifiableNote':
 		'Summen mit „Wird bestätigt“ prüft Ihr Kunde gerade erneut, daher kann aus diesen Bestellungen hier keine Rechnung erstellt werden. Reichen Sie dafür stattdessen Ihre eigene Rechnung ein.',

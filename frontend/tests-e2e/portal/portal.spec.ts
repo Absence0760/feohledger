@@ -478,6 +478,54 @@ test.describe("/portal — self-service (PO flip, remittance, company)", () => {
     }
   });
 
+  test("an open PO the vendor already invoiced offers no Create invoice", async ({
+    page,
+  }) => {
+    // The flip refuses an open PO a live invoice of this vendor already cites
+    // (`po_already_invoiced`, decisions §NEW-N1), and the row says so from its
+    // `flip_verdict`. Real backend, real rows: an open PO and an ordinary
+    // invoice citing it, seeded for the portal vendor.
+    await portalSignIn(page);
+    await expect(page).toHaveURL(/\/portal\/invoices/, { timeout: 15_000 });
+
+    const vendorId = tenantPsql(
+      `SELECT vendor_id FROM vendor_users WHERE email='${PORTAL_EMAIL}'`,
+    ).trim();
+    const orgId = tenantPsql(
+      `SELECT organization_id FROM vendors WHERE id='${vendorId}'`,
+    ).trim();
+    const billedPo = `E2E-BILLED-${Date.now()}`;
+    tenantPsql(
+      `INSERT INTO purchase_orders (id, po_number, vendor_id, total, status, organization_id)
+       VALUES (gen_random_uuid(), '${billedPo}', '${vendorId}', 120.00, 'open', '${orgId}')`,
+    );
+    tenantPsql(
+      `INSERT INTO invoices
+         (id, correlation_id, invoice_number, vendor_name, vendor_id, amount, currency,
+          status, po_number, organization_id, created_at, updated_at)
+       VALUES (gen_random_uuid(), gen_random_uuid(), '${billedPo}-INV', 'Portal Vendor',
+               '${vendorId}', 120.00, 'USD', 'ready_for_review', '${billedPo}', '${orgId}',
+               now(), now())`,
+    );
+
+    try {
+      await page.getByRole("link", { name: "Purchase Orders" }).click();
+      const row = page.locator("table tbody tr", { hasText: billedPo });
+      await expect(row).toBeVisible();
+      await expect(
+        row.getByRole("button", { name: "Create invoice" }),
+      ).toHaveCount(0);
+      await expect(row.getByTestId("po-flip-refusal")).toHaveText(
+        "Already invoiced",
+      );
+    } finally {
+      deleteInvoicesWhere(
+        `vendor_id='${vendorId}' AND po_number='${billedPo}'`,
+      );
+      tenantPsql(`DELETE FROM purchase_orders WHERE po_number='${billedPo}'`);
+    }
+  });
+
   test("a vendor downloads a remittance PDF for a completed payment", async ({
     page,
     request,

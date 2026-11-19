@@ -811,6 +811,21 @@ or is a sibling of a fix that needs its own pass.
       `pnpm gen:warning-messages`. **Trigger:** the next change to contract
       compliance, or the first multi-currency customer with contracts.
 
+### Surfaced by the already-invoiced PO flip (round 24, 2026-11-18, decisions §NEW-N1)
+
+- [ ] **(c) A PO billed in full by a flip can be billed again by an ordinary
+      invoice.** The flip now refuses a PO the vendor already invoiced, but the
+      reverse order is open: after a flip, a portal submit or AP-keyed invoice
+      citing the same PO is created, and neither duplicate detection (the
+      flipped invoice has no number) nor PO matching (it compares one invoice
+      with the PO, not with what is already billed against it) flags it.
+      **Durable fix:** an over-billing finding in `services/invoice_warnings`
+      that sums the live invoices citing a PO (the `_pos_already_invoiced`
+      citation rule) against the vouched PO total, with a catalogue code, six
+      web locales and the mobile ARB. This is not a portal refusal, because
+      partial and corrective invoices are legitimate. **Trigger:** the next
+      change to PO matching, or the first customer using the PO flip.
+
 ### Surfaced by the approval recall (2026-11-13, decisions §374)
 
 - [ ] **(c) A recalled invoice's PEPPOL transmission and inter-company mirror

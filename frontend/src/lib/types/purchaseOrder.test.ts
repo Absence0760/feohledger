@@ -11,6 +11,7 @@ import { EN_ALL, loadAllMessages } from '#lib/i18n/allMessages.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import { interpolate } from '#lib/i18n/interpolate.ts';
 import {
+	PO_ALREADY_INVOICED,
 	PO_NOT_INVOICEABLE,
 	PO_STATUS_LABEL_KEYS,
 	PO_TOTAL_UNVERIFIABLE,
@@ -51,6 +52,7 @@ describe('PO status labels', () => {
 				expect(all[key], `${locale} ${key}`).toBeTruthy();
 			}
 			expect(all['portal.po.refusal.notInvoiceable'], locale).toBeTruthy();
+			expect(all['portal.po.refusal.alreadyInvoiced'], locale).toBeTruthy();
 		}
 	});
 
@@ -69,6 +71,9 @@ describe('poFlipRefusalText', () => {
 				en
 			)
 		).toBe('No longer open for invoicing');
+		expect(poFlipRefusalText({ code: PO_ALREADY_INVOICED, message: 'server' }, en)).toBe(
+			'Already invoiced'
+		);
 		expect(poFlipRefusalText({ code: PO_TOTAL_UNVERIFIABLE, message: 'server' }, en)).toBe(
 			EN_ALL['portal.po.totalUnverifiableNote']
 		);

@@ -341,6 +341,8 @@ const BUILDERS: Record<string, Builder> = {
 	// `api/portal.py::po_flip_refusal` — a supplier's "Create invoice" on a PO
 	// that is cancelled / closed / voided / unissued (`DEAD_PO_STATUSES`).
 	po_not_invoiceable: fixed('refusal.poNotInvoiceable'),
+	// …and on an open PO this supplier has already invoiced (decisions §NEW-N1).
+	po_already_invoiced: fixed('refusal.poAlreadyInvoiced'),
 	// `services/approval_chain.py`
 	approval_segregation: fixed('refusal.approvalSegregation'),
 	approval_segregation_receiver: fixed('refusal.approvalSegregationReceiver'),
