@@ -61,6 +61,27 @@ export function timeAgo(iso: string, placeholder = '—'): string {
 }
 
 /**
+ * A deadline relative to now, in the reader's language: "in 3 hr." / "in 2
+ * days", or "3 hr. ago" once it has passed (overdue is the negative of the
+ * same unit). Hours under a day, whole days after that — the buckets the
+ * exception queue's Due column has always used. Reads the active locale and
+ * shares {@link timeAgo}'s memoized formatter, so a table of rows constructs
+ * one `Intl.RelativeTimeFormat`, not one per cell.
+ *
+ * Null, empty or unparseable input returns `placeholder` (default `—`).
+ */
+export function formatDueIn(iso: string | null | undefined, placeholder = '—'): string {
+	if (!iso) return placeholder;
+	const due = new Date(iso).getTime();
+	if (Number.isNaN(due)) return placeholder;
+	const hours = Math.round((due - Date.now()) / 3600000);
+	const fmt = relativeFormatter('always');
+	return Math.abs(hours) < 24
+		? fmt.format(hours, 'hour')
+		: fmt.format(Math.round(hours / 24), 'day');
+}
+
+/**
  * Parse a bare calendar date (`YYYY-MM-DD` or `YYYY-MM`) into a `Date` at
  * *local* midnight. `new Date('2026-06-20')` parses the string as UTC, which
  * in a negative-offset timezone (e.g. America/New_York) rolls the displayed

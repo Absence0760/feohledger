@@ -33,8 +33,7 @@
 	import AgentDashboard from '#lib/components/exceptions/AgentDashboard.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { formatMoney, type MoneyAmount } from '#lib/utils/money.ts';
-	import { formatDate, timeAgo } from '#lib/utils/time.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { formatDate, formatDueIn, timeAgo } from '#lib/utils/time.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -949,17 +948,7 @@
 	};
 
 	function dueLabel(exc: ExceptionItem): string {
-		if (!exc.due_at) return '—';
-		const due = new Date(exc.due_at).getTime();
-		if (Number.isNaN(due)) return '—';
-		const hours = Math.round((due - Date.now()) / 3600000);
-		const fmt = new Intl.RelativeTimeFormat(getActiveFormatLocale(), {
-			numeric: 'always',
-			style: 'short'
-		});
-		return Math.abs(hours) < 24
-			? fmt.format(hours, 'hour')
-			: fmt.format(Math.round(hours / 24), 'day');
+		return formatDueIn(exc.due_at);
 	}
 
 	let COLUMNS = $derived([

@@ -177,7 +177,7 @@
 				/>
 			</div>
 			{#if spend}
-				<div class="util-bar" aria-label={m('budgets.modal.utilizationAria', { percent: spend.utilization_pct.toFixed(1) })}>
+				<div class="util-bar" aria-label={m('budgets.modal.utilizationAria', { percent: formatPercent(spend.utilization_pct, { minimumFractionDigits: 1 }) })}>
 					<div class="util-fill {utilClass}" style={`width: ${Math.min(spend.utilization_pct, 100)}%`}></div>
 				</div>
 				<div class="spend-detail">
