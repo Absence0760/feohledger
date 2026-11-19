@@ -184,7 +184,7 @@ import's entity; decisions §372).
 - **Seed / e2e** — `scripts/seed.py::finalize_entities` does the same for demo
   + e2e tenants after their data is seeded.
 - **Test harness** — `tests/conftest.py` re-seeds the Default entity after each
-  per-test TRUNCATE (which wipes `entities` along with the rest), so every
+  per-test reset (which empties `entities` along with the rest), so every
   test starts from the single-entity baseline.
 
 A single-entity tenant still behaves exactly as before: with one entity the

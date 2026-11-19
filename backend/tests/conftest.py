@@ -281,7 +281,7 @@ def temp_payment_adapter():
 #
 # The tenant pair is claimed EXCLUSIVELY by this pytest process for the whole
 # session — see ``_claim_realdb_slot`` below. Sharing it between two concurrent
-# pytest processes is not survivable: the per-test reset TRUNCATEs the tenant
+# pytest processes is not survivable: the per-test reset empties the tenant
 # tables and terminates every other backend on them, so each process would be
 # deleting the other's rows and killing its connections mid-test.
 #
@@ -303,7 +303,7 @@ import pytest_asyncio  # noqa: E402
 # Per-process tenant slot
 #
 # `feoh_pytesta` / `feoh_pytestb` are process-EXCLUSIVE, not merely suite-exclusive:
-# the reset below TRUNCATEs their tables and reaps every other backend on them.
+# the reset below empties their tables and reaps every other backend on them.
 # Two pytest processes pointed at the same Postgres therefore corrupt each other
 # (deleted rows + `ConnectionDoesNotExistError` in unrelated files), which reads
 # as flakiness rather than as the collision it is.
@@ -443,6 +443,78 @@ _REAP_STALE_BACKENDS_SQL = (
     "WHERE datname = current_database() AND pid <> pg_backend_pid() "
     "AND state IS DISTINCT FROM 'active'"
 )
+
+
+# The per-test tenant reset (see the `realdb` fixture below).
+#
+# It used to be one `TRUNCATE <every tenant table> RESTART IDENTITY CASCADE`.
+# That is correct but slow in a way that has nothing to do with how much data a
+# test wrote: TRUNCATE gives every named table (and each of its indexes and its
+# TOAST table) a brand-new relfilenode, and Postgres builds each new, empty
+# btree by writing it outside shared buffers and fsyncing it at once
+# (`DataFileImmediateSync`). With ~70 tenant tables and two tenants that was
+# hundreds of fsyncs per test — measured at ~5.2 s of setup per test locally,
+# against a test body of well under a second. Before/after numbers:
+# backend/CLAUDE.md § Test databases.
+#
+# So the reset now touches only the tables that actually hold a row. One
+# round trip asks every tenant table whether it is non-empty (an `EXISTS` on an
+# empty heap reads no tuples), and each non-empty one gets a plain `DELETE`,
+# which rewrites no files and so syncs nothing but the commit's WAL.
+#
+# `session_replication_role = replica` (transaction-local) is what makes a
+# plain DELETE equivalent to the old TRUNCATE ... CASCADE: it switches off the
+# FK triggers, so the delete order across tables does not matter (every table
+# that holds a row is emptied in the same transaction, so nothing is left
+# dangling), and it switches off the append-only `audit_log_no_delete` trigger
+# (`services/audit_immutability`), which TRUNCATE never fired either. Setting
+# it needs superuser (or, on PG 15+, `GRANT SET`); the Compose and CI Postgres
+# both connect as the `postgres` superuser. Without that privilege the reset
+# falls back to the old whole-schema TRUNCATE rather than half-working.
+#
+# RESTART IDENTITY has no equivalent here because no tenant table owns a
+# sequence (every key is a UUID); `test_realdb_reset.py` fails the day one does,
+# which is the point at which this reset must also restart it.
+_TENANT_RESET_PRIVILEGE_SQL = "SELECT has_parameter_privilege('session_replication_role', 'SET')"
+
+
+async def _reset_tenant_tables(conn, tenant_tables: Sequence[str], org_id: uuid.UUID) -> list[str]:
+    """Empty every tenant table that holds a row, then restore the Default entity.
+
+    Runs inside the caller's transaction. Returns the tables it emptied (the
+    guard test reads it). See the comment above for why this is DELETE of the
+    non-empty tables rather than a TRUNCATE of all of them.
+    """
+    from sqlalchemy import text
+
+    can_replica = (await conn.exec_driver_sql(_TENANT_RESET_PRIVILEGE_SQL)).scalar()
+    if can_replica:
+        probe = " UNION ALL ".join(
+            f"SELECT '{n}' WHERE EXISTS (SELECT 1 FROM \"{n}\")" for n in tenant_tables
+        )
+        dirty = [row[0] for row in (await conn.exec_driver_sql(probe)).all()]
+        if dirty:
+            await conn.exec_driver_sql("SET LOCAL session_replication_role = replica")
+            for name in dirty:
+                await conn.exec_driver_sql(f'DELETE FROM "{name}"')
+            await conn.exec_driver_sql("SET LOCAL session_replication_role = origin")
+    else:
+        dirty = list(tenant_tables)
+        quoted = ", ".join(f'"{n}"' for n in tenant_tables)
+        await conn.exec_driver_sql(f"TRUNCATE {quoted} RESTART IDENTITY CASCADE")
+    # Multi-entity (Phase 1): the reset empties `entities` too (it always holds
+    # the Default row, so it is always "dirty"), but every tenant is expected to
+    # always have its Default entity. Restore it so each test starts from the
+    # same single-entity baseline.
+    await conn.execute(
+        text(
+            "INSERT INTO entities "
+            "(id, organization_id, name, slug, is_default, is_active) "
+            "VALUES (:id, :org, 'Default', 'default', true, true)"
+        ),
+        {"id": uuid.uuid4(), "org": org_id},
+    )
+    return dirty
 
 
 # Tenant DBs whose physical schema has been rebuilt from the current
@@ -744,7 +816,7 @@ async def _ensure_test_tenants() -> dict:
 
     # Importing the app wires every router, which transitively imports every
     # model — so Base.metadata is COMPLETE before any create_all. Without this,
-    # only the models imported so far get tables, and later TRUNCATE/queries
+    # only the models imported so far get tables, and later resets/queries
     # reference tables that were never created.
     import app.main  # noqa: F401
     from app.api.deps import ALL_ROLES
@@ -910,7 +982,7 @@ async def _ensure_test_tenants() -> dict:
                 await s.commit()
             tenants[key] = TenantInfo(slug=slug, db_name=db_name, org_id=org_id, users=users)
 
-        # Control-plane reset — the counterpart of the tenant TRUNCATE below.
+        # Control-plane reset — the counterpart of the tenant reset below.
         # `Organization.settings` (branding, SSO, payments, …) and the partner
         # self-FK `parent_org_id` are shared mutable state on a row that
         # persists for the life of the database, so a test that writes them and
@@ -980,7 +1052,7 @@ _HARNESS_ENGINE_KW = {"poolclass": NullPool}
 # Control-plane billing rows: the per-test teardown and its seatbelt.
 #
 # `Plan` / `Subscription` live in this slot's CONTROL-plane database, which the
-# per-test reset never reaches — that TRUNCATE covers the tenant business tables
+# per-test reset never reaches — that reset covers the tenant business tables
 # only, and `_rebuild_pytest_schema` clears the control DB just once per pytest
 # SESSION. So a throwaway plan a test minted stayed visible to every later test
 # in the run, and `GET /api/billing/plans` is a catalogue listing, so the
@@ -1021,7 +1093,7 @@ def _assert_purgeable_plan_prefix(prefix: str) -> None:
 async def _reset_control_billing(tenants: dict) -> None:
     """Per-test teardown: drop the billing rows a test left in the control plane.
 
-    The counterpart of the tenant TRUNCATE and of the `Organization.settings`
+    The counterpart of the tenant reset and of the `Organization.settings`
     baseline beside it. Two deletes, children first:
 
     * every ``Subscription`` held by one of THIS harness's orgs — a live one
@@ -1412,7 +1484,6 @@ async def realdb(request):
     module) binds both harness orgs to that catalog plan first — the opt-in a
     test of a plan-gated surface uses (``RealDB.subscribe``)."""
     import asyncpg
-    from sqlalchemy import text
     from sqlalchemy.exc import OperationalError
     from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -1435,8 +1506,7 @@ async def realdb(request):
             ) from exc
         pytest.skip(f"realdb fixture requires a live Postgres (pnpm db:up): {exc}")
 
-    tenant_tables = [f'"{n}"' for n in Base.metadata.tables if n not in CONTROL_TABLES]
-    truncate = f"TRUNCATE {', '.join(tenant_tables)} RESTART IDENTITY CASCADE"
+    tenant_tables = [n for n in Base.metadata.tables if n not in CONTROL_TABLES]
     for info in tenants.values():
         engine = create_async_engine(_make_tenant_url(info.db_name))
         try:
@@ -1447,7 +1517,7 @@ async def realdb(request):
                 # closed it) or `idle` but still pinning an old MVCC snapshot /
                 # AccessShareLock. `cleanup()` calls `engine.dispose()`, but
                 # Postgres doesn't always process the close before THIS test's
-                # TRUNCATE fires next — which then either deadlocks or, worse,
+                # reset fires next — which then either deadlocks or, worse,
                 # makes the freshly-inserted rows invisible to the request under
                 # test (an empty-result flake, ~1-in-3). Reaping every *other*
                 # backend on the DB before the reset makes per-test isolation
@@ -1461,18 +1531,7 @@ async def realdb(request):
                 # surfacing as `ConnectionDoesNotExistError` in whichever
                 # unrelated file happened to be mid-query.
                 await conn.exec_driver_sql(_REAP_STALE_BACKENDS_SQL)
-                await conn.exec_driver_sql(truncate)
-                # Multi-entity (Phase 1): TRUNCATE wipes `entities` too, but every
-                # tenant is expected to always have its Default entity. Restore it
-                # so each test starts from the same single-entity baseline.
-                await conn.execute(
-                    text(
-                        "INSERT INTO entities "
-                        "(id, organization_id, name, slug, is_default, is_active) "
-                        "VALUES (:id, :org, 'Default', 'default', true, true)"
-                    ),
-                    {"id": uuid.uuid4(), "org": info.org_id},
-                )
+                await _reset_tenant_tables(conn, tenant_tables, info.org_id)
         finally:
             await engine.dispose()
 
