@@ -152,6 +152,40 @@ test.describe('/portal supplier chat — vendor surface', () => {
 		await expect(apBubble).toHaveAttribute('data-role', 'ap_team');
 		await expect(apBubble.locator('.chat-author')).not.toBeEmpty();
 	});
+
+	test('a failed thread read says so and retries, never posing as an empty conversation', async ({
+		page,
+	}) => {
+		await portalSignIn(page);
+
+		// Fail the FIRST read of whichever thread is opened, then let reads
+		// through: the retry must reach the real endpoint. GET only — a send
+		// is not what this test is about.
+		let failed = false;
+		await page.route(/\/api\/portal\/invoices\/[^/]+\/chat$/, async (route) => {
+			if (route.request().method() === 'GET' && !failed) {
+				failed = true;
+				await route.fulfill({ status: 500, body: '{"detail":"boom"}' });
+				return;
+			}
+			await route.continue();
+		});
+
+		const firstRow = page.locator('table tbody tr.clickable').first();
+		await expect(firstRow).toBeVisible({ timeout: 10_000 });
+		await firstRow.click();
+
+		const chat = page.locator('[data-testid="supplier-chat"]');
+		const loadError = chat.locator('[data-testid="chat-load-error"]');
+		await expect(loadError).toBeVisible();
+		await expect(chat).not.toContainText('No messages yet');
+		// No composer over a conversation the supplier cannot see.
+		await expect(chat.locator('[data-testid="chat-input"]')).toHaveCount(0);
+
+		await loadError.getByRole('button').click();
+		await expect(loadError).toHaveCount(0);
+		await expect(chat.locator('[data-testid="chat-input"]')).toBeVisible();
+	});
 });
 
 /** Mint a control-plane admin bearer token via the AP login API. The AP app
