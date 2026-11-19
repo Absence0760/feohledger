@@ -22,6 +22,7 @@
 		screeningStatusLabelKey,
 		riskLevelLabelKey,
 		sanctionsResultLabelKey,
+		sanctionsCheckTypeLabelKey,
 		screeningCategoryLabels
 	} from '#lib/types/vendor.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
@@ -85,6 +86,12 @@
 		return key ? m(key) : result.replace(/_/g, ' ');
 	};
 
+	// Why the screen ran; an unknown trigger renders as itself, never blank.
+	const checkTypeLabel = (checkType: string) => {
+		const key = sanctionsCheckTypeLabelKey(checkType);
+		return key ? m(key) : checkType;
+	};
+
 	// Composed through a key rather than concatenated: Japanese parenthesises
 	// with full-width （）, and `vendors.risk.pill` already established that a
 	// translated level never gets an English wrapper glued onto it.
@@ -145,6 +152,13 @@
 	// disabled, and the spinner label sat on a row the action never touched.
 	let busy = $state<{ vendorId: string; action: 'block' | 'rescreen' } | null>(null);
 	let blockReason = $state('');
+	// Unblock is armed two-click: it releases payments to a vendor a screen or
+	// a reviewer stopped, on the sanctions path, so one stray click must not do
+	// it. Keyed to the vendor it was armed for, so re-opening the modal on
+	// another vendor never inherits the arm. Block stays one click — it is the
+	// safe direction and the urgent one.
+	let unblockArmedFor = $state<string | null>(null);
+	const unblockArmed = $derived(selected !== null && unblockArmedFor === selected.vendor_id);
 
 	// What the OPEN vendor is busy with — `null` for an action running against
 	// some other vendor, so this modal's controls stay live and honest.
@@ -362,6 +376,7 @@
 
 	function closeDetail() {
 		selected = null;
+		unblockArmedFor = null;
 		history = [];
 		historyVendorId = null;
 		historyError = false;
@@ -405,6 +420,11 @@
 
 	async function toggleBlock() {
 		if (!selected) return;
+		if (selected.payments_blocked && !unblockArmed) {
+			unblockArmedFor = selected.vendor_id;
+			return;
+		}
+		unblockArmedFor = null;
 		// Bind the action to the vendor that was on screen when it was fired.
 		// Everything after the first await must read THIS, never `selected` —
 		// the modal can be closed and re-opened on another vendor mid-flight.
@@ -668,6 +688,7 @@
 					<button
 						class="btn-block"
 						class:unblock={selected.payments_blocked}
+						class:armed={unblockArmed}
 						onclick={toggleBlock}
 						disabled={selectedBusy !== null}
 					>
@@ -675,7 +696,9 @@
 							{m('vendors.screening.queue.action.working')}
 						{:else}
 							{selected.payments_blocked
-								? m('vendors.screening.queue.action.unblock')
+								? unblockArmed
+									? m('vendors.screening.queue.action.confirmUnblock')
+									: m('vendors.screening.queue.action.unblock')
 								: m('vendors.screening.queue.action.block')}
 						{/if}
 					</button>
@@ -715,7 +738,7 @@
 							{resultLabel(h.result)}
 						</Badge>
 						<span class="history-meta">
-							{h.check_type} · {h.provider}
+							{checkTypeLabel(h.check_type)} · {h.provider}
 							{#if h.matched_list}· {h.matched_list}{/if}
 							{#if h.categories.length}· {formatCategories(h.categories)}{/if}
 							{#if h.risk_score}· {m('vendors.screening.queue.history.score', { score: h.risk_score })}{/if}
@@ -847,6 +870,11 @@
 	}
 	.btn-block.unblock:hover:not(:disabled) {
 		box-shadow: inset 0 0 0 1px var(--success-on-tint);
+	}
+	/* Armed (one click from releasing payments): a heavier ring, not a new
+	   colour, so the text/fill pairing stays the audited one. */
+	.btn-block.unblock.armed {
+		box-shadow: inset 0 0 0 2px var(--success-on-tint);
 	}
 	.btn-block:disabled {
 		opacity: 0.5;

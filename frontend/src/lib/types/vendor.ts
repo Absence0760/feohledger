@@ -609,6 +609,39 @@ export function sanctionsResultLabelKey(result: string): MessageKey | null {
 	return SANCTIONS_RESULT_LABEL_KEYS[result as SanctionsResult] ?? null;
 }
 
+// Why a sanctions screen ran (`SanctionsCheck.check_type`) — a FOURTH
+// vocabulary, and the one the history timelines printed raw (`pre_payment`,
+// `bank_change`) beside a translated verdict. The backend writes exactly these
+// (`schemas/sanctions.py`, `vendor_screening.screen_vendor_record` callers).
+export const SANCTIONS_CHECK_TYPES = [
+	'initial',
+	'periodic',
+	'manual',
+	'pre_payment',
+	'bank_change',
+	'tax_id_change'
+] as const;
+
+export type SanctionsCheckType = (typeof SANCTIONS_CHECK_TYPES)[number];
+
+export const SANCTIONS_CHECK_TYPE_LABEL_KEYS: Record<SanctionsCheckType, MessageKey> = {
+	initial: 'vendors.screening.checkType.initial',
+	periodic: 'vendors.screening.checkType.periodic',
+	manual: 'vendors.screening.checkType.manual',
+	pre_payment: 'vendors.screening.checkType.prePayment',
+	bank_change: 'vendors.screening.checkType.bankChange',
+	tax_id_change: 'vendors.screening.checkType.taxIdChange'
+};
+
+/**
+ * The message key for why a screen ran, or `null` for a trigger this frontend
+ * doesn't know — the caller then renders the raw value rather than dropping it
+ * (the column is a free `String(30)`, so a new caller can widen it first).
+ */
+export function sanctionsCheckTypeLabelKey(checkType: string): MessageKey | null {
+	return SANCTIONS_CHECK_TYPE_LABEL_KEYS[checkType as SanctionsCheckType] ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Vendor change requests — the dual-control (BEC / bank-redirect) gate.
 //
@@ -707,6 +740,45 @@ export function maskedProposalSummary(
 }
 
 /**
+ * The i18n key for each field a staged change can carry — the keys of
+ * `proposed_value.bank_details` (the `VendorBankDetails` shape plus the full
+ * numbers a staged change holds before the processor tokenises them) and the
+ * bare `tax_id`. The review dialog labelled them by de-underscoring the JSON
+ * key, which read `account last4` in English and in every other locale.
+ */
+export const PROPOSAL_FIELD_LABEL_KEYS: Record<string, MessageKey> = {
+	counterparty_id: 'vendors.changeRequests.field.counterpartyId',
+	bank_name: 'vendors.changeRequests.field.bankName',
+	account_number: 'vendors.changeRequests.field.accountNumber',
+	account_last4: 'vendors.changeRequests.field.accountLast4',
+	routing_number: 'vendors.changeRequests.field.routingNumber',
+	routing_last4: 'vendors.changeRequests.field.routingLast4',
+	wire_routing_number: 'vendors.changeRequests.field.wireRoutingNumber',
+	wire_routing_last4: 'vendors.changeRequests.field.wireRoutingLast4',
+	sort_code: 'vendors.changeRequests.field.sortCode',
+	iban: 'vendors.changeRequests.field.iban',
+	iban_last4: 'vendors.changeRequests.field.ibanLast4',
+	swift_bic: 'vendors.changeRequests.field.swiftBic',
+	country: 'vendors.changeRequests.field.country',
+	tax_id: 'vendors.changeRequests.field.taxId'
+};
+
+/** The message key for a proposal field, or `null` for one this build can't name. */
+export function proposalFieldLabelKey(field: string): MessageKey | null {
+	return Object.hasOwn(PROPOSAL_FIELD_LABEL_KEYS, field) ? PROPOSAL_FIELD_LABEL_KEYS[field] : null;
+}
+
+export interface RevealedProposalField {
+	/** The raw payload key — stable, so it keys the `{#each}`. */
+	field: string;
+	/** The label's message key, or `null` when the field is unknown. */
+	labelKey: MessageKey | null;
+	/** What to render when `labelKey` is `null`: the key, de-underscored. */
+	fallback: string;
+	value: string;
+}
+
+/**
  * The REVEALED proposed value flattened to `{field, value}` rows for the
  * review dialog — what an approver reads back to the supplier on a callback
  * before signing off.
@@ -720,7 +792,7 @@ export function maskedProposalSummary(
 export function revealedProposalFields(
 	changeType: string,
 	proposed: Record<string, unknown> | null | undefined
-): { field: string; value: string }[] | null {
+): RevealedProposalField[] | null {
 	if (!proposed) return null;
 	const inner =
 		changeType === 'bank_details'
@@ -729,11 +801,16 @@ export function revealedProposalFields(
 				? proposed
 				: null;
 	if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return null;
-	const rows: { field: string; value: string }[] = [];
+	const rows: RevealedProposalField[] = [];
 	for (const [key, value] of Object.entries(inner as Record<string, unknown>)) {
 		if (value === null || value === undefined) continue;
 		if (typeof value === 'object') return null; // nested — fall back to JSON
-		rows.push({ field: key.replace(/_/g, ' '), value: String(value) });
+		rows.push({
+			field: key,
+			labelKey: proposalFieldLabelKey(key),
+			fallback: key.replace(/_/g, ' '),
+			value: String(value)
+		});
 	}
 	return rows.length ? rows : null;
 }

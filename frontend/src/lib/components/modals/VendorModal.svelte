@@ -27,6 +27,7 @@
 	} from '#lib/api/vendors.ts';
 	import {
 		riskLevelLabelKey,
+		sanctionsCheckTypeLabelKey,
 		ENRICHABLE_FIELD_LABEL_KEYS,
 		type Vendor,
 		type SanctionsCheck,
@@ -52,6 +53,12 @@
 		return (SCREENING_RESULTS as string[]).includes(result)
 			? (result as ScreeningStatus)
 			: undefined;
+	}
+
+	// Why a screen ran; an unknown trigger renders as itself, never blank.
+	function checkTypeLabel(checkType: string): string {
+		const key = sanctionsCheckTypeLabelKey(checkType);
+		return key ? m(key) : checkType;
 	}
 
 	let {
@@ -711,7 +718,7 @@
 							{:else}
 								<span class="result-text">{check.result}</span>
 							{/if}
-							<span class="muted">{check.provider} · {check.check_type}</span>
+							<span class="muted">{check.provider} · {checkTypeLabel(check.check_type)}</span>
 							{#if check.matched_list}
 								<span class="matched-list">{m('vendors.modal.matchedLabel', { list: check.matched_list })}</span>
 							{/if}
