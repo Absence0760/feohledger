@@ -30,8 +30,9 @@ When an ingested file is a **structured** e-invoice — UBL 2.1 (PEPPOL BIS
 Billing 3.0), standalone UN/CEFACT CII, or a Factur-X / ZUGFeRD hybrid PDF/A-3 —
 it is parsed deterministically instead of going through a vision model.
 
-- **Auto-detect on ingest.** `extraction.run_extraction` calls
-  `_detect_structured_format(file_bytes, file_key)` right after the S3 fetch
+- **Auto-detect on ingest.** `extraction.run_extraction` runs
+  `_detect_structured_format(file_bytes, file_key)` on a worker thread
+  (`asyncio.to_thread`; it may open a PDF) right after the S3 fetch
   (the single choke point both upload and email intake reach). A structured file
   overrides the org's configured adapter with the `einvoice` adapter and passes
   the real mime (XML vs PDF) into `adapter.extract`. A plain scanned PDF (no

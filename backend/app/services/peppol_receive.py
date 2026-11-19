@@ -36,6 +36,7 @@ fields. Money (``amount``) is ``Decimal`` — never float.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
@@ -181,9 +182,17 @@ async def receive_peppol_message(
             # 2. Validate the payload structurally. A non-structured or malformed
             #    document is soft-rejected (no invoice). EInvoiceValidationError's
             #    str() is already PII-free; ValueError gets a fixed code.
+            #    Off the loop: the XML mime is only a hint, and `detect_format`
+            #    trusts the bytes — a payload starting `%PDF` (a hybrid Factur-X
+            #    a sender wraps in the envelope) is opened with PyMuPDF to probe
+            #    for its embedded CII, which is synchronous C work on a PUBLIC
+            #    webhook path (`tests/test_pdf_render_offloaded.py`).
             try:
-                doc = parse_e_invoice(
-                    message.payload, mime_type="application/xml", filename="inbound.xml"
+                doc = await asyncio.to_thread(
+                    parse_e_invoice,
+                    message.payload,
+                    mime_type="application/xml",
+                    filename="inbound.xml",
                 )
             except EInvoiceValidationError as exc:
                 # field/code pairs only — no PII, no document values.

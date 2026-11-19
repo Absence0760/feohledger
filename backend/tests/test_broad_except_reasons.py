@@ -38,8 +38,7 @@ _REASON = re.compile(r"#\s*noqa:\s*[A-Z0-9, ]*BLE001\s*(?:—|–|-|:)\s*\S")
 
 #: Reasonless silent broad handlers per file (relative to app/) when the guard
 #: landed. Only ever lower these: add the reason (or log the class / re-raise)
-#: and drop the count. `services/extraction.py` belongs to the extraction work
-#: and is ratcheted here rather than edited.
+#: and drop the count.
 _RATCHET: dict[str, int] = {
     "api/admin.py": 1,
     "api/cards.py": 2,
@@ -79,7 +78,6 @@ _RATCHET: dict[str, int] = {
     "services/extraction_adapters/claude_vision.py": 3,
     "services/extraction_adapters/ollama.py": 3,
     "services/extraction_adapters/openai_vision.py": 3,
-    "services/extraction.py": 2,
     "services/fx_adapters/openexchangerates.py": 1,
     "services/mfa.py": 1,
     "services/payment_adapters/checkeeper.py": 1,
