@@ -1,6 +1,7 @@
 <script lang="ts" generics="T extends string">
 	import { tick, type Snippet } from 'svelte';
 	import {
+		clipBounds,
 		menuKeyTarget,
 		placeMenu,
 		triggerKeyAction,
@@ -86,15 +87,21 @@
 		itemEls[i]?.focus();
 	}
 
-	/** Keep the open menu inside the viewport (flip above, shift sideways). */
+	/**
+	 * Keep the open menu inside what is visible of it (flip above, shift
+	 * sideways): the viewport, cut down to the nearest scrolling / clipping
+	 * ancestor — inside InvoiceModal's `.form-scroll` the window is not what
+	 * clips it (`clipBounds`).
+	 */
 	function place() {
 		if (!trigger || !menu) return;
 		const t = trigger.getBoundingClientRect();
-		placement = placeMenu(
-			t,
-			{ width: menu.offsetWidth, height: menu.offsetHeight },
-			{ width: document.documentElement.clientWidth, height: window.innerHeight }
+		const bounds = clipBounds(
+			menu,
+			{ width: document.documentElement.clientWidth, height: window.innerHeight },
+			(node) => getComputedStyle(node as Element)
 		);
+		placement = placeMenu(t, { width: menu.offsetWidth, height: menu.offsetHeight }, bounds);
 	}
 
 	function choose(value: T) {

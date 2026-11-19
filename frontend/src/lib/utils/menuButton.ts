@@ -72,31 +72,86 @@ export interface MenuPlacement {
 	shiftX: number;
 }
 
+/** A viewport size alone, read as a box whose top-left corner is (0, 0). */
+export interface Size {
+	width: number;
+	height: number;
+}
+
+function toBox(b: Box | Size): Box {
+	return 'left' in b ? b : { left: 0, top: 0, right: b.width, bottom: b.height };
+}
+
 /**
- * Where to draw a menu of `size` next to `trigger` so it stays inside a
- * `viewport` (keeping `margin` px clear of each edge).
+ * Where to draw a menu of `size` next to `trigger` so it stays inside
+ * `bounds` (keeping `margin` px clear of each edge). `bounds` is the visible
+ * area the menu can be drawn in: the viewport, or — inside a scrolling pane —
+ * the part of it the nearest clipping ancestor shows (`clipBounds`). A bare
+ * `{ width, height }` is the viewport.
  *
  * Vertical: below by default; above only when it does not fit below AND
  * there is more room above (the bulk bar is pinned to the bottom of the
  * viewport, so its menus flip). Horizontal: aligned to the trigger's start
  * edge, then shifted left or right by exactly the overflow — and, when the
- * menu is wider than the viewport allows, pinned to the left margin (the
+ * menu is wider than the bounds allow, pinned to the left margin (the
  * menu's own `max-width` keeps that case from arising at 320px).
  */
 export function placeMenu(
 	trigger: Box,
 	size: { width: number; height: number },
-	viewport: { width: number; height: number },
+	bounds: Box | Size,
 	margin = 8,
 	gap = 4
 ): MenuPlacement {
-	const below = viewport.height - trigger.bottom - gap - margin;
-	const above = trigger.top - gap - margin;
+	const area = toBox(bounds);
+	const below = area.bottom - trigger.bottom - gap - margin;
+	const above = trigger.top - area.top - gap - margin;
 	const side: MenuPlacement['side'] = size.height <= below || below >= above ? 'below' : 'above';
 
 	let shiftX = 0;
 	const right = trigger.left + size.width;
-	if (right > viewport.width - margin) shiftX = viewport.width - margin - right;
-	if (trigger.left + shiftX < margin) shiftX = margin - trigger.left;
+	if (right > area.right - margin) shiftX = area.right - margin - right;
+	if (trigger.left + shiftX < area.left + margin) shiftX = area.left + margin - trigger.left;
 	return { side, shiftX };
+}
+
+/** The slice of the DOM `clipBounds` reads — an `Element` satisfies it. */
+export interface ClipNode {
+	parentElement: ClipNode | null;
+	getBoundingClientRect(): Box;
+}
+
+/**
+ * The visible area a menu anchored inside `start` can be drawn in: the
+ * viewport, cut down to the nearest ancestor that clips its overflow.
+ *
+ * The menu is `position: absolute` inside its trigger's wrapper, so an
+ * ancestor with `overflow` other than `visible` (InvoiceModal's
+ * `.form-scroll`, a scrolling table) hides whatever of it falls outside that
+ * ancestor's box — measuring against `window.innerHeight` alone left the
+ * e-invoice menu un-flipped and cut off at the bottom of the form pane. Only
+ * the first such ancestor is used: it is the one the menu's position is
+ * judged against, and the pane is normally the tighter box.
+ *
+ * `overflowOf` is `getComputedStyle` in the component, injected so this
+ * stays testable in Node.
+ */
+export function clipBounds(
+	start: ClipNode,
+	viewport: Size,
+	overflowOf: (node: ClipNode) => { overflowX: string; overflowY: string }
+): Box {
+	const view: Box = { left: 0, top: 0, right: viewport.width, bottom: viewport.height };
+	for (let node = start.parentElement; node; node = node.parentElement) {
+		const { overflowX, overflowY } = overflowOf(node);
+		if (overflowX === 'visible' && overflowY === 'visible') continue;
+		const r = node.getBoundingClientRect();
+		return {
+			left: Math.max(view.left, r.left),
+			top: Math.max(view.top, r.top),
+			right: Math.min(view.right, r.right),
+			bottom: Math.min(view.bottom, r.bottom)
+		};
+	}
+	return view;
 }
