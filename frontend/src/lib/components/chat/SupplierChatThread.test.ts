@@ -74,14 +74,15 @@ describe('SupplierChatThread copy comes from the catalogue', () => {
 
 	it('labels the status pill and keeps the wire value on data-status', () => {
 		const out = html({ thread: { id: 't', status: 'resolved', messages: [] }, surface: 'ap' });
-		expect(out).toMatch(/data-status="resolved"[^>]*>Resolved</);
+		// The wire value rides the wrapper; the label is the Badge inside it.
+		expect(out).toMatch(/data-status="resolved"[^>]*><span class="badge success[^"]*"[^>]*>(?:<!---->)?Resolved</);
 		expect(out).toContain('aria-label="Supplier chat"');
 		expect(out).toContain('This thread is resolved.');
 	});
 
 	it('shows an unknown status as-is rather than dropping it', () => {
 		const out = html({ thread: { id: 't', status: 'archived', messages: [] } });
-		expect(out).toMatch(/data-status="archived"[^>]*>archived</);
+		expect(out).toMatch(/data-status="archived"[^>]*><span class="badge neutral[^"]*"[^>]*>(?:<!---->)?archived</);
 	});
 
 	it('renders the composer labels and the unknown-author fallback', () => {
