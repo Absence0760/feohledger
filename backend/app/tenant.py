@@ -181,7 +181,7 @@ async def get_tenant(
             # access token we mint carries `org`. The MFA challenge types are
             # not access tokens (`get_current_user` refuses them) and stay
             # exempt so a route that reads one keeps resolving its tenant.
-            if token_org is None and payload.get("typ") not in _CHALLENGE_TOKEN_TYPES:
+            if not token_org and payload.get("typ") not in _CHALLENGE_TOKEN_TYPES:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=TOKEN_TENANT_MISMATCH_DETAIL,

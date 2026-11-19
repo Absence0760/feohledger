@@ -189,6 +189,27 @@ async def test_get_tenant_refuses_access_token_with_no_org_claim():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("empty_org", ["", 0, False])
+async def test_get_tenant_refuses_access_token_with_an_empty_org_claim(empty_org):
+    """An `org` claim that is present but empty is no claim at all: the
+    mismatch check below the refusal only runs for a truthy `org`, so an empty
+    one would otherwise fall through to the `sub`-only user lookup (§474)."""
+    from app.tenant import get_tenant
+
+    acme_id = uuid.uuid4()
+    token = _mint({"sub": str(uuid.uuid4()), "typ": "user", "jti": "j5e", "org": empty_org})
+
+    with pytest.raises(HTTPException) as exc:
+        await get_tenant(
+            slug="acme",
+            db=_ctrl_db_returning(_fake_org(acme_id, "acme")),
+            authorization=f"Bearer {token}",
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "token_tenant_mismatch"
+
+
+@pytest.mark.asyncio
 async def test_get_tenant_still_resolves_for_an_mfa_challenge_token():
     """Challenge tokens carry no `org` and are not access tokens
     (`get_current_user` refuses them), so the claim-less refusal above must not

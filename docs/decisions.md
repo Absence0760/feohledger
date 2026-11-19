@@ -23943,7 +23943,7 @@ skip turned the tenant chokepoint into a check that depends on how tokens
 happen to be minted elsewhere, and `organization_close.py` had already grown
 its own compensating check because of it.
 
-**Decision:** `get_tenant` refuses an employee token with no `org` claim with
+**Decision:** `get_tenant` refuses an employee token with no `org` claim (absent, or present but empty) with
 the same 403 `token_tenant_mismatch` as a mismatched one. The MFA challenge
 token types stay exempt, because they are scoped to the challenge flow, never
 to tenant data. The chokepoint now stands on its own.
