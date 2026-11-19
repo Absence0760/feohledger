@@ -39,6 +39,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
@@ -186,7 +187,7 @@
 			// A failed Load-more keeps the rows already shown, so a toast is
 			// enough; a failed list load is stated in place, with a Retry.
 			if (opts.append) {
-				toast(e instanceof Error ? e.message : m('recurring.toast.loadFailed'), 'error');
+				toast(errorMessage(e, m('recurring.toast.loadFailed')), 'error');
 			} else {
 				templates = [];
 				total = 0;
@@ -335,28 +336,44 @@
 	}
 
 	// --- Row lifecycle actions ---
-	let busyId = $state<string | null>(null);
+	type RowActionKind = 'generate' | 'pause' | 'resume' | 'end';
+
+	// One row request at a time, tracked per action: the button that sent it
+	// is `busy` (aria-disabled, so the keyboard user who pressed it keeps
+	// focus — native `disabled` dropped it to <body>) and every other row
+	// action is `disabled` until it settles (component-library.md § RowAction).
+	let inFlight = $state<{ action: RowActionKind; id: string } | null>(null);
+	const isBusy = (action: RowActionKind, id: string) =>
+		inFlight?.action === action && inFlight.id === id;
+	const isHeld = (action: RowActionKind, id: string) =>
+		inFlight !== null && !isBusy(action, id);
 
 	async function runRowLifecycle(
 		t: RecurringTemplate,
+		action: RowActionKind,
 		fn: () => Promise<RecurringTemplate>,
 		successMsg: string,
 		fallback: string
 	) {
-		busyId = t.id;
+		if (inFlight) return;
+		inFlight = { action, id: t.id };
 		try {
 			const updated = await fn();
 			toast(successMsg, 'success');
 			onSaved(updated);
 		} catch (e) {
-			toast(e instanceof Error ? e.message : fallback, 'error');
+			toast(errorMessage(e, fallback), 'error');
 		} finally {
-			busyId = null;
+			inFlight = null;
+			// Disarmed only once the request settles, so a busy End keeps
+			// reading "Confirm" rather than reverting mid-request.
+			confirmEndId = null;
 		}
 	}
 
 	async function generateNow(t: RecurringTemplate) {
-		busyId = t.id;
+		if (inFlight) return;
+		inFlight = { action: 'generate', id: t.id };
 		try {
 			await generateRecurringNow(t.id);
 			toast(m('recurring.toast.generated'), 'success');
@@ -367,9 +384,9 @@
 				/* the toast already confirmed success */
 			}
 		} catch (e) {
-			toast(e instanceof Error ? e.message : m('recurring.toast.generateFailed'), 'error');
+			toast(errorMessage(e, m('recurring.toast.generateFailed')), 'error');
 		} finally {
-			busyId = null;
+			inFlight = null;
 		}
 	}
 
@@ -377,13 +394,14 @@
 	let confirmEndId = $state<string | null>(null);
 
 	async function endTemplate(t: RecurringTemplate) {
+		if (inFlight) return;
 		if (confirmEndId !== t.id) {
 			confirmEndId = t.id;
 			return;
 		}
-		confirmEndId = null;
 		await runRowLifecycle(
 			t,
+			'end',
 			() => endRecurring(t.id),
 			m('recurring.toast.ended'),
 			m('recurring.toast.endFailed')
@@ -461,7 +479,7 @@
 <svelte:window
 	onclick={(e) => {
 		// Un-arm the End confirm when the click lands outside a row action.
-		if (confirmEndId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
+		if (confirmEndId && !inFlight && !(e.target as HTMLElement)?.closest?.('.row-action')) {
 			confirmEndId = null;
 		}
 	}}
@@ -598,7 +616,8 @@
 						{#if canCreate}
 							{#if template.status === 'active'}
 								<RowAction
-									disabled={busyId === template.id}
+									busy={isBusy('generate', template.id)}
+									disabled={isHeld('generate', template.id)}
 									onclick={() => generateNow(template)}
 									ariaLabel={m('recurring.row.generateNowAria', {
 										action: m('recurring.row.generateNow'),
@@ -608,8 +627,9 @@
 									{m('recurring.row.generateNow')}
 								</RowAction>
 								<RowAction
-									disabled={busyId === template.id}
-									onclick={() => runRowLifecycle(template, () => pauseRecurring(template.id), m('recurring.toast.paused'), m('recurring.toast.pauseFailed'))}
+									busy={isBusy('pause', template.id)}
+									disabled={isHeld('pause', template.id)}
+									onclick={() => runRowLifecycle(template, 'pause', () => pauseRecurring(template.id), m('recurring.toast.paused'), m('recurring.toast.pauseFailed'))}
 									ariaLabel={m('recurring.row.pauseAria', { name: template.name })}
 								>
 									{m('recurring.row.pause')}
@@ -617,8 +637,9 @@
 							{:else if template.status === 'paused'}
 								<RowAction
 									variant="success"
-									disabled={busyId === template.id}
-									onclick={() => runRowLifecycle(template, () => resumeRecurring(template.id), m('recurring.toast.resumed'), m('recurring.toast.resumeFailed'))}
+									busy={isBusy('resume', template.id)}
+									disabled={isHeld('resume', template.id)}
+									onclick={() => runRowLifecycle(template, 'resume', () => resumeRecurring(template.id), m('recurring.toast.resumed'), m('recurring.toast.resumeFailed'))}
 									ariaLabel={m('recurring.row.resumeAria', { name: template.name })}
 								>
 									{m('recurring.row.resume')}
@@ -628,7 +649,8 @@
 								<RowAction
 									variant="danger"
 									armed={confirmEndId === template.id}
-									disabled={busyId === template.id}
+									busy={isBusy('end', template.id)}
+									disabled={isHeld('end', template.id)}
 									onclick={() => endTemplate(template)}
 									ariaLabel={m('recurring.row.endAria', { name: template.name })}
 								>

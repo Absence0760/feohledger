@@ -30,6 +30,7 @@
 	import VendorStatementReconModal from '#lib/components/modals/VendorStatementReconModal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { page } from '$app/state';
@@ -171,7 +172,7 @@
 			// edit still failed, and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
 			if (opts.append) {
-				toast(e instanceof Error ? e.message : m('vendorStatements.toast.loadFailed'), 'error');
+				toast(errorMessage(e, m('vendorStatements.toast.loadFailed')), 'error');
 			} else {
 				recons = [];
 				total = 0;
@@ -288,7 +289,8 @@
 			confirmDeleteId = r.id;
 			return;
 		}
-		confirmDeleteId = null;
+		// Stays armed until the request settles, so the busy button keeps
+		// reading "Confirm" rather than reverting mid-request.
 		busyId = r.id;
 		try {
 			await deleteReconciliation(r.id);
@@ -299,9 +301,10 @@
 			loadCloseReadiness();
 			void loadSummary();
 		} catch (e) {
-			toast(e instanceof Error ? e.message : m('vendorStatements.toast.deleteFailed'), 'error');
+			toast(errorMessage(e, m('vendorStatements.toast.deleteFailed')), 'error');
 		} finally {
 			busyId = null;
+			confirmDeleteId = null;
 		}
 	}
 
@@ -339,7 +342,7 @@
 
 <svelte:window
 	onclick={(e) => {
-		if (confirmDeleteId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
+		if (confirmDeleteId && !busyId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
 			confirmDeleteId = null;
 		}
 	}}

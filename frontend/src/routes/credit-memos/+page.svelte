@@ -24,6 +24,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { DEFAULT_CURRENCY } from '#lib/utils/money.ts';
@@ -503,7 +504,7 @@
 			closeForm();
 			await loadMemos();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('creditMemos.toast.createFailed'), 'error');
+			toast(errorMessage(err, m('creditMemos.toast.createFailed')), 'error');
 		} finally {
 			saving = false;
 		}
@@ -540,7 +541,7 @@
 		} catch (err) {
 			// A 409 here means the memo was applied or voided since the row was
 			// drawn; the backend says which, and the reload shows it.
-			toast(err instanceof Error ? err.message : m('creditMemos.toast.updateFailed'), 'error');
+			toast(errorMessage(err, m('creditMemos.toast.updateFailed')), 'error');
 			await loadMemos();
 		} finally {
 			saving = false;
@@ -559,7 +560,7 @@
 			applyInvoiceId = '';
 			await loadMemos();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('creditMemos.toast.applyFailed'), 'error');
+			toast(errorMessage(err, m('creditMemos.toast.applyFailed')), 'error');
 		} finally {
 			applying = false;
 		}
@@ -576,16 +577,18 @@
 			confirmVoidId = id;
 			return;
 		}
-		confirmVoidId = null;
+		// Stays armed until the request settles, so the busy button keeps
+		// reading "Confirm" rather than reverting mid-request.
 		voidingId = id;
 		try {
 			await api.post(`/api/credit-memos/${id}/void`, {});
 			toast(m('creditMemos.toast.voided'), 'success');
 			await loadMemos();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('creditMemos.toast.voidFailed'), 'error');
+			toast(errorMessage(err, m('creditMemos.toast.voidFailed')), 'error');
 		} finally {
 			voidingId = null;
+			confirmVoidId = null;
 		}
 	}
 
@@ -627,7 +630,7 @@
 <svelte:window
 	onclick={(e) => {
 		// Outside-click un-arms a pending Void confirmation.
-		if (confirmVoidId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
+		if (confirmVoidId && !voidingId && !(e.target as HTMLElement)?.closest?.('.row-action')) {
 			confirmVoidId = null;
 		}
 	}}
