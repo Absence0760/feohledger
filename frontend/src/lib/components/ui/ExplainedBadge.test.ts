@@ -19,8 +19,19 @@ function renderBadge(props: {
 	label: string;
 	explanation: string;
 }): string {
-	// Svelte's hydration markers are comments; drop them so the markup reads plainly.
-	return render(ExplainedBadge, { props }).body.replace(/<!--.*?-->/g, '');
+	return render(ExplainedBadge, { props }).body;
+}
+
+/** Svelte's server render puts empty hydration comments (`<!---->`) between
+ *  expressions; the patterns below allow them rather than strip them. */
+const M = '(?:<!--[^>]*-->)*';
+
+/** The text inside the badge's visually-hidden span, read by position: no
+ *  markup is rewritten, so nothing here is a sanitizer. */
+function hiddenText(html: string): string {
+	const open = '<span class="visually-hidden';
+	const start = html.indexOf('>', html.indexOf(open)) + 1;
+	return html.slice(start, html.indexOf('</span>', start)).split('<!---->').join('');
 }
 
 describe('ExplainedBadge', () => {
@@ -34,7 +45,9 @@ describe('ExplainedBadge', () => {
 	it('puts the explanation in a visually-hidden span inside the badge', () => {
 		const html = renderBadge(props);
 		expect(html).toMatch(
-			/<span class="badge warning skipped[^"]*"[^>]*>Not generating<span class="visually-hidden[^"]*"> 2 periods skipped — last 2026-11: no amount set<\/span><\/span>/
+			new RegExp(
+				`<span class="badge warning skipped[^"]*"[^>]*>${M}Not generating${M}<span class="visually-hidden[^"]*">${M} 2 periods skipped — last 2026-11: no amount set${M}</span>${M}</span>`
+			)
 		);
 	});
 
@@ -49,7 +62,10 @@ describe('ExplainedBadge', () => {
 		// the explanation must not run together into one word.
 		// Svelte trims whitespace at the edges of an element's children, so a
 		// literal leading space in the markup would be dropped here.
-		const text = renderBadge(props).replace(/<[^>]+>/g, '');
-		expect(text).toBe('Not generating 2 periods skipped — last 2026-11: no amount set');
+		const hidden = hiddenText(renderBadge(props));
+		expect(hidden).toBe(' 2 periods skipped — last 2026-11: no amount set');
+		expect(`Not generating${hidden}`).toBe(
+			'Not generating 2 periods skipped — last 2026-11: no amount set'
+		);
 	});
 });
