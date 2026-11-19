@@ -608,6 +608,7 @@ export const messages = {
 	'invoices.warning.priceVarianceUnder': 'Prix unitaire {deltaPct} au-dessous de la référence de ce fournisseur pour {item} ({unitPrice} contre {baselineUnitPrice})',
 	'invoices.warning.poNotFound': 'Commande {poNumber} introuvable',
 	'invoices.warning.poAmountVariance': 'Écart de montant {variancePct} par rapport à la commande {poNumber} (facture {invoiceAmount} contre commande {poTotal})',
+	'invoices.warning.poBilledBeyondTotal': 'D’autres factures facturent déjà {billedAmount} sur la commande {poNumber}, dont le total est de {poTotal} — cette facture dépasse ce total',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Écart de montant {variancePct} par rapport à la commande {poNumber}, qui n’indique aucune devise (facture {invoiceAmount} contre commande {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'La facture est en {invoiceCurrency} mais la commande {poNumber} est en {poCurrency} — les montants n’ont pas été comparés',
 	'invoices.warning.poCurrencyMismatchInvoiceCurrencyUnknown': 'La facture n’indique aucune devise valide et les commandes derrière {poNumber} sont dans des devises différentes ({poCurrencies}) — les montants n’ont pas été comparés',

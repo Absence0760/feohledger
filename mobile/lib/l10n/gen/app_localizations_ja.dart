@@ -3114,6 +3114,15 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoBilledBeyondTotal(
+    String billedAmount,
+    String poNumber,
+    String poTotal,
+  ) {
+    return '他の請求書が発注 $poNumber（合計 $poTotal）に対してすでに $billedAmount を請求しています — この請求書でその合計を超えます';
+  }
+
+  @override
   String invoiceWarningPoAmountVariancePoCurrencyUnknown(
     String variancePct,
     String poNumber,

@@ -1004,6 +1004,7 @@
   "invoiceWarningPriceVarianceUnder": "Preço unitário {deltaPct} abaixo da referência deste fornecedor para {item} ({unitPrice} contra {baselineUnitPrice})",
   "invoiceWarningPoNotFound": "Pedido {poNumber} não encontrado",
   "invoiceWarningPoAmountVariance": "Variação de valor {variancePct} em relação ao pedido {poNumber} (nota {invoiceAmount} contra pedido {poTotal})",
+  "invoiceWarningPoBilledBeyondTotal": "Outras faturas já cobram {billedAmount} contra o pedido {poNumber}, cujo total é {poTotal} — esta fatura ultrapassa esse total",
   "invoiceWarningPoAmountVariancePoCurrencyUnknown": "Variação de valor {variancePct} em relação ao pedido {poNumber}, que não registra moeda (nota {invoiceAmount} contra pedido {poTotal})",
   "invoiceWarningPoCurrencyMismatch": "A nota está em {invoiceCurrency}, mas o pedido {poNumber} está em {poCurrency} — os valores não foram comparados",
   "invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown": "A nota não registra uma moeda válida e os pedidos de {poNumber} estão em moedas diferentes ({poCurrencies}) — os valores não foram comparados",

@@ -23493,3 +23493,65 @@ Tests: `backend/tests/test_portal_self_service.py` (live statuses refused with
 the coded detail and verdict, a split leg, a rejected or foreign-vendor invoice
 not blocking, the flipped PO's verdict and its replay);
 `frontend/src/lib/types/purchaseOrder.test.ts`.
+
+## §TBD-billing. A PO billed past its total across invoices is a review warning, and a rejected flip still counts as invoiced (round 25, 2026-11-19)
+
+**Problem.** §468 refused a flip of a PO the vendor had already invoiced, and
+left the reverse order open: after a flip, a portal submit, an emailed invoice
+or AP keying for the same order passed every check. The flipped invoice has no
+number for duplicate detection to match, and PO matching compares one invoice
+with the PO, not with what other invoices already bill against it. Separately,
+§468 counted a rejected invoice as not billing, which is right for the
+supplier's ordinary invoice but not for the PO's own flip. The flip's
+`po-flip:<po_id>` marker is unique in every status (migration 0024), so after a
+rejection the row offered "Create invoice" while the endpoint could only replay
+the rejected invoice.
+
+**Decision 1: an over-billing warning, not a hold.**
+`invoice_warnings._refresh_po_overbilling`, run inside the PO match, sums the
+other invoices citing the matched PO and adds `po_billed_beyond_total`
+(type `po_overbilled`, severity `warning`) when they and this invoice exceed
+the PO total by more than the match rule's tolerance. "Cites" and "live" reuse
+the flip refusal's rule (`api/portal._pos_already_invoiced`): the PO's number
+within its entity, every status but `rejected`. It differs in two ways. It is
+not vendor-scoped, because AP reads it and any bill against the order counts.
+And it sums only the PO's currency, in exact `Decimal`. It runs only on a
+single-PO match whose total is trustworthy and in the invoice's own currency.
+A split's amount cannot be attributed to one leg, and a cancelled, unissued,
+unvouched or other-currency PO already raises its own finding.
+
+Why not a payment-blocking `po_mismatch`: the sum crosses invoices, and their
+changes (a credit memo, a corrective re-bill, a sibling rejected or reopened
+after this refresh) do not re-run this invoice's warnings. A hold would go
+stale both ways: it would hold a legitimate bill after its sibling was rejected,
+or miss a sibling reopened later. A hold would also need a re-match of every
+sibling on each status change, which no transition does today. The reviewer
+reads the warning at approval beside the amount and duplicate findings. That
+is the same review-side check §468 called for. Why its own type: the invoice
+modal shows `po_mismatch` warnings only through the PO-match panel's `issues`,
+and this finding is not one of them. `refresh_po_match_only` rebuilds the new
+type together with the match, so a PO-only refresh neither duplicates it nor
+keeps a stale copy.
+
+**Decision 2: a rejected flip still counts as "already invoiced".**
+`_pos_already_invoiced` counts a rejected invoice when its `reference_number`
+is that PO's own flip marker. A rejected flip is reopened, not replaced: the
+supplier's `/resubmit`, or AP moving it `rejected → new`. A second flip beside
+it is impossible (the unique marker) and would also be wrong: reopening the
+first would double-bill the order. So `flip_verdict` and the endpoint now
+agree. The verdict refuses with `po_already_invoiced`, and a retry still
+replays the rejected invoice with its status, as §468's replay order requires.
+Reopening changes nothing for the flip gate: the invoice is live again and
+still counts. A supplier's ORDINARY rejected invoice keeps §468's rule. It
+does not block a flip, and if that invoice is reopened after a flip, the
+over-billing warning from Decision 1 surfaces the second bill.
+
+**Left alone.** Credit memos are not netted off the billed sum. The warning
+names the figure and the reviewer judges it, which is a further reason it is
+not a hold.
+
+Tests: `backend/tests/test_po_matching_critical_path.py` (flip then a second
+bill warns with exact params; rejecting the flip clears it, reopening brings
+it back; two halves and an other-currency invoice do not warn);
+`backend/tests/test_portal_self_service.py` (a rejected flip's verdict, its
+replay, and the reopened flip's verdict, with one invoice throughout).

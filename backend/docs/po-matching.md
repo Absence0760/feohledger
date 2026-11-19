@@ -553,6 +553,35 @@ leg short-received escalates instead of being approved.
 Covered by `backend/tests/test_po_match_exception_reconciliation.py` § A
 multi-PO split and `backend/tests/test_exception_agents_multi_po_split.py`.
 
+### Billing past the PO across invoices
+
+The matcher compares ONE invoice with the whole PO, so two invoices that each
+fit pass it: a supplier's PO flip (which bills the whole total under no invoice
+number, so duplicate detection has nothing to match) followed by the same
+order billed again through the portal, email or AP keying.
+`invoice_warnings._refresh_po_overbilling` closes that gap. On a single-PO
+match whose total is trustworthy and in the invoice's own currency, it sums the
+OTHER invoices citing the PO's number (within the PO's entity; either side
+unstamped spans entities), in every status but `rejected`, in that currency. When
+those plus this invoice exceed the PO total by more than the match rule's
+tolerance, it adds `po_billed_beyond_total` (type `po_overbilled`, severity
+`warning`), naming what the others already bill and the PO total.
+
+- **Not a hold.** Credit memos, corrective re-bills, and a sibling rejected or
+  reopened after this refresh all move the sum without re-running it on this
+  invoice, so a payment-blocking row would go stale both ways. The reviewer
+  reads it at approval, as with the other findings.
+- **Its own type**, not `po_mismatch`: the invoice modal shows `po_mismatch`
+  warnings through the PO-match panel's own `issues`, which this cross-invoice
+  finding is not one of. `refresh_po_match_only` rebuilds it with the match.
+- **Skipped** for a multi-PO split (its amount cannot be attributed to one
+  leg), and for a cancelled, unissued, unvouched or other-currency PO, which
+  each raise their own finding. A rejected invoice is neither checked nor
+  counted. It bills nothing while rejected, and reopening it re-runs the
+  refresh, so it is counted again from then on.
+
+Reasoning: `docs/decisions.md` §TBD-billing.
+
 ### Recording a goods receipt
 
 `POST /api/goods-receipts` (`services/goods_receipts.py`) is the one in-app

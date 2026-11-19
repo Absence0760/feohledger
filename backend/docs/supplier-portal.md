@@ -222,7 +222,15 @@ verdict). It refuses, with 409:
   the second bill; the supplier submits an ordinary invoice for any remainder
   (`docs/decisions.md` §468). One query per list page
   (`api/portal._pos_already_invoiced`). Once a PO is flipped, its own invoice
-  cites it, so the row stops offering "Create invoice" too;
+  cites it, so the row stops offering "Create invoice" too. That holds after
+  the flip is rejected: the `po-flip:<po_id>` marker is unique in every status
+  (migration 0024), so the endpoint replays the rejected invoice rather than
+  mint another, and the way back is reopening that invoice (`/resubmit`, or AP
+  moving it `rejected → new`), never a second flip that would double-bill the
+  moment the first reopens (`docs/decisions.md` §TBD-billing). The reverse
+  order, a flip and then an ordinary invoice for the same order, is not
+  refused; AP sees it as the `po_billed_beyond_total` warning
+  (`backend/docs/po-matching.md` § Billing past the PO across invoices);
 - `po_total_unverifiable` — the ERP could not vouch for the total
   (decisions §323); the endpoint keeps its plain-string detail.
 

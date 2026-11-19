@@ -1213,3 +1213,44 @@ async def test_a_flipped_po_reads_as_invoiced_but_its_replay_returns_the_invoice
     assert replay.status_code == 202, replay.text
     assert replay.json()["id"] == first.json()["id"]
     assert await _invoices_citing(mk, number) == 1
+
+
+async def _set_invoice_status(mk, invoice_id: str, status: InvoiceStatus) -> None:
+    async with mk() as s:
+        inv = await s.get(Invoice, uuid.UUID(invoice_id))
+        inv.status = status
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_flip_still_reads_as_invoiced_and_its_reopen_mints_nothing(realdb):
+    """The PO's own flip, once rejected, still counts as invoiced (decisions
+    §TBD-billing). Its `po-flip:<po_id>` marker is unique in every status, so
+    the endpoint replays the rejected invoice rather than mint a second, and
+    the row must not offer a creation it never performs. A rejected flip is
+    reopened instead, after which it is the one live bill on the PO."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
+    po_id, number = await _seed_open_po(mk, org_id, vendor_id, prefix="PO-REJ")
+
+    async with _portal_client(realdb, vu_id, vendor_id) as client:
+        first = await client.post(f"/api/portal/purchase-orders/{po_id}/flip")
+        assert first.status_code == 202, first.text
+        flipped_id = first.json()["id"]
+
+        await _set_invoice_status(mk, flipped_id, InvoiceStatus.rejected)
+        rejected_detail = (await client.get(f"/api/portal/purchase-orders/{po_id}")).json()
+        rejected_replay = await client.post(f"/api/portal/purchase-orders/{po_id}/flip")
+
+        await _set_invoice_status(mk, flipped_id, InvoiceStatus.new)
+        reopened_detail = (await client.get(f"/api/portal/purchase-orders/{po_id}")).json()
+        reopened_replay = await client.post(f"/api/portal/purchase-orders/{po_id}/flip")
+
+    assert rejected_detail["flip_verdict"] == _ALREADY_INVOICED
+    assert rejected_replay.status_code == 202, rejected_replay.text
+    assert rejected_replay.json()["id"] == flipped_id
+    assert rejected_replay.json()["status"] == "rejected"
+    assert reopened_detail["flip_verdict"] == _ALREADY_INVOICED
+    assert reopened_replay.json()["id"] == flipped_id
+    assert await _invoices_citing(mk, number) == 1

@@ -686,6 +686,7 @@ export const en = {
 	'invoices.warning.priceVarianceUnder': 'Unit price {deltaPct} under this vendor\'s baseline for {item} ({unitPrice} vs {baselineUnitPrice})',
 	'invoices.warning.poNotFound': 'PO {poNumber} not found',
 	'invoices.warning.poAmountVariance': 'Amount variance {variancePct} vs PO {poNumber} (invoice {invoiceAmount} vs PO {poTotal})',
+	'invoices.warning.poBilledBeyondTotal': 'Other invoices already bill {billedAmount} against PO {poNumber}, whose total is {poTotal} — this invoice takes it past that total',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Amount variance {variancePct} vs PO {poNumber}, which records no currency (invoice {invoiceAmount} vs PO {poTotal})',
 	'invoices.warning.poCurrencyMismatch': 'Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared',
 	'invoices.warning.poCurrencyMismatchInvoiceCurrencyUnknown': 'The invoice records no valid currency and the POs behind {poNumber} are in different currencies ({poCurrencies}) — the amounts were not compared',

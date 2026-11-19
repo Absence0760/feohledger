@@ -838,6 +838,7 @@
   "invoiceWarningPriceVarianceUnder": "Einzelpreis {deltaPct} unter der Referenz dieses Lieferanten für {item} ({unitPrice} statt {baselineUnitPrice})",
   "invoiceWarningPoNotFound": "Bestellung {poNumber} nicht gefunden",
   "invoiceWarningPoAmountVariance": "Betragsabweichung {variancePct} gegenüber Bestellung {poNumber} (Rechnung {invoiceAmount}, Bestellung {poTotal})",
+  "invoiceWarningPoBilledBeyondTotal": "Andere Rechnungen stellen bereits {billedAmount} gegen Bestellung {poNumber} mit einer Gesamtsumme von {poTotal} in Rechnung — diese Rechnung überschreitet diese Summe",
   "invoiceWarningPoAmountVariancePoCurrencyUnknown": "Betragsabweichung {variancePct} gegenüber Bestellung {poNumber}, für die keine Währung erfasst ist (Rechnung {invoiceAmount}, Bestellung {poTotal})",
   "invoiceWarningPoCurrencyMismatch": "Die Rechnung lautet auf {invoiceCurrency}, Bestellung {poNumber} jedoch auf {poCurrency} — die Beträge wurden nicht verglichen",
   "invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown": "Die Rechnung enthält keine gültige Währung, und die Bestellungen hinter {poNumber} lauten auf unterschiedliche Währungen ({poCurrencies}) — die Beträge wurden nicht verglichen",

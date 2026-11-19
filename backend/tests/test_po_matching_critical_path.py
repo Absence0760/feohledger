@@ -821,3 +821,81 @@ async def test_realdb_another_shipments_inspection_does_not_stand_in(realdb):
     assert match.gr_id == str(newest_gr.id)
     assert match.inspection_result is None
     assert match.match_type == "3-way"
+
+
+# ===========================================================================
+# Cumulative over-billing (decisions §TBD-billing): the matcher compares ONE
+# invoice with the PO, so a flip followed by another bill for the same order
+# passes it. `_refresh_po_overbilling` sums the others citing the PO.
+# ===========================================================================
+
+
+async def _overbilling_codes(s, inv) -> list[str]:
+    match = await match_invoice_to_po(s, inv)
+    warnings: list[dict] = []
+    rule = resolve_match_rule(None, vendor_id=inv.vendor_id, gl_account=inv.gl_account)
+    await invoice_warnings._refresh_po_overbilling(s, inv, warnings, match, rule.tolerance_pct)
+    return warnings
+
+
+@pytest.mark.asyncio
+async def test_realdb_a_second_bill_after_a_po_flip_warns_over_billed(realdb):
+    """A flipped invoice bills the whole PO under no number; an ordinary
+    invoice for the same order afterwards fits the PO on its own and has no
+    number to collide with, so only the cumulative sum catches it."""
+    from app.models.invoice import InvoiceStatus
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        po = await _add_po(s, org_id, ent, po_number="PO-FLIPPED", total="500.00", currency="USD")
+        flipped = await _add_invoice(s, org_id, ent, po_number="PO-FLIPPED", amount="500.00")
+        flipped.invoice_number = ""
+        flipped.reference_number = f"po-flip:{po.id}"
+        second = await _add_invoice(s, org_id, ent, po_number="PO-FLIPPED", amount="500.00")
+        await s.commit()
+
+        warnings = await _overbilling_codes(s, second)
+
+        # The flip rejected: it bills nothing while rejected, so the second
+        # invoice is the PO's only bill and the finding goes away.
+        flipped.status = InvoiceStatus.rejected
+        await s.commit()
+        after_reject = await _overbilling_codes(s, second)
+
+        # Reopened (rejected → new): billing again, so the finding returns.
+        flipped.status = InvoiceStatus.new
+        await s.commit()
+        after_reopen = await _overbilling_codes(s, second)
+
+    assert [w["code"] for w in warnings] == ["po_billed_beyond_total"]
+    assert warnings[0]["type"] == "po_overbilled"
+    assert warnings[0]["severity"] == "warning"
+    assert warnings[0]["params"] == {
+        "billedAmount": "500.00",
+        "poNumber": "PO-FLIPPED",
+        "poTotal": "500.00",
+        "currency": "USD",
+    }
+    assert after_reject == []
+    assert [w["code"] for w in after_reopen] == ["po_billed_beyond_total"]
+
+
+@pytest.mark.asyncio
+async def test_realdb_partial_bills_within_the_po_total_do_not_warn(realdb):
+    """Partial deliveries billed one by one are legitimate: two halves of a PO,
+    or another currency's invoice citing it, never read as over-billing."""
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        await _add_po(s, org_id, ent, po_number="PO-HALVES", total="1000.00", currency="USD")
+        await _add_invoice(s, org_id, ent, po_number="PO-HALVES", amount="500.00")
+        await _add_invoice(s, org_id, ent, po_number="PO-HALVES", amount="900.00", currency="EUR")
+        second_half = await _add_invoice(s, org_id, ent, po_number="PO-HALVES", amount="500.00")
+        await s.commit()
+
+        warnings = await _overbilling_codes(s, second_half)
+
+    assert warnings == []
