@@ -174,8 +174,10 @@ test.describe('/billing (admin)', () => {
 			await expect(plan.getByText('Active', { exact: true })).toBeVisible();
 			// Exact price rendered through <Money> ($49.00).
 			await expect(plan.getByText('$49.00')).toBeVisible();
-			// The granted entitlement flag surfaces.
-			await expect(plan.getByText('public api')).toBeVisible();
+			// The granted entitlement surfaces under the name the pricing page
+			// gives it (`planFeature.publicApi`), not as its raw `public_api` key.
+			await expect(plan.getByText('Public API and webhooks', { exact: true })).toBeVisible();
+			await expect(plan.getByText('public api')).toHaveCount(0);
 			// Usage meters still render.
 			await expect(page.locator('.kpi-label', { hasText: 'Extractions' }).first()).toBeVisible();
 		} finally {
@@ -186,6 +188,55 @@ test.describe('/billing (admin)', () => {
 			}
 			// Only now — restoring while this test's row is still live would
 			// recreate the two-live-rows collision the index forbids.
+			restoreLiveSubscriptions(parked);
+		}
+	});
+
+	test('a past-due subscription leads with a callout that takes the reader to the card', async ({
+		page
+	}) => {
+		// The dunning state (`active → past_due → canceled`, services/billing/
+		// dunning_sweep.py) is the one that needs the reader to act before the
+		// sweep cancels them, so the page says so above the plan and links to
+		// where the card is replaced. Seeded the same way as the test above.
+		const orgId = currentOrgId();
+		const planCode = `e2e_billing_pd_${Date.now()}`;
+		let planId: string | null = null;
+		const parked = parkLiveSubscriptions(orgId);
+		try {
+			planId = controlPsql(
+				`INSERT INTO plans (id, code, name, monthly_price, currency, seat_component, ` +
+					`usage_components, entitlements, trial_days, is_active, created_at, updated_at) ` +
+					`VALUES (gen_random_uuid(), '${planCode}', 'E2E Past Due', 49.00, 'USD', '{}'::jsonb, ` +
+					`'{}'::jsonb, '{}'::jsonb, 0, true, now(), now()) RETURNING id`
+			);
+			controlPsql(
+				`INSERT INTO subscriptions (id, organization_id, plan_id, status, ` +
+					`current_period_start, current_period_end, trial_end, created_at, updated_at) ` +
+					`VALUES (gen_random_uuid(), '${orgId}', '${planId}', 'past_due', ` +
+					`now() - interval '5 days', now() + interval '25 days', NULL, now(), now())`
+			);
+
+			await page.goto('/billing');
+
+			const callout = page.getByTestId('billing-status-callout');
+			await expect(callout).toBeVisible({ timeout: 10_000 });
+			await expect(callout.getByText('Payment overdue')).toBeVisible();
+			const action = callout.getByRole('link', { name: 'Update payment method' });
+			await expect(action).toHaveAttribute('href', '#billing-payment-methods');
+			await expect(page.locator('#billing-payment-methods')).toHaveAttribute(
+				'data-testid',
+				'billing-payment-methods'
+			);
+			// The callout sits above the plan card it is about.
+			const calloutBox = await callout.boundingBox();
+			const planBox = await page.getByTestId('billing-plan').boundingBox();
+			expect(calloutBox && planBox && calloutBox.y < planBox.y).toBe(true);
+		} finally {
+			if (planId) {
+				controlPsql(`DELETE FROM subscriptions WHERE plan_id='${planId}'`);
+				controlPsql(`DELETE FROM plans WHERE id='${planId}'`);
+			}
 			restoreLiveSubscriptions(parked);
 		}
 	});
