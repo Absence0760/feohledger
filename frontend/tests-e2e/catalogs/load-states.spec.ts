@@ -163,7 +163,7 @@ test.describe('/catalogs load states', () => {
 	});
 
 	/**
-	 * A navigation that REUSES the page — the sidebar row clicked while filtered,
+	 * A navigation that REUSES the page — the section tab clicked while filtered,
 	 * Back/Forward between two of its history entries — must re-apply the URL.
 	 * The filters were read once at mount, so the address bar changed and the
 	 * view did not (ui-patterns.md § "Reading the URL once at mount is only half
@@ -189,11 +189,17 @@ test.describe('/catalogs load states', () => {
 		await expect(punchout).toHaveAttribute('aria-pressed', 'true');
 		await expect(searchBox).toHaveValue('paper');
 
-		// The sidebar row: a real client-side navigation to the same route, bare.
+		// The section tab: a real client-side navigation to the same route, bare.
+		// /catalogs is a Procurement child, so its sidebar row is the group's
+		// (aria-current="true", linking the group's first child); the link to
+		// /catalogs itself is the active tab, which SectionTabs keeps in the row.
 		const unfiltered = page.waitForResponse(
 			(r) => isCatalogList(r) && !r.url().includes('catalog_type=') && !r.url().includes('search=')
 		);
-		await page.getByRole('navigation', { name: 'Primary' }).locator('[aria-current="page"]').click();
+		await page
+			.getByRole('navigation', { name: 'Procurement sections' })
+			.getByRole('link', { name: 'Catalogs', exact: true })
+			.click();
 		await unfiltered;
 		await expect(page).toHaveURL(/\/catalogs$/);
 		await expect(punchout).toHaveAttribute('aria-pressed', 'false');
