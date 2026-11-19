@@ -66,7 +66,7 @@ bulk offer spans many invoices and has no single net due date, so for one with
 no `valid_until` either there is **nothing to accelerate against** — the APR has
 no value, not a value of zero.
 
-`_build_opportunity` used to end its due-date chain at `or pay_by`, substituting
+`build_opportunity` (`services/discount_opportunities.py`) used to end its due-date chain at `or pay_by`, substituting
 the discount deadline for the missing due date. That is `days_accelerated == 0`,
 and the object it produced contradicted itself:
 
@@ -262,7 +262,7 @@ every accept path. All four now ask one gate,
 `discount_auto_trigger.settled_invoice_status`: `POST /offers/{id}/accept` and
 the supplier portal's accept answer `409` naming the status, while the
 auto-accept sweep and the copilot's `capture-discounts` skip the offer and leave
-it `offered`. The optimizer's candidate builder (`api/discounts._build_opportunity`
+it `offered`. The optimizer's candidate builder (`discount_opportunities.build_opportunity`
 — behind `POST /optimize`, the dashboard's `projected_savings` and the copilot's
 plans) drops such an offer too, so it is never ranked, selected or summed into
 savings nobody can take. The predicate, `discount_offers.invoice_awaits_payment`, is
@@ -404,7 +404,7 @@ every place a `Payment` reaches `completed` in `app/api/payments.py`:
   savings realized on a number in dispute. See
   [payments.md](payments.md) § Settlement-amount verification.
 
-Both call the shared `_capture_discount_offers` helper →
+Both call the shared `discount_opportunities.capture_discount_offers` helper →
 `discount_capture.capture_offer_for_settled_payment`. **A payment booked with a
 discount** (`Payment.discount_offer_id`, migration 0104 — § Paying the
 discounted amount below) captures exactly that offer, for exactly
@@ -476,7 +476,7 @@ never raises on an already-`captured` offer. `mark_captured`'s own status
 guard is a second backstop against a genuine race between two settlement
 paths. **Best-effort**: the whole capture attempt (including resolving the
 invoice on the webhook leg) runs inside a try/except in
-`_capture_discount_offers` — a failure here is logged (exception class only)
+`capture_discount_offers` — a failure here is logged (exception class only)
 and swallowed, never the reason a payment that DID settle fails to record
 that it settled, or the reason a webhook delivery 5xxs and gets needlessly
 retried.
