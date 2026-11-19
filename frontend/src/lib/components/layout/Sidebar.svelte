@@ -52,6 +52,14 @@
 		if (sidebar.overlay) sidebar.collapse();
 	});
 
+	function onProfileFocusOut(e: FocusEvent) {
+		if (!showProfile) return;
+		const next = e.relatedTarget as Node | null;
+		const wrapper = e.currentTarget as HTMLElement;
+		if (next && wrapper.contains(next)) return;
+		showProfile = false;
+	}
+
 	function onWindowKeydown(e: KeyboardEvent) {
 		if (e.key !== 'Escape') return;
 		// An open modal dialog owns Escape: its own `focusTrap` handler closes
@@ -220,7 +228,15 @@
 		{#if !collapsed}<span class="help-label">{m('shell.help')}</span>{/if}
 	</a>
 
-	<div class="profile-wrapper">
+	<!--
+		Focus leaving the disclosure closes it (WCAG 2.4.11 Focus Not Obscured):
+		left open, Shift+Tab from the trigger lands on the Help link, which the
+		popover is drawn over, and in the collapsed rail it covers the icon
+		column. Focus is not moved — it is already where the reader sent it. A
+		null `relatedTarget` (focus going to the page body or another window)
+		closes it too: nothing inside the wrapper holds focus any more.
+	-->
+	<div class="profile-wrapper" onfocusout={onProfileFocusOut}>
 		{#if showProfile}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div class="profile-backdrop" onclick={() => (showProfile = false)} onkeydown={() => {}}></div>

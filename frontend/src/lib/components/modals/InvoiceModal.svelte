@@ -3117,7 +3117,14 @@
 		border: 1px solid var(--border);
 		border-radius: 8px;
 		width: min(1300px, 95vw);
-		height: min(800px, 92vh);
+		/* 90vh is `.modal`'s own cap, so the height asked for is the height
+		   drawn; and the cap is lifted to the fullscreen value (app.css) on
+		   both sides of the toggle, so only `height` changes when it flips and
+		   the transition below runs from where the dialog actually is. A cap
+		   that switched from 90vh to none in one frame made it jump first. */
+		height: min(800px, 90vh);
+		max-height: 100vh;
+		max-height: 100dvh;
 		display: flex;
 		flex-direction: column;
 		box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);

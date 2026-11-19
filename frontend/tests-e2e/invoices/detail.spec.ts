@@ -119,6 +119,41 @@ test.describe('/invoices invoice detail modal', () => {
 			.toBeLessThan(viewport.width);
 	});
 
+	// On a phone the fullscreen dialog is sized to the DYNAMIC viewport
+	// (app.css: `100dvh` after a `100vh` fallback). `100vh` is the height with
+	// the browser toolbar retracted, so while the toolbar showed, the pinned
+	// action footer sat under it. Headless Chromium has no toolbar (dvh = vh
+	// there), so this pins the outcome the change is for: at phone width the
+	// fullscreen dialog fits the viewport and every footer button is on screen.
+	test('fullscreen at 390px keeps the action footer inside the viewport', async ({ page }) => {
+		await page.locator('table tbody tr').first().getByRole('button', { name: 'Edit' }).click();
+		const modal = page.locator('div.modal[role="dialog"][aria-label*="Edit invoice"]');
+		await expect(modal).toBeVisible();
+		await page.setViewportSize({ width: 390, height: 844 });
+
+		const toggle = modal.getByRole('button', { name: 'Fullscreen' });
+		await toggle.click();
+		await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+		await expect
+			.poll(async () => {
+				const box = await modal.boundingBox();
+				return box && [box.x, box.y, Math.round(box.width), Math.round(box.height)];
+			})
+			.toEqual([0, 0, 390, 844]);
+
+		const buttons = modal.getByTestId('invoice-modal-actions').locator('button:visible');
+		const count = await buttons.count();
+		expect(count).toBeGreaterThan(0);
+		for (let i = 0; i < count; i++) {
+			const box = await buttons.nth(i).boundingBox();
+			expect(box, `footer button ${i} has no box`).not.toBeNull();
+			expect(box!.x).toBeGreaterThanOrEqual(0);
+			expect(box!.y).toBeGreaterThanOrEqual(0);
+			expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+			expect(box!.y + box!.height).toBeLessThanOrEqual(844);
+		}
+	});
+
 	test('Activity timeline renders the per-field before/after change diff', async ({
 		page
 	}) => {

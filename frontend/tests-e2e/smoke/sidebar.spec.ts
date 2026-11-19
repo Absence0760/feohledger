@@ -1,4 +1,6 @@
+import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/helpers';
+import { expectNoA11yViolations } from '../a11y/axe-helper';
 
 /**
  * Shared side panel (the left nav `Sidebar`, rendered in every authenticated
@@ -7,7 +9,8 @@ import { expect, test } from '../fixtures/helpers';
  * The profile popover is an overlay menu opened from the sidebar footer. It
  * dismisses on backdrop click — but used to ignore Escape (its backdrop carried
  * a no-op `onkeydown`), stranding a keyboard user who opened it. These assert
- * both dismissal paths and that Escape restores focus to the trigger.
+ * both dismissal paths and that Escape restores focus to the trigger, and that
+ * focus leaving it closes it (it is drawn over the Help link, 2.4.11).
  *
  * Read-only (no mutation) → parallel-safe across worker tenants.
  */
@@ -55,7 +58,77 @@ test.describe('sidebar profile popover', () => {
 		await page.locator('.profile-backdrop').click();
 		await expect(page.locator('.profile-popover')).toBeHidden();
 	});
+
+	// WCAG 2.4.11 Focus Not Obscured. The popover is drawn ABOVE its trigger
+	// (`bottom: 100%`), over the Help link, so a disclosure left open while
+	// focus moved on hid the very control focus moved to. Focus leaving the
+	// wrapper closes it; focus itself is not moved.
+	test('Shift+Tab out of the open popover closes it, and Help is focused and not covered', async ({
+		page
+	}) => {
+		await page.goto('/');
+		const trigger = page.locator('.profile-btn');
+		await trigger.click();
+		await expect(page.locator('.profile-popover')).toBeVisible();
+		await expect(trigger).toBeFocused();
+
+		await page.keyboard.press('Shift+Tab');
+		await expect(page.locator('.profile-popover')).toBeHidden();
+		await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+		const help = page.getByTestId('sidebar-help');
+		await expect(help).toBeFocused();
+		expect(await topmostIsInside(page, 'sidebar-help')).toBe(true);
+	});
+
+	test('Tab past Log out closes it and leaves focus on the next control', async ({ page }) => {
+		await page.goto('/');
+		await page.locator('.profile-btn').click();
+		const popover = page.locator('.profile-popover');
+		await expect(popover).toBeVisible();
+
+		await page.keyboard.press('Tab'); // Profile & security
+		await page.keyboard.press('Tab'); // Legal & privacy
+		await page.keyboard.press('Tab'); // Log out
+		await expect(popover.locator('.profile-logout')).toBeFocused();
+		await expect(popover).toBeVisible();
+
+		await page.keyboard.press('Tab');
+		await expect(popover).toBeHidden();
+		await expect(page.locator('.collapse-btn')).toBeFocused();
+	});
+
+	for (const theme of ['dark', 'light'] as const) {
+		test(`open in the collapsed rail it has no axe violations in the ${theme} theme`, async ({
+			page
+		}) => {
+			await page.addInitScript((value) => {
+				try {
+					localStorage.setItem('feoh_theme', value);
+				} catch {
+					// about:blank — ignore
+				}
+			}, theme);
+			await page.goto('/');
+			await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+			await page.locator('.collapse-btn').click();
+			const trigger = page.locator('.profile-btn');
+			await expect(trigger).toHaveClass(/collapsed/);
+
+			await trigger.click();
+			await expect(page.locator('.profile-popover')).toBeVisible();
+			await expectNoA11yViolations(page);
+		});
+	}
 });
+
+/** Whether the element drawn at the centre of `testId` is that element (or inside it). */
+async function topmostIsInside(page: Page, testId: string): Promise<boolean> {
+	return page.getByTestId(testId).evaluate((el) => {
+		const r = el.getBoundingClientRect();
+		const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+		return hit !== null && el.contains(hit);
+	});
+}
 
 /**
  * The notification bell lives in the sidebar header (it replaced the old

@@ -1307,15 +1307,30 @@ html.has-bulk-bar body {
 }
 /* `<Modal fullscreen>`: no gutter, the whole viewport, square corners. The
    selector outranks a caller's own `.modal.<class>` sizing, so the toggle
-   wins without each caller restating it. */
+   wins without each caller restating it.
+
+   The size is the DYNAMIC viewport (`dvh` / `dvw`), with the `vh` / `vw`
+   line before it as the fallback for an engine without them. On a phone
+   `100vh` is the LARGE viewport — the height with the browser toolbar
+   retracted — so while the toolbar shows, the bottom of a 100vh dialog sits
+   under it, and a dialog that pins its actions to its foot (InvoiceModal's
+   `.form-actions`) loses them there.
+
+   `max-height` is the same box rather than `none`: a dialog that animates
+   its height into this state (InvoiceModal) is then capped by the same value
+   on both sides of the toggle, so the cap does not drop away in one frame
+   and make the dialog jump before the transition starts. */
 .backdrop.backdrop-flush {
 	--backdrop-pad: 0px;
 }
 .backdrop.backdrop-flush > .modal.modal-fullscreen {
 	width: 100vw;
+	width: 100dvw;
 	height: 100vh;
+	height: 100dvh;
 	max-width: none;
-	max-height: none;
+	max-height: 100vh;
+	max-height: 100dvh;
 	border-radius: 0;
 	border: none;
 }

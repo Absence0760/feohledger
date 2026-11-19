@@ -233,6 +233,37 @@ test.describe('/invoices — e-invoice export', () => {
 		await expect(modal).toBeVisible();
 	});
 
+	// The menu is `position: absolute` inside `.form-scroll` (overflow-y: auto,
+	// in a pane with overflow: hidden), so the pane — not the window — is what
+	// clips it. Placement measured against `window.innerHeight` left it opening
+	// downward off the bottom of the pane, cut off; it measures against the
+	// nearest clipping ancestor now (`utils/menuButton.clipBounds`).
+	test('the open menu stays inside the scrolling form pane', async ({ page }) => {
+		const inv = await createValidInvoice(page);
+		const modal = await openModal(page, inv.id);
+
+		const toggle = modal.getByTestId('einvoice-menu-toggle');
+		// Put the trigger at the very bottom of the pane: no room below it.
+		await toggle.evaluate((el) => el.scrollIntoView({ block: 'end' }));
+		await toggle.click();
+		const menu = modal.getByTestId('einvoice-menu');
+		await expect(menu).toBeVisible();
+
+		const pane = modal.getByTestId('invoice-form-scroll');
+		await expect
+			.poll(async () => {
+				const [m, p] = await Promise.all([menu.boundingBox(), pane.boundingBox()]);
+				if (!m || !p) return 'unmeasured';
+				const inside =
+					m.y >= p.y - 0.5 &&
+					m.y + m.height <= p.y + p.height + 0.5 &&
+					m.x >= p.x - 0.5 &&
+					m.x + m.width <= p.x + p.width + 0.5;
+				return inside ? 'inside' : JSON.stringify({ menu: m, pane: p });
+			})
+			.toBe('inside');
+	});
+
 	test('a refused dialect names the fields that made it non-compliant', async ({ page }) => {
 		const inv = await createInvalidInvoice(page);
 		const modal = await openModal(page, inv.id);
