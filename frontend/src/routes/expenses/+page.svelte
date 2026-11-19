@@ -77,6 +77,7 @@
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import CsvImportErrors from '#lib/components/ui/CsvImportErrors.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
@@ -467,14 +468,14 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					`Selected the first ${res.ids.length} of ${res.total} matching — narrow your filters to select the rest.`,
+					m('expenses.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
 					'error'
 				);
 			} else {
-				toast(`Selected all ${res.ids.length} matching expense(s)`, 'success');
+				toast(m('expenses.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
-		} catch {
-			toast('Failed to select all matching', 'error');
+		} catch (err) {
+			toast(err instanceof Error ? err.message : m('expenses.toast.selectAllFailed'), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -575,14 +576,11 @@
 	// re-fetches through `loadReports()` — so it needs no `supersedeInFlight()`;
 	// the sequencer here only stops two of those refreshes landing out of order.
 	// Three states, not one: a failed load must not read as "nothing matched".
-	// The search term reaches the server, so once the fetch settles the plain
-	// empty message is a true statement about the whole filtered set.
+	// The failed state renders `ui/LoadError` (with a Retry) in the table's
+	// place. The search term reaches the server, so once the fetch settles the
+	// plain empty message is a true statement about the whole filtered set.
 	let expensesEmptyMessage = $derived(
-		expenseStore.loading
-			? m('expenses.loading')
-			: expenseStore.errored
-				? m('expenses.empty.errored')
-				: m('expenses.empty')
+		expenseStore.loading ? m('expenses.loading') : m('expenses.empty')
 	);
 
 	const reportsSequence = createRequestSequencer();
@@ -1263,6 +1261,13 @@
 			<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
 		</div>
 
+		{#if expenseStore.errored}
+			<LoadError
+				message={m('expenses.empty.errored')}
+				onretry={() => expenseStore.fetch(buildParams()).catch(() => {})}
+				testId="expenses-error"
+			/>
+		{:else}
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={expenseStore.all.length === 0}
@@ -1350,14 +1355,15 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		{/if}
 
-		{#if expenseStore.hasMore}
+		{#if expenseStore.hasMore && !expenseStore.errored}
 			<div class="load-more-row">
 				<button class="btn-load-more" onclick={() => expenseStore.loadMore()} disabled={expenseStore.loading}>
 					{expenseStore.loading ? m('expenses.loading') : m('expenses.loadMore', { shown: expenseStore.all.length, total: expenseStore.total })}
 				</button>
 			</div>
-		{:else if expenseStore.total > 0}
+		{:else if expenseStore.total > 0 && !expenseStore.errored}
 			<div class="load-more-row">
 				<span class="load-more-end">{m('expenses.showingAll', { total: expenseStore.total })}</span>
 			</div>

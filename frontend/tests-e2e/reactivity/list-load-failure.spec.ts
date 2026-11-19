@@ -46,6 +46,7 @@ const CASES: Case[] = [
 	},
 	{
 		name: 'expenses',
+		retry: true,
 		route: '/expenses',
 		apiPathname: '/api/expenses',
 		notShown: /No expenses match your filters/,
