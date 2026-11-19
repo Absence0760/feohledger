@@ -723,6 +723,7 @@ export const messages = {
 		'抽出の事前情報: {cache, plural, other {取引先キャッシュ項目 # 件}}、{rag, plural, other {RAG 近傍 # 件}}',
 	'invoices.empty': 'フィルターに一致する請求書はありません。',
 	'invoices.empty.errored': '請求書を読み込めませんでした。もう一度お試しください。',
+	'invoices.toast.loadMoreFailed': '請求書をこれ以上読み込めませんでした。',
 	'invoices.empty.fresh': 'まだ請求書がありません。アップロード、手動作成、またはCSVをインポートして未払いのAPを読み込んでください。',
 	'invoices.row.delete': '削除',
 	'invoices.row.confirm': '確認',
@@ -1663,6 +1664,7 @@ export const messages = {
 
 	'recurring.dayOfPeriod': '{day}日',
 	'recurring.empty': 'フィルターに一致する定期請求テンプレートはありません。',
+	'recurring.empty.fresh': '定期請求テンプレートはまだありません。',
 	'recurring.notFound': 'テンプレートが見つかりません',
 	'recurring.row.open': 'テンプレート{name}を開く',
 	'recurring.row.generateNow': '今すぐ生成',
@@ -3978,6 +3980,7 @@ export const messages = {
 	'creditMemos.toast.createFailed': '作成に失敗しました',
 	'creditMemos.toast.created': 'クレジットメモを作成しました',
 	'creditMemos.toast.loadFailed': 'クレジットメモを読み込めませんでした',
+	'creditMemos.toast.loadMoreFailed': 'クレジットメモをこれ以上読み込めませんでした。',
 	'creditMemos.toast.updateFailed': '更新に失敗しました',
 	'creditMemos.toast.updated': 'クレジットメモを更新しました',
 	'creditMemos.toast.voidFailed': '無効化に失敗しました',

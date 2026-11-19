@@ -29,6 +29,7 @@
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -42,6 +43,7 @@
 	import { untrack } from 'svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { daysUntil } from './relativeRun.ts';
 
 	const canCreate = $derived(auth.isManager);
 
@@ -88,8 +90,17 @@
 	let pageNum = $state(1);
 	let loading = $state(true);
 	let loadingMore = $state(false);
+	// The latest list load failed. `LoadError` replaces the table: clearing the
+	// rows left "No recurring templates match your filters." asserting an empty
+	// list the page never actually received.
+	let loadErrored = $state(false);
 
 	let hasMore = $derived(templates.length < total);
+	// "No templates match your filters" is false with no filter on: a fresh
+	// tenant reads that it filtered something out.
+	let noActiveFilters = $derived(
+		!search.trim() && statusFilter === 'all' && glFilter === 'all'
+	);
 
 	// Modal state: null = create; a RecurringTemplate = detail/edit.
 	let showCreate = $state(false);
@@ -150,7 +161,10 @@
 		// fresh (non-append) list load; its own sequencer guards ordering.
 		if (!opts.append) void loadSummary();
 		if (opts.append) loadingMore = true;
-		else loading = true;
+		else {
+			loading = true;
+			loadErrored = false;
+		}
 		try {
 			const data = await listRecurring({ ...buildParams(), page: nextPage, page_size: PAGE_SIZE });
 			// Superseded by a newer load, or by a local edit.
@@ -162,8 +176,15 @@
 			// `isCurrentRequest`, not `canCommit`: a load superseded by a local
 			// edit still failed, and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			if (!opts.append) templates = [];
-			toast(e instanceof Error ? e.message : m('recurring.toast.loadFailed'), 'error');
+			// A failed Load-more keeps the rows already shown, so a toast is
+			// enough; a failed list load is stated in place, with a Retry.
+			if (opts.append) {
+				toast(e instanceof Error ? e.message : m('recurring.toast.loadFailed'), 'error');
+			} else {
+				templates = [];
+				total = 0;
+				loadErrored = true;
+			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -332,9 +353,8 @@
 	/** Friendly relative "in 3 days" / "5 days ago" for the next run. */
 	function relativeRun(s: string | null): string {
 		if (!s) return '';
-		const d = new Date(s);
-		if (Number.isNaN(d.getTime())) return '';
-		const days = Math.round((d.getTime() - Date.now()) / 86_400_000);
+		const days = daysUntil(s);
+		if (days === null) return '';
 		if (days === 0) return m('recurring.rel.today');
 		if (days > 0) return m('recurring.rel.inDays', { n: days });
 		return m('recurring.rel.daysAgo', { n: -days });
@@ -426,10 +446,21 @@
 		</div>
 	</div>
 
+	{#if loadErrored}
+		<LoadError
+			message={m('recurring.toast.loadFailed')}
+			onretry={() => load()}
+			testId="recurring-load-error"
+		/>
+	{:else}
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={!loading && templates.length === 0}
-		empty={loading ? m('common.loading') : m('recurring.empty')}
+		empty={loading
+			? m('common.loading')
+			: noActiveFilters
+				? m('recurring.empty.fresh')
+				: m('recurring.empty')}
 		colspan={8}
 	>
 		{#snippet body()}
@@ -542,6 +573,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	{/if}
 
 	{#if hasMore}
 		<div class="load-more-row">

@@ -731,6 +731,7 @@ export const messages = {
 		'Antécédents d’extraction : {cache, plural, one {# champ en cache fournisseur} other {# champs en cache fournisseur}}, {rag, plural, one {# voisin RAG} other {# voisins RAG}}',
 	'invoices.empty': 'Aucune facture ne correspond à vos filtres.',
 	'invoices.empty.errored': 'Impossible de charger les factures. Réessayez.',
+	'invoices.toast.loadMoreFailed': 'Impossible de charger plus de factures.',
 	'invoices.empty.fresh': 'Aucune facture pour le moment. Téléversez-en une, créez-en une manuellement, ou importez un CSV pour charger vos créances ouvertes.',
 	'invoices.row.delete': 'Supprimer',
 	'invoices.row.confirm': 'Confirmer',
@@ -1695,6 +1696,7 @@ export const messages = {
 
 	'recurring.dayOfPeriod': 'jour {day}',
 	'recurring.empty': 'Aucun modèle récurrent ne correspond à vos filtres.',
+	'recurring.empty.fresh': 'Aucun modèle récurrent pour l’instant.',
 	'recurring.notFound': 'Modèle introuvable',
 	'recurring.row.open': 'Ouvrir le modèle {name}',
 	'recurring.row.generateNow': 'Générer maintenant',
@@ -4048,6 +4050,7 @@ export const messages = {
 	'creditMemos.toast.createFailed': 'Échec de la création',
 	'creditMemos.toast.created': 'Avoir créé',
 	'creditMemos.toast.loadFailed': 'Échec du chargement des avoirs',
+	'creditMemos.toast.loadMoreFailed': 'Impossible de charger plus d’avoirs.',
 	'creditMemos.toast.updateFailed': 'Échec de la mise à jour',
 	'creditMemos.toast.updated': 'Avoir mis à jour',
 	'creditMemos.toast.voidFailed': 'Échec de l\'annulation',

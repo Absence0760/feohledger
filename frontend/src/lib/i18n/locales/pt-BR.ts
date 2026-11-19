@@ -732,6 +732,7 @@ export const messages = {
 		'Dados prévios de extração: {cache, plural, one {# campo em cache do fornecedor} other {# campos em cache do fornecedor}}, {rag, plural, one {# vizinho RAG} other {# vizinhos RAG}}',
 	'invoices.empty': 'Nenhuma fatura corresponde aos seus filtros.',
 	'invoices.empty.errored': 'Não foi possível carregar as faturas. Tente novamente.',
+	'invoices.toast.loadMoreFailed': 'Não foi possível carregar mais faturas.',
 	'invoices.empty.fresh': 'Ainda não há faturas. Envie uma, crie uma manualmente ou importe um CSV para carregar suas contas a pagar em aberto.',
 	'invoices.row.delete': 'Excluir',
 	'invoices.row.confirm': 'Confirmar',
@@ -1696,6 +1697,7 @@ export const messages = {
 
 	'recurring.dayOfPeriod': 'dia {day}',
 	'recurring.empty': 'Nenhum modelo recorrente corresponde aos seus filtros.',
+	'recurring.empty.fresh': 'Ainda não há modelos recorrentes.',
 	'recurring.notFound': 'Modelo não encontrado',
 	'recurring.row.open': 'Abrir modelo {name}',
 	'recurring.row.generateNow': 'Gerar agora',
@@ -4043,6 +4045,7 @@ export const messages = {
 	'creditMemos.toast.createFailed': 'Falha ao criar',
 	'creditMemos.toast.created': 'Nota de crédito criada',
 	'creditMemos.toast.loadFailed': 'Falha ao carregar as notas de crédito',
+	'creditMemos.toast.loadMoreFailed': 'Não foi possível carregar mais notas de crédito.',
 	'creditMemos.toast.updateFailed': 'Falha ao atualizar',
 	'creditMemos.toast.updated': 'Nota de crédito atualizada',
 	'creditMemos.toast.voidFailed': 'Falha ao anular',

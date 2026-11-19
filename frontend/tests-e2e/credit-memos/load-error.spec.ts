@@ -1,0 +1,38 @@
+import { expect, test } from '../fixtures/helpers';
+import type { Route } from '@playwright/test';
+
+/**
+ * `/credit-memos` — a failed list load is stated in place with `ui/LoadError` and a
+ * Retry, never as the table's empty line (the empty line alone left a failed filter change showing the previous filter's rows, with no way to retry).
+ *
+ * Only the FIRST GET of the exact list pathname is failed (the module-request
+ * trap in tests-e2e/README.md § Stubbing an API route), so Retry reaches the
+ * real backend and the recovery is real.
+ */
+test('/credit-memos: a failed list load shows LoadError, and Retry recovers', async ({ page }) => {
+	let failed = false;
+	await page.route(
+		(url) => url.pathname === '/api/credit-memos',
+		async (route: Route) => {
+			if (route.request().method() !== 'GET' || failed) return route.fallback();
+			failed = true;
+			return route.fulfill({
+				status: 500,
+				contentType: 'application/json',
+				body: JSON.stringify({ detail: 'boom' })
+			});
+		}
+	);
+
+	await page.goto('/credit-memos');
+	const loadError = page.getByTestId('credit-memos-load-error');
+	await expect(loadError).toBeVisible();
+	await expect(loadError).toHaveAttribute('role', 'alert');
+	await expect(page.getByRole('table')).toHaveCount(0);
+
+	await loadError.getByRole('button').click();
+	// Retry unmounts the button it was pressed on; focus goes to <main>, not <body>.
+	await expect(page.locator('main')).toBeFocused();
+	await expect(loadError).toHaveCount(0);
+	await expect(page.getByRole('table').or(page.getByTestId('credit-memos-empty-state'))).toBeVisible();
+});
