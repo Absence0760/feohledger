@@ -1692,6 +1692,9 @@ export const en = {
 	// Notifications (routes/notifications/+page.svelte)
 	'notifications.title': 'Notifications',
 	'notifications.markAllRead': 'Mark all read',
+	'notifications.markRead': "Mark read",
+	'notifications.markReadAria': "Mark read: {title}",
+	'notifications.markReadFailed': "Could not mark as read",
 	'notifications.markedRead': '{n, plural, one {Marked # as read} other {Marked # as read}}',
 	'notifications.nothingToMark': 'Nothing to mark',
 	'notifications.markAllFailed': 'Failed to mark all read',

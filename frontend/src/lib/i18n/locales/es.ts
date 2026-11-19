@@ -1549,6 +1549,9 @@ export const messages = {
 	// Notifications
 	'notifications.title': 'Notificaciones',
 	'notifications.markAllRead': 'Marcar todas como leídas',
+	'notifications.markRead': "Marcar como leída",
+	'notifications.markReadAria': "Marcar como leída: {title}",
+	'notifications.markReadFailed': "No se pudo marcar como leída",
 	'notifications.markedRead':
 		'{n, plural, one {# marcada como leída} other {# marcadas como leídas}}',
 	'notifications.nothingToMark': 'Nada que marcar',

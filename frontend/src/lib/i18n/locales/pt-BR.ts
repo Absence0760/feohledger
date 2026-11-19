@@ -1553,6 +1553,9 @@ export const messages = {
 	// Notifications
 	'notifications.title': 'Notificações',
 	'notifications.markAllRead': 'Marcar todas como lidas',
+	'notifications.markRead': "Marcar como lida",
+	'notifications.markReadAria': "Marcar como lida: {title}",
+	'notifications.markReadFailed': "Não foi possível marcar como lida",
 	'notifications.markedRead':
 		'{n, plural, one {# marcada como lida} other {# marcadas como lidas}}',
 	'notifications.nothingToMark': 'Nada para marcar',

@@ -1551,6 +1551,9 @@ export const messages = {
 	// Notifications
 	'notifications.title': 'Benachrichtigungen',
 	'notifications.markAllRead': 'Alle als gelesen markieren',
+	'notifications.markRead': "Als gelesen markieren",
+	'notifications.markReadAria': "Als gelesen markieren: {title}",
+	'notifications.markReadFailed': "Markieren als gelesen fehlgeschlagen",
 	'notifications.markedRead':
 		'{n, plural, one {# als gelesen markiert} other {# als gelesen markiert}}',
 	'notifications.nothingToMark': 'Nichts zu markieren',

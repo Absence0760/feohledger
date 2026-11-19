@@ -5,9 +5,10 @@
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import { page as pageStore } from '$app/state';
 	import { afterNavigate, goto, replaceState } from '$app/navigation';
 	import { formatDate, timeAgo } from '#lib/utils/time.ts';
@@ -112,6 +113,26 @@
 		goto(href);
 	}
 
+	// A row with nowhere to go has no open click to mark it read, so it gets
+	// its own control; without one, "Mark all read" was the only way to clear it.
+	let marking = $state<string | null>(null);
+
+	async function markOne(n: Notification) {
+		if (marking) return;
+		marking = n.id;
+		try {
+			await notificationStore.markRead(n.id);
+			// The button unmounts with the unread state; land focus on the
+			// row's text rather than letting it fall to <body>.
+			await tick();
+			document.querySelector<HTMLElement>(`[data-notif-text="${n.id}"]`)?.focus();
+		} catch {
+			toast(m('notifications.markReadFailed'), 'error');
+		} finally {
+			marking = null;
+		}
+	}
+
 	async function markAll() {
 		try {
 			const updated = await notificationStore.markAllRead({ unreadOnly: filter === 'unread' });
@@ -170,7 +191,7 @@
 						<td>
 							<div class="notif-cell">
 								<span class="notif-dot" class:on={!n.read_at} aria-hidden="true"></span>
-								<div class="notif-text">
+								<div class="notif-text" data-notif-text={n.id} tabindex="-1">
 									{#if href}
 										<RowLink onclick={() => open(n, href)} ariaLabel={m('notifications.open', { title: n.title })}>
 											<span class="notif-title">{n.title}</span>
@@ -183,6 +204,17 @@
 										{EVENT_LABEL_KEYS[n.event_type] ? m(EVENT_LABEL_KEYS[n.event_type]) : n.event_type}
 									</span>
 								</div>
+								{#if !href && !n.read_at}
+									<span class="notif-mark">
+										<RowAction
+											busy={marking === n.id}
+											ariaLabel={m('notifications.markReadAria', { title: n.title })}
+											onclick={() => markOne(n)}
+										>
+											{m('notifications.markRead')}
+										</RowAction>
+									</span>
+								{/if}
 							</div>
 						</td>
 						<td class="muted-cell" title={formatDate(n.created_at, '', DATETIME_OPTS)}>{timeAgo(n.created_at)}</td>
@@ -258,9 +290,15 @@
 	}
 
 	.notif-text {
+		flex: 1;
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+	}
+
+	.notif-mark {
+		flex-shrink: 0;
 	}
 
 	.notif-title {

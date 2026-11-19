@@ -79,6 +79,19 @@
 		goto(href);
 	}
 
+	// A row with nowhere to go cannot be opened, so opening cannot mark it
+	// read; it gets its own control instead of leaving "Mark all read" as the
+	// only way to clear it.
+	async function markOne(n: Notification) {
+		try {
+			await notificationStore.markRead(n.id);
+		} catch {
+			/* non-critical, as markAll: the dot stays, which is the truth */
+		}
+		// The button unmounts once the row is read; keep focus in the dialog.
+		heading?.focus();
+	}
+
 	async function markAll() {
 		try {
 			await notificationStore.markAllRead();
@@ -158,6 +171,16 @@
 							     pretends to open something (lib/utils/notificationHref.ts). -->
 							<div class="bell-item static" class:unread={!n.read_at} data-testid="bell-item-static">
 								{@render itemContent(n)}
+								{#if !n.read_at}
+									<button
+										type="button"
+										class="bell-item-mark"
+										aria-label={m('notifications.markReadAria', { title: n.title })}
+										onclick={() => markOne(n)}
+									>
+										{m('notifications.markRead')}
+									</button>
+								{/if}
 							</div>
 						{/if}
 					{/each}
@@ -371,6 +394,25 @@
 
 	.bell-item.unread {
 		background: color-mix(in srgb, var(--accent) 5%, transparent);
+	}
+
+	.bell-item-mark {
+		margin-left: auto;
+		flex-shrink: 0;
+		min-height: 24px;
+		padding: 2px 8px;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--surface);
+		color: var(--text);
+		font: inherit;
+		font-size: 0.72rem;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+
+	.bell-item-mark:hover {
+		border-color: var(--accent);
 	}
 
 	.bell-dot {

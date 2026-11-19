@@ -1523,6 +1523,9 @@ export const messages = {
 	// Notifications
 	'notifications.title': '通知',
 	'notifications.markAllRead': 'すべて既読にする',
+	'notifications.markRead': "既読にする",
+	'notifications.markReadAria': "既読にする: {title}",
+	'notifications.markReadFailed': "既読にできませんでした",
 	'notifications.markedRead': '{n, plural, other {#件を既読にしました}}',
 	'notifications.nothingToMark': '既読にする項目はありません',
 	'notifications.markAllFailed': 'すべて既読にできませんでした',
