@@ -12,6 +12,7 @@ new tables incl. the circular FK; an explicit table-existence test pins it.
 import uuid
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select, text, update
 
 from app.models.expense import Expense, ExpenseReport
@@ -747,3 +748,31 @@ async def test_summary_is_tenant_scoped(realdb):
         body = (await c.get("/api/expenses/summary")).json()
     assert body["total"] == 0
     assert body["by_currency"] == []
+
+
+async def test_policy_refresh_failure_fails_the_write_not_stales_the_flags(monkeypatch):
+    """A policy-engine failure propagates instead of leaving the stored
+    violations describing the expense as it was before the edit (an approver
+    would see no badge on a line that now breaks policy)."""
+    from types import SimpleNamespace
+
+    import app.api.expenses as expenses_api
+
+    async def _no_policies(_db, _entity_id):
+        return []
+
+    async def _no_cover(_db, _expense):
+        return None
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("policy engine failed")
+
+    monkeypatch.setattr(expenses_api, "_active_policies", _no_policies)
+    monkeypatch.setattr(expenses_api, "_approved_preapproval_amount", _no_cover)
+    monkeypatch.setattr(expenses_api, "evaluate_expense", _boom)
+
+    stale = [{"code": "category_limit"}]
+    expense = SimpleNamespace(entity_id=None, policy_violations=stale)
+    org = SimpleNamespace(settings={})
+    with pytest.raises(RuntimeError):
+        await expenses_api._refresh_policy_violations(None, expense, org)

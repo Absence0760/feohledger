@@ -30,6 +30,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO, require_roles
 from app.database import get_control_db
+from app.models.exception import Exception as APException
 from app.models.expense import Expense, ExpenseReport
 from app.models.gl_account import GLAccount
 from app.models.invoice import Invoice, InvoiceStatus
@@ -1098,24 +1099,22 @@ async def get_cfo_analytics(
                 )
             )
         )
-        exc_count = 0
-        try:
-            from app.models.exception import Exception as APException
-
-            exc_count_q = await db.execute(
-                _exc(
-                    select(func.count(APException.id)).where(
-                        APException.created_at
-                        >= datetime.combine(month_start, datetime.min.time()).replace(tzinfo=UTC),
-                        APException.created_at
-                        <= datetime.combine(month_end, datetime.max.time()).replace(tzinfo=UTC),
-                    ),
-                    APException,
-                )
+        # No `except` here: a failed count used to report 0 exceptions, which
+        # the trend then stated as a 0% fraud rate — a confident claim, not a
+        # safe default. It fails loudly like every sibling figure (the rebate
+        # yield below says the same).
+        exc_count_q = await db.execute(
+            _exc(
+                select(func.count(APException.id)).where(
+                    APException.created_at
+                    >= datetime.combine(month_start, datetime.min.time()).replace(tzinfo=UTC),
+                    APException.created_at
+                    <= datetime.combine(month_end, datetime.max.time()).replace(tzinfo=UTC),
+                ),
+                APException,
             )
-            exc_count = int(exc_count_q.scalar() or 0)
-        except Exception:  # noqa: BLE001
-            exc_count = 0
+        )
+        exc_count = int(exc_count_q.scalar() or 0)
         fraud_rows.append(
             {
                 "month": month_start.strftime("%Y-%m"),
@@ -1638,21 +1637,17 @@ async def _entity_metrics(
         reporting_currency=reporting_currency,
     )
 
-    # Open-exceptions count (entity-scoped) — fails soft to 0.
-    open_exceptions = 0
-    try:
-        from app.models.exception import Exception as APException
-
-        exc_q = await db.execute(
-            apply_entity_scope(
-                select(func.count(APException.id)).where(APException.status == "open"),
-                APException,
-                entity_id,
-            )
+    # Open-exceptions count (entity-scoped). Fails loudly like the figures
+    # beside it: the soft-fail to 0 it once had told a CFO an entity had no open
+    # exceptions when the count had merely not been taken.
+    exc_q = await db.execute(
+        apply_entity_scope(
+            select(func.count(APException.id)).where(APException.status == "open"),
+            APException,
+            entity_id,
         )
-        open_exceptions = int(exc_q.scalar() or 0)
-    except Exception:  # noqa: BLE001
-        open_exceptions = 0
+    )
+    open_exceptions = int(exc_q.scalar() or 0)
 
     # Open-PO accrual — the same per-currency grouping `/cfo`'s accruals card
     # renders (entity-scoped), so the consolidated row and that card agree.

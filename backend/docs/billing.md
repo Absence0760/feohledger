@@ -916,8 +916,11 @@ the org's billing adapter's `list_invoices`:
 The org's provider-side customer id is read from
 `Organization.settings.billing.stripe_customer_id` and passed to the adapter.
 **Graceful degradation:** an org never provisioned with the provider (no customer
-id), an unconfigured/unavailable provider (the live adapter fails closed without
-a key), or any provider error yields an **empty list** — never a 500. Money is an
+id) or an unconfigured provider (the live adapter fails closed without a key,
+`BillingNotConfigured`) yields an **empty list**. Any other provider error is a
+**502** (`Billing provider is unavailable; please retry.`), logged by exception
+class only: an outage reported as "no receipts" is a wrong answer, not a safe
+default. Money is an
 exact decimal **string**. The frontend invoices/receipts UI ships — see
 § Customer-facing UI below.
 
@@ -948,10 +951,13 @@ provider's JS SDK — no charge, and no PAN ever touches our backend:
 
 Both read the provider-side customer id from
 `Organization.settings.billing.stripe_customer_id`. **Graceful degradation:** an
-org never provisioned (no customer id), an unconfigured/unavailable provider (the
-live adapter fails closed without a key), or any provider error yields
+org never provisioned (no customer id) or an unconfigured provider (the live
+adapter fails closed without a key, `BillingNotConfigured`) yields
 `configured=false` + null `client_secret` (setup-intent) or an **empty list**
-(payment-methods) — never a 500.
+(payment-methods). Any other provider error is a **502**, logged by exception
+class only (never the message, which can carry customer detail): an outage
+shown as "no saved cards" invites an admin to add a second card. The page
+already renders each section's load error with a retry.
 
 ## Customer-facing UI (`frontend/src/routes/billing/`)
 

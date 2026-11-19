@@ -487,8 +487,13 @@ async def _maybe_notify_transition(
             recipients.append(uploaded_by_id)
         try:
             recipients.extend(await resolve_role_user_ids(invoice.organization_id, "ap_manager"))
-        except Exception:  # noqa: BLE001 — role lookup must not break the transition
-            pass
+        except Exception as exc:  # noqa: BLE001 — role lookup must not break the transition
+            # The uploader is still notified; the AP managers are not, so say so
+            # (class only — the message may carry a recipient's address).
+            _log.warning(
+                "paid notification: AP manager lookup failed (%s); managers not notified",
+                type(exc).__name__,
+            )
 
     if not event_type:
         return

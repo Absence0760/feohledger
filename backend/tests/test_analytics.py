@@ -1164,3 +1164,31 @@ def test_accruals_by_currency_net_each_currency_within_itself():
         )
         == []
     )
+
+
+def test_exception_counts_on_the_cfo_dashboard_are_never_soft_failed_to_zero():
+    """The fraud-trend exception count (`/cfo`) and the per-entity open-exception
+    count (`/by-entity`) fail loudly like their sibling figures. Each once sat
+    in an `except Exception` that reported 0 — a confident "no exceptions" (and
+    so a 0% fraud rate) when the count had not been taken."""
+    import ast
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "app" / "api" / "analytics.py").read_text()
+    wanted = {"get_cfo_analytics", "_entity_metrics"}
+    funcs = {
+        n.name: n
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.AsyncFunctionDef) and n.name in wanted
+    }
+    assert set(funcs) == wanted
+    for name, fn in funcs.items():
+        for handler in (h for h in ast.walk(fn) if isinstance(h, ast.ExceptHandler)):
+            assigned = {
+                t.id
+                for a in ast.walk(handler)
+                if isinstance(a, ast.Assign)
+                for t in a.targets
+                if isinstance(t, ast.Name)
+            }
+            assert not assigned & {"exc_count", "open_exceptions"}, (name, handler.lineno)
