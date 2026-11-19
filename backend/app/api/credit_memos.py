@@ -171,7 +171,7 @@ def _statuses_a_payment_can_still_net() -> frozenset[InvoiceStatus]:
     — the status a payment is booked under — without first being `paid`, the
     status its payment settles into. That is a reachability question over the
     state machine, so it is answered from `VALID_TRANSITIONS` rather than written
-    out as a list (the `api/payments.SCHEDULABLE_INVOICE_STATUSES` rule): a status
+    out as a list (the `services/payment_gates.SCHEDULABLE_INVOICE_STATUSES` rule): a status
     added to the graph is classified by its edges, and a status with no entry at
     all is refused, never waved through.
 

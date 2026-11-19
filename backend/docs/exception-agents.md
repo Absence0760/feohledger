@@ -345,7 +345,7 @@ that approve ran the invoice through the **platform** defaults:
 
 * a fraud rule the tenant had explicitly **disabled** still opened a
   payment-BLOCKING `fraud_flag` (`duplicate` / `fraud_flag` /
-  `line_total_mismatch` are in `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`),
+  `line_total_mismatch` are in `services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`),
   so the agent's own "resolution" refused the invoice's next payment run; and
 * a stricter-than-default per-vendor / per-commodity PO tolerance
   (`settings.matching.vendor_rules`) was **erased** from `invoice.po_match` by

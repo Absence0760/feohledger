@@ -786,7 +786,7 @@ Reviewers see the match status:
 ### Before Payment
 An unresolved (`open` / `escalated`) `po_mismatch` or `quality_hold` exception
 blocks payment — both are members of
-`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so the run builder refuses the
+`services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so the run builder refuses the
 invoice, the payment queue marks the row blocked (reason code `po_mismatch` /
 `quality_hold`), dispatch refuses a payment whose invoice picked one up after the
 run was built, and `/retry-failed`, `POST /api/payments` and

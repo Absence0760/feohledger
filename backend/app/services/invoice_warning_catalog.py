@@ -1078,7 +1078,7 @@ DIRECT_EXCEPTION_SPECS: tuple[WarningSpec, ...] = (
         "Positive Pay return: check {checkNumber} not on issued file",
         {"checkNumber": "text"},
     ),
-    # `api/vendors.flag_invoice_for_bank_change`.
+    # `services/vendor_bank_change.flag_invoice_for_bank_change`.
     WarningSpec(
         EXCEPTION_PREFIX + "vendor_bank_changed",
         "fraud_flag",

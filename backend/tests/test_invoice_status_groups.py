@@ -204,6 +204,7 @@ def test_consumers_read_the_owner():
         erp_status_sync,
         gl_recode,
         invoice_warnings,
+        payment_gates,
         payment_reconciler,
         retention_sweep,
         vendor_merge,
@@ -228,7 +229,8 @@ def test_consumers_read_the_owner():
     assert invoice_warnings._ERP_SYNC_SKIPPED_STATUSES == ("paid", "done")
     assert erp_status_sync.PAYABLE_HERE == frozenset(PAYABLE_STATUSES)
     assert payment_reconciler.TERMINAL_STATUSES is payment_base.TERMINAL_STATUSES
-    assert api_payments.PAYABLE_INVOICE_STATUSES == tuple(s.value for s in PAYABLE_STATUSES)
+    assert payment_gates.PAYABLE_INVOICE_STATUSES == tuple(s.value for s in PAYABLE_STATUSES)
+    assert api_payments.PAYABLE_INVOICE_STATUSES is payment_gates.PAYABLE_INVOICE_STATUSES
     assert api_vendors._MONEY_MOVED_STATUSES == frozenset(SETTLED_STATUSES)
 
 

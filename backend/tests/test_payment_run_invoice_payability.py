@@ -32,10 +32,10 @@ from decimal import Decimal
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 
-from app.api.payments import PAYABLE_INVOICE_STATUSES, SCHEDULABLE_INVOICE_STATUSES
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment
 from app.models.vendor import Vendor
+from app.services.payment_gates import PAYABLE_INVOICE_STATUSES, SCHEDULABLE_INVOICE_STATUSES
 from app.services.payment_runs import IN_DOUBT, RETRY_SAFE, classify_payment_failure
 from app.services.workflow_engine import VALID_TRANSITIONS
 

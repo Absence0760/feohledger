@@ -506,7 +506,7 @@ retry-safe for the same reason (no order exists at the processor):
   re-attempt it — and its own payability gate keeps skipping the row (as
   `invoice_not_payable`) until the ERP push completes and the invoice reaches
   the payable `posted_in_erp`.
-- `api/payments.SCHEDULABLE_INVOICE_STATUSES` — the statuses the three dispatch
+- `services/payment_gates.SCHEDULABLE_INVOICE_STATUSES` — the statuses the three dispatch
   legs transition to `payment_scheduled` — is now **derived** from
   `workflow_engine.VALID_TRANSITIONS` rather than restated as a literal, so it
   can never again name a status the state machine refuses. It is
@@ -1297,7 +1297,7 @@ is seen by whichever of the two runs second.
 | stamped | same vendor, other bank fingerprint, or one that cannot be recomputed (no fingerprint, or its key in neither setting) | `payee_changed_since_paid` | every approver of a bank change since the stamp |
 | stamped | same vendor, same fingerprint | none | |
 | unstamped (paid before 0128) | a merge into its vendor since the payment was booked | `payee_unrecorded_after_merge` | the stewards of those merges |
-| unstamped | a bank change approved since the payment was booked | `vendor_bank_changed` (`api/vendors.reflag_voided_invoice_for_bank_change`) | every approver of those changes |
+| unstamped | a bank change approved since the payment was booked | `vendor_bank_changed` (`services/vendor_bank_change.reflag_voided_invoice_for_bank_change`) | every approver of those changes |
 
 The merge chain follows each retired vendor's own record; a merge from before
 0128 is read from its `vendor.merged` audit row (the earliest one naming the
@@ -2950,7 +2950,7 @@ section) and `tests/test_payment_create_cfo_gate.py`.
 
 Independently of the CFO threshold, `create_payment_run` refuses any invoice
 that still carries an **unresolved** (`open`/`escalated`) exception of a class
-listed in `payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`. This gate (along with
+listed in `payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`. This gate (along with
 the payable-status check, credit-memo netting, and the CFO-threshold
 computation above) lives in `services/payment_runs.py::create_payment_run_for_invoices`
 — `POST /api/payments/runs` and the AI Cash-Flow Copilot's

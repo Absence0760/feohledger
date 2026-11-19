@@ -1569,7 +1569,7 @@ still receives the email. The approval refusal is what closes the chain.
 ### Segregation of duties on the exception queue
 
 Clearing a payment-**blocking** exception is a money-path authorisation, not
-queue hygiene. `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES` — `duplicate`,
+queue hygiene. `services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES` — `duplicate`,
 `fraud_flag`, `line_total_mismatch`, `payment_reconciliation`, `quality_hold`,
 `po_mismatch` — stops a payment run while the row is `open` **or** `escalated`, and invoice approval gates on
 none of them. So resolving or dismissing one is the human sign-off that lets a

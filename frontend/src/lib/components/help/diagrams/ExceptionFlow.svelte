@@ -3,7 +3,7 @@
 	 * An exception's life: raised (by a check, a match, an agent or a person),
 	 * open in the queue, then resolved, dismissed or escalated — and an
 	 * escalated one is decided later. The four payment-blocking types
-	 * (api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES) keep the invoice out of a
+	 * (services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES) keep the invoice out of a
 	 * payment run while open OR escalated; resolving or dismissing releases it.
 	 * The lock badges carry that, explained by the legend.
 	 */

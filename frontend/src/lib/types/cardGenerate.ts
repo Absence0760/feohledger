@@ -51,7 +51,7 @@ export function alreadyCardedCardId(skip: CardGenerateSkip): string | null {
 
 /**
  * The invoice statuses `POST /api/cards/generate` mints for — the backend's
- * `api/payments.PAYABLE_INVOICE_STATUSES`, which the endpoint filters on. Used
+ * `services/payment_gates.PAYABLE_INVOICE_STATUSES`, which the endpoint filters on. Used
  * ONLY to narrow the Generate dialog's picker; the server re-runs every gate
  * and names whatever it refuses in `skipped`, so a stale list costs an
  * explained skip, never a card. `cardGenerate.test.ts` pins it to the backend.

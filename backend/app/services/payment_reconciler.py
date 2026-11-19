@@ -245,7 +245,7 @@ async def _audit_reconcile_transition(
 
 
 #: Exception type opened when the backstop gives up on a still-in-flight
-#: payment. Payment-BLOCKING (``api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES``)
+#: payment. Payment-BLOCKING (``services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES``)
 #: — that is the whole point: aging a payment out to ``failed`` frees the
 #: invoice's live-payment slot, and nothing else stops the next run paying it
 #: again while the original may still be moving at the rail.
@@ -266,7 +266,7 @@ async def flag_payment_for_reconciliation(
     for it. ``failed`` is in ``LIVE_PAYMENT_TERMINAL_STATUSES``, so that row no
     longer holds the invoice's live-payment slot; this payment-blocking
     exception is what stops a fresh run paying the invoice a second time until a
-    human has reconciled the rail (``api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES``).
+    human has reconciled the rail (``services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES``).
 
     **De-duped** on an already-open/escalated ``payment_reconciliation`` for the
     invoice, so a tenant whose rail is down doesn't accumulate a row per sweep.

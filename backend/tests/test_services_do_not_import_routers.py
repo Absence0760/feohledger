@@ -24,8 +24,8 @@ Two kinds of exception:
   checks evaluate) and `permissions` (the granular permission catalogue). None
   of them defines a route, and moving them is a separate decision.
 * ``KNOWN_OFFENDERS`` — the router imports still to be cleared, file by file.
-  It may only shrink: an import not listed fails, and a listed import that is
-  gone fails too, so whoever clears one deletes its entry in the same change.
+  It is now empty and asserted so; an import not listed fails, and a listed
+  import that is gone fails too.
 """
 
 from __future__ import annotations
@@ -39,14 +39,12 @@ SCANNED_PACKAGES = ("services", "utils")
 ALLOWED_API_MODULES = frozenset({"app.api.refusals", "app.api.deps", "app.api.permissions"})
 
 #: file (relative to `app/`) -> the `app.api.*` modules it still imports.
-KNOWN_OFFENDERS: dict[str, frozenset[str]] = {
-    "services/audit_summary.py": frozenset({"app.api.exceptions"}),
-    "services/erp_export_gate.py": frozenset({"app.api.payments"}),
-    "services/exception_lifecycle.py": frozenset({"app.api.payments"}),
-    "services/external_payment.py": frozenset({"app.api.payments"}),
-    "services/payee_stamp.py": frozenset({"app.api.vendors"}),
-    "services/payment_runs.py": frozenset({"app.api.payments"}),
-}
+#: Empty: the last six were cleared by moving the money-path gates into
+#: `services/payment_gates.py`, the payee-change flag into
+#: `services/vendor_bank_change.py` and the exception-type labels into
+#: `services/exception_lifecycle.py`. It stays as the place a deliberate,
+#: reviewed exception would go, and `test_known_offenders_is_empty` keeps it so.
+KNOWN_OFFENDERS: dict[str, frozenset[str]] = {}
 
 
 def _module_name(path: Path) -> str:
@@ -124,6 +122,33 @@ def test_known_offenders_only_shrink():
     assert not stale, (
         "these allowlisted router imports are gone; delete them from "
         f"KNOWN_OFFENDERS so they cannot come back: {stale}"
+    )
+
+
+def test_known_offenders_is_empty():
+    """Every service-to-router import has been cleared; none comes back by
+    being added to the allowlist."""
+    assert KNOWN_OFFENDERS == {}
+
+
+def test_moved_owners_are_the_ones_the_routers_read():
+    """The routers reuse the service-owned constants rather than restating them."""
+    from app.api import exceptions as api_exceptions
+    from app.api import payments as api_payments
+    from app.api import vendors as api_vendors
+    from app.services import exception_lifecycle, payment_gates, vendor_bank_change
+
+    for name in (
+        "PAYABLE_INVOICE_STATUSES",
+        "SCHEDULABLE_INVOICE_STATUSES",
+        "PAYMENT_BLOCKING_EXCEPTION_TYPES",
+        "INVOICE_LOCKED_REASON",
+        "INVOICE_LOCKED_DETAIL",
+    ):
+        assert getattr(api_payments, name) is getattr(payment_gates, name)
+    assert api_exceptions.EXCEPTION_TYPE_LABELS is exception_lifecycle.EXCEPTION_TYPE_LABELS
+    assert (
+        api_vendors.flag_invoice_for_bank_change is vendor_bank_change.flag_invoice_for_bank_change
     )
 
 

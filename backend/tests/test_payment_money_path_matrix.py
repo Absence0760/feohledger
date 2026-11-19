@@ -32,9 +32,9 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment, PaymentRun
+from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 from tests.test_payment_run_blocking_exceptions import (
     _add_exception,
     _payment_count,

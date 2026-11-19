@@ -979,7 +979,7 @@ retry-safe by construction. The payment fails with the named
 completes and the invoice reaches the payable `posted_in_erp`.
 
 `sent_to_erp` is also gone from the three dispatch legs' transition branch — but
-not by deleting a literal: `api/payments.SCHEDULABLE_INVOICE_STATUSES` is now
+not by deleting a literal: `services/payment_gates.SCHEDULABLE_INVOICE_STATUSES` is now
 **derived** from `workflow_engine.VALID_TRANSITIONS`, so the branch can never
 again name a status the state machine refuses.
 

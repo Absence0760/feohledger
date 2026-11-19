@@ -1058,7 +1058,7 @@ The disclosure problem was real too: `matches_to_warning` put the matched invoic
 
 A NULL `entity_id` on either side means *unstamped* (a pre-multi-entity row, or a single-entity tenant), **not** "some other entity" — so single-entity tenants, the overwhelming majority, see no change at all. When both a same-entity and a cross-entity match exist, the headline is built from the same-entity one (the viewer can act on that and needs the identifiers) with a bare count of the cross-entity ones appended.
 
-The `duplicate` Exception is in `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so a cross-entity hit still blocks the payment run until a human clears it. That is intended: a suspected intra-group double-bill wants the human sign-off, and the clearing path is unchanged.
+The `duplicate` Exception is in `services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so a cross-entity hit still blocks the payment run until a human clears it. That is intended: a suspected intra-group double-bill wants the human sign-off, and the clearing path is unchanged.
 
 ### Threshold rationale
 

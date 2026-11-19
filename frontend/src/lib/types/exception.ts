@@ -4,7 +4,7 @@
 // `Exception.exception_type` is a plain `String(50)` server-side (no DB enum),
 // so the roster the backend declares is the contract: `EXCEPTION_TYPES` in
 // `backend/app/services/exception_lifecycle.py`, labelled for the queue by
-// `backend/app/api/exceptions.py::EXCEPTION_TYPE_LABELS`. `exception.test.ts`
+// `backend/app/services/exception_lifecycle.py::EXCEPTION_TYPE_LABELS`. `exception.test.ts`
 // reads that Python source and fails if either drifts.
 //
 // Why this module exists: the agent decision log rendered its type cell as

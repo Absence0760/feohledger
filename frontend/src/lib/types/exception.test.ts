@@ -26,7 +26,7 @@ import {
  *     through the tolerant fallback (de-underscored raw key) rather than a
  *     label. Silent, and in the wrong direction: two of these types are the
  *     ones that block a payment run.
- *  2. The WORDING — `api/exceptions.py::EXCEPTION_TYPE_LABELS`. The queue still
+ *  2. The WORDING — `services/exception_lifecycle.py::EXCEPTION_TYPE_LABELS`. The queue still
  *     renders the server's `type_label` off that map while the agent decision
  *     log renders `EXCEPTION_TYPE_LABEL_KEYS`, so if the two disagree in
  *     English the same exception reads differently on two tabs of one page.
@@ -78,7 +78,7 @@ function backendRoster(): string[] {
 
 /** The `EXCEPTION_TYPE_LABELS` map, type → English label, in declaration order. */
 function backendLabels(): Record<string, string> {
-	const py = source('api/exceptions.py');
+	const py = source('services/exception_lifecycle.py');
 	const block = /EXCEPTION_TYPE_LABELS\s*=\s*\{([\s\S]*?)\n\}/.exec(py);
 	expect(block, 'EXCEPTION_TYPE_LABELS map not found — did it move or change shape?').not.toBeNull();
 	const out: Record<string, string> = {};
@@ -112,7 +112,7 @@ function backendStatuses(): Set<string> {
  * IS the queue's chip order, because the chips render one per count.
  */
 function summaryStatuses(): string[] {
-	const py = source('api/exceptions.py');
+	const py = source('services/exception_lifecycle.py');
 	const rows = [...py.matchAll(/"([a-z0-9_]+)":\s*by_status\.get\("([a-z0-9_]+)", 0\)/g)];
 	expect(rows.length, 'the /summary by_status block stopped matching').toBeGreaterThan(3);
 	for (const row of rows) {

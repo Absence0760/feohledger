@@ -1083,7 +1083,7 @@ async def test_a_payable_invoice_the_lock_left_out_is_a_moved_vendor(realdb):
     be opened deterministically over HTTP, so the classifier is driven directly
     on such an invoice."""
     from app.api.cards import _unlocked_skip
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
+    from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 
     org_id = realdb.info(TENANT).org_id
     mk = realdb.sessionmaker(TENANT)

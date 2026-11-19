@@ -1070,7 +1070,7 @@ async def invoices_citing_pos(
 
 
 #: The exception types `_refresh_po_match` owns. Both block payment
-#: (`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`), so an open row whose
+#: (`services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`), so an open row whose
 #: finding a refresh no longer reports is closed again by
 #: `_close_cleared_po_exceptions` — otherwise a partial receipt that later
 #: completes, or a failed inspection that is re-run and passes, would hold the
