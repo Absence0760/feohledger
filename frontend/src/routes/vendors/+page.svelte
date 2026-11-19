@@ -630,6 +630,10 @@
 			alert: true
 		},
 		{ key: 'active', label: m('vendors.filter.active') },
+		// `?status=inactive` was accepted from the URL (and honoured by the
+		// backend list) with no chip to show it, so a deactivated-only view
+		// looked unfiltered and could not be cleared from a chip.
+		{ key: 'inactive', label: m('vendors.filter.inactive') },
 		{ key: 'rejected', label: m('vendors.filter.rejected') }
 	]);
 	// The table's empty line, chosen by state — the invoices page's shape. A
@@ -866,6 +870,10 @@
 								<RowAction
 									variant="danger"
 									armed={rejectArmedFor(v.id)}
+									ariaLabel={m('common.rowActionAria', {
+										action: rejectArmedFor(v.id) ? m('vendors.row.confirmReject') : m('vendors.row.reject'),
+										name: v.name
+									})}
 									onclick={(e) => {
 										e.stopPropagation();
 										if (rejectArmedFor(v.id)) {

@@ -614,7 +614,7 @@
 				<dl class="proposed-fields" data-testid="proposed-value">
 					{#each revealedFields as f (f.field)}
 						<div>
-							<dt>{f.field}</dt>
+							<dt>{f.labelKey ? m(f.labelKey) : f.fallback}</dt>
 							<dd>{f.value}</dd>
 						</div>
 					{/each}
