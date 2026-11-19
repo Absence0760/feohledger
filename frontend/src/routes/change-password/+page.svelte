@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
 	import NewPasswordFields from '#lib/components/auth/NewPasswordFields.svelte';
 	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
@@ -75,11 +76,11 @@
 				await tick();
 				currentInput?.focus();
 			} else if (err instanceof ApiError && err.status === 422) {
-				newServerError = err.message;
+				newServerError = apiErrorMessage(err, m('auth.changePassword.failed'));
 				await tick();
 				newFields?.focusNew();
 			} else {
-				error = err instanceof Error ? err.message : m('auth.changePassword.failed');
+				error = apiErrorMessage(err, m('auth.changePassword.failed'));
 			}
 		} finally {
 			submitting = false;

@@ -19,6 +19,7 @@
  */
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import { formatList } from '#lib/utils/list.ts';
+import { apiErrorMessage, isApiErrorLike } from '#lib/utils/apiError.ts';
 
 /** The structural slice of `ApiError` this needs — kept structural so the
  *  module never imports `#lib/api.ts` (which reaches `$app/env/public`). */
@@ -73,14 +74,15 @@ export function authRefusalText(refusal: CodedRefusal, t: Translate): string | n
 
 /**
  * What a page shows for an error from a step-up / passkey call: the localized
- * refusal when the error is a coded one this build knows, else the error's own
- * message, else the caller's localized fallback (a non-`Error` throw).
+ * refusal when the error is a coded one this build knows, else the server's
+ * own sentence (`apiErrorMessage`), else the caller's localized fallback.
+ * A non-API error — a cancelled browser passkey prompt (`DOMException`), a
+ * network `TypeError`, `webauthn.ts`'s own throws — gets the fallback, never
+ * the browser's English.
  */
 export function authErrorMessage(err: unknown, t: Translate, fallback: MessageKey): string {
-	if (!(err instanceof Error)) return t(fallback);
-	// Structural rather than `instanceof ApiError` (see `CodedRefusal`). A
-	// `DOMException` from a cancelled browser passkey prompt also has a `code`,
-	// but a numeric one and no `params`, so it falls through to its message.
+	if (!isApiErrorLike(err)) return t(fallback);
+	// Structural rather than `instanceof ApiError` (see `CodedRefusal`).
 	const { code, params } = err as Error & { code?: unknown; params?: unknown };
 	if (typeof code === 'string' && params && typeof params === 'object') {
 		const localized = authRefusalText(
@@ -89,5 +91,5 @@ export function authErrorMessage(err: unknown, t: Translate, fallback: MessageKe
 		);
 		if (localized) return localized;
 	}
-	return err.message;
+	return apiErrorMessage(err, t(fallback));
 }

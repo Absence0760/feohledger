@@ -3438,6 +3438,8 @@ export const messages = {
 	'auth.resetPassword.retry': 'Tentar novamente',
 	'auth.resetPassword.checkFailed':
 		'Não foi possível verificar este link agora. Tente novamente.',
+	'auth.resetPassword.submitFailed':
+		'Não foi possível salvar sua senha agora. Tente novamente.',
 	'auth.resetPassword.checking': 'Verificando seu link…',
 	'auth.resetPassword.setExpiredHint':
 		'Links para definir a senha funcionam uma única vez e expiram. Solicite um novo em “Esqueceu a senha?” — funciona também para sua nova conta.',

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
 	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
 	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
@@ -160,7 +161,7 @@
 			}
 			goto(postLoginTarget(next));
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('auth.login.failed');
+			error = apiErrorMessage(err, m('auth.login.failed'));
 			ownWorkspaceUrl =
 				err instanceof ApiError && err.code === 'wrong_workspace'
 					? ownWorkspaceSignInUrl(err.params)

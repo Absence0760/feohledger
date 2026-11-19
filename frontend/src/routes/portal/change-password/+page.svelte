@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import NewPasswordFields from '#lib/components/auth/NewPasswordFields.svelte';
 	import PasswordInput from '#lib/components/auth/PasswordInput.svelte';
 	import { ApiError } from '#lib/api.ts';
@@ -48,11 +49,11 @@
 				await tick();
 				currentInput?.focus();
 			} else if (err instanceof ApiError && err.status === 422) {
-				newServerError = err.message;
+				newServerError = apiErrorMessage(err, m('portal.changePassword.failed'));
 				await tick();
 				newFields?.focusNew();
 			} else {
-				error = err instanceof Error ? err.message : m('portal.changePassword.failed');
+				error = apiErrorMessage(err, m('portal.changePassword.failed'));
 			}
 		} finally {
 			loading = false;

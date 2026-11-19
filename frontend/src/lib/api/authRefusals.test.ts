@@ -24,7 +24,7 @@ function recorder() {
 
 /** Shaped like the `ApiError` `api.ts` throws for a coded `detail`. */
 function apiError(code: unknown, params: unknown, message: string): Error {
-	return Object.assign(new Error(message), { status: 400, code, params });
+	return Object.assign(new Error(message), { status: 400, code, params, detail: { code, message, params } });
 }
 
 describe('authRefusalText', () => {
@@ -133,18 +133,32 @@ describe('authErrorMessage', () => {
 
 	it('renders an uncoded error by its message', () => {
 		const { t } = recorder();
-		expect(authErrorMessage(apiError(null, {}, 'MFA is disabled'), t, 'profile.mfa.disableFailed')).toBe(
-			'MFA is disabled'
+		const err = Object.assign(new Error('MFA is disabled'), {
+			status: 400,
+			code: null,
+			params: {},
+			detail: 'MFA is disabled'
+		});
+		expect(authErrorMessage(err, t, 'profile.mfa.disableFailed')).toBe('MFA is disabled');
+	});
+
+	it("never shows a cancelled browser prompt's own English (a DOMException is not an API error)", () => {
+		const { t } = recorder();
+		const cancelled = Object.assign(new Error('The operation was aborted.'), { code: 20 });
+		expect(authErrorMessage(cancelled, t, 'profile.passkeys.addFailed')).toBe(
+			EN_ALL['profile.passkeys.addFailed']
 		);
 	});
 
-	it('leaves a cancelled browser prompt (a numeric DOMException code) to its own message', () => {
-		const { t, calls } = recorder();
-		const cancelled = Object.assign(new Error('The operation was aborted.'), { code: 20 });
-		expect(authErrorMessage(cancelled, t, 'profile.passkeys.addFailed')).toBe(
-			'The operation was aborted.'
+	it('uses the localized fallback for a network failure and a bodyless 5xx', () => {
+		const { t } = recorder();
+		expect(authErrorMessage(new TypeError('Failed to fetch'), t, 'profile.passkeys.addFailed')).toBe(
+			EN_ALL['profile.passkeys.addFailed']
 		);
-		expect(calls).toEqual([]);
+		const bodyless = Object.assign(new Error('API error 502'), { status: 502, code: null, params: {} });
+		expect(authErrorMessage(bodyless, t, 'profile.passkeys.addFailed')).toBe(
+			EN_ALL['profile.passkeys.addFailed']
+		);
 	});
 
 	it('uses the localized fallback for a non-Error throw', () => {

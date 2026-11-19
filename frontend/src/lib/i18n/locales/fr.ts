@@ -3440,6 +3440,8 @@ export const messages = {
 	'auth.resetPassword.retry': 'Réessayer',
 	'auth.resetPassword.checkFailed':
 		"Nous n'avons pas pu vérifier ce lien pour le moment. Veuillez réessayer.",
+	'auth.resetPassword.submitFailed':
+		"Nous n'avons pas pu enregistrer votre mot de passe pour le moment. Veuillez réessayer.",
 	'auth.resetPassword.checking': 'Vérification de votre lien…',
 	'auth.resetPassword.setExpiredHint':
 		"Les liens de définition du mot de passe ne fonctionnent qu'une fois et expirent. Demandez-en un nouveau avec « Mot de passe oublié ? » — cela fonctionne aussi pour votre nouveau compte.",

@@ -3616,6 +3616,8 @@ export const en = {
 	'auth.resetPassword.retry': 'Try again',
 	'auth.resetPassword.checkFailed':
 		"We couldn't check this link just now. Please try again.",
+	'auth.resetPassword.submitFailed':
+		"We couldn't save your password just now. Please try again.",
 	'auth.resetPassword.checking': 'Checking your link…',
 	'auth.resetPassword.setExpiredHint':
 		'Set-password links work once and expire. Request a new one with Forgot password — it works for your new account too.',

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -81,7 +82,10 @@
 			);
 		} catch (e) {
 			phase = 'error';
-			if (e instanceof Error && e.message) serverMessage = e.message;
+			// The server's own refusal when it sent one for the user (a
+			// coded one arrives localized); never a network or JS message.
+			const text = apiErrorMessage(e, '');
+			if (text) serverMessage = text;
 			else messageKey = 'auth.callback.failed';
 		}
 	});

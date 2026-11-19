@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
 	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
 	import { auth, type MFAChallenge } from '#lib/stores/auth.svelte.ts';
@@ -114,7 +115,7 @@
 			notice = m('auth.mfa.emailSent');
 			await focusCurrentControl();
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('auth.mfa.error.emailSend');
+			error = apiErrorMessage(err, m('auth.mfa.error.emailSend'));
 		} finally {
 			sendingEmail = false;
 		}
@@ -144,7 +145,7 @@
 			await auth.completeMfa(challenge.mfa_challenge_token, submitted, method);
 			finish();
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('auth.mfa.error.verify');
+			error = apiErrorMessage(err, m('auth.mfa.error.verify'));
 		} finally {
 			loading = false;
 		}
