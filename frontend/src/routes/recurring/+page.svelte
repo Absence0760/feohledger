@@ -367,6 +367,8 @@
 	// normalisation in exact decimal and groups the result by currency —
 	// `formatCurrencyTotals` renders one subtotal per currency, never added. ---
 	let recurringSummary = $state<RecurringTemplateSummary | null>(null);
+	// The first rollup is still out — what `KpiCard pending` announces.
+	let summaryPending = $state(true);
 	const summarySequence = createRequestSequencer();
 
 	async function loadSummary() {
@@ -377,10 +379,15 @@
 			recurringSummary = res;
 		} catch {
 			if (summarySequence.isCurrentRequest(token)) recurringSummary = null;
+		} finally {
+			if (summarySequence.isCurrentRequest(token)) summaryPending = false;
 		}
 	}
 
-	const activeCount = $derived(recurringSummary?.by_status.active ?? 0);
+	// Nullish until the rollup arrives (or when it failed), so `KpiCard` draws
+	// its "no figure" dash: a `0` asserted "no active templates" before, or
+	// without, the server ever saying so.
+	const activeCount = $derived(recurringSummary ? (recurringSummary.by_status.active ?? 0) : null);
 	const offChartCount = $derived(recurringSummary?.gl_off_chart ?? 0);
 	// Offered only while there is something to find (or the filter is already
 	// on, so it can always be turned back off).
@@ -422,13 +429,19 @@
 
 	<!-- KPI row -->
 	<div class="kpi-row">
-		<KpiCard value={activeCount} label={m('recurring.kpi.activeTemplates')} />
 		<KpiCard
-			value={soonestNextRun ? formatDate(soonestNextRun) : '—'}
+			value={activeCount}
+			pending={summaryPending}
+			label={m('recurring.kpi.activeTemplates')}
+		/>
+		<KpiCard
+			value={recurringSummary ? (soonestNextRun ? formatDate(soonestNextRun) : '—') : null}
+			pending={summaryPending}
 			label={m('recurring.kpi.nextRun')}
 		/>
 		<KpiCard
-			value={monthlyRecurringValue ?? '—'}
+			value={recurringSummary ? (monthlyRecurringValue ?? '—') : null}
+			pending={summaryPending}
 			sub={monthlyRecurringRest}
 			label={m('recurring.kpi.monthlyRecurring')}
 			highlight="green"
