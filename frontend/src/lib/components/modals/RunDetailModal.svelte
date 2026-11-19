@@ -814,9 +814,12 @@
 									<button type="button" class="btn-cancel" onclick={() => (rejectOpen = false)}>
 										{m('common.cancel')}
 									</button>
+									<!-- Outlined, not `.armed`: this submits a form the
+									     reader opened and filled in, not the second click
+									     of a two-click confirm. -->
 									<button
 										type="submit"
-										class="btn-danger armed"
+										class="btn-danger"
 										disabled={rejecting || !rejectReason.trim()}
 										data-testid="nacha-reject-confirm"
 									>
@@ -1140,8 +1143,11 @@
 										})}
 							</button>
 						{:else}
+							<!-- Secondary while the CFO sign-off is pending: that
+							     sign-off is then the footer's one lead action, and
+							     Execute cannot run before it anyway. -->
 							<button
-								class="btn-primary"
+								class={pendingCfo ? 'btn-secondary' : 'btn-primary'}
 								disabled={executing || cancelling || !isAllowed(run.actions?.execute) || recordingRun}
 								aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
 								title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}

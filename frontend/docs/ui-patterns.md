@@ -1099,6 +1099,8 @@ into these. Guard:
 `src/lib/sharedButtonClasses.test.ts` — a file joins its `COVERED` list in
 the change that migrates it:
 - `.btn-primary` — the page's one lead action (white on `--accent-strong`).
+  One per footer: `RunDetailModal` renders Execute as `.btn-secondary` while
+  the CFO sign-off (`.btn-primary`) is pending.
 - `.btn-cancel` — dismiss / back out, beside a Save. Reads in `--text-muted`.
 - `.btn-secondary` — any other action (Create beside Upload, Import CSV,
   Refresh, Merge duplicates). Reads in `--text`; works on an `<a>` that
@@ -1108,12 +1110,26 @@ the change that migrates it:
   with `<RowAction armed>` / `<BulkDeleteButton>`.
 - `.btn-ghost` — an action that reads as a link: Back out of a detail view, a
   Download inside the sentence that explains it. No box, underlined in
-  `--accent` so colour is not the only cue (WCAG 1.4.1).
+  `--accent` so colour is not the only cue (WCAG 1.4.1). `inline-flex` with a
+  24px `min-height`, so standing alone it meets WCAG 2.5.8.
 - `.armed` on `.btn-primary` / `.btn-danger` — the second, committing click
   of a footer two-click confirm (execute a run, file 1099s, cancel a run):
   a `--danger-strong` fill, whatever the button looked like unarmed. Pair it
   with a distinct armed label (`Confirm execute · …`), since a colour change
-  announces nothing to a screen reader.
+  announces nothing to a screen reader. Busy (disabled) it stays red without
+  `opacity`: the danger tint, `--danger-on-tint` text, the strong border.
+- **A confirmation dialog's destructive commit is `.btn-danger.armed`.** The
+  outlined `.btn-danger` trigger opened the dialog (or the inline confirm it
+  reveals), so that step is the first click and its commit is the second: Void payment, Dismiss compliance
+  hold, Accept short settlement (`/payments`), Confirm reject (an expense
+  report), Disable MFA (`/portal/company`), Clear credentials
+  (`CredentialResetPrompt`). Never a hand-rolled `--danger-strong` fill. The
+  one exception is the bank-file Reject submit in `RunDetailModal`, a plain
+  `.btn-danger`: its panel sits above the run footer, where a permanent red
+  fill would read as a second armed commit beside Execute's. Still hand-rolled, to fold in when
+  next touched: `CloseWorkspacePanel`'s `.btn-close-workspace` and
+  `InvoiceModal`'s `.btn-reject` (both a filled red commit, `opacity` when
+  disabled).
 `.btn-secondary` / `.btn-danger` show disabled with `--text-muted` and a
 neutral border, not `opacity` (contrast measured per theme in the
 `app.css` comment).

@@ -56,7 +56,7 @@
 	<p>{m('org.credentialReset.notice')}</p>
 	<button
 		type="button"
-		class="btn-clear-credentials"
+		class="btn-danger"
 		data-testid="credential-reset-open-{block}"
 		onclick={() => (confirming = true)}
 	>
@@ -78,7 +78,7 @@
 		</button>
 		<button
 			type="button"
-			class="btn-clear-credentials"
+			class="btn-danger armed"
 			data-testid="credential-reset-confirm-{block}"
 			disabled={clearing}
 			onclick={clear}
@@ -105,23 +105,5 @@
 	.confirm-body {
 		margin: 0 0 16px;
 		font-size: 0.9rem;
-	}
-
-	.btn-clear-credentials {
-		padding: 8px 16px;
-		border-radius: var(--radius-sm);
-		border: none;
-		background: var(--danger-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-		min-height: 24px;
-	}
-
-	.btn-clear-credentials:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 </style>
