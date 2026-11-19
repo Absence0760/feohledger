@@ -424,7 +424,7 @@ export const messages = {
 	'dashboard.discount.missed': 'Manqués',
 	'dashboard.discount.pending': 'Encore possibles',
 	'dashboard.discount.count': '{n, plural, one {# facture} other {# factures}}',
-	'dashboard.discount.rate': '{pct} % des fenêtres d’escompte tranchées ont été obtenues.',
+	'dashboard.discount.rate': '{pct} des fenêtres d’escompte tranchées ont été obtenues.',
 	'dashboard.discount.rateUnknown':
 		'Aucune fenêtre d’escompte n’est encore close — il n’y a pas de taux d’obtention à signaler.',
 	'dashboard.discount.unconverted':
@@ -3143,7 +3143,7 @@ export const messages = {
 	'bankRecon.state.confirmed': 'Confirmé',
 	'bankRecon.state.probable': 'Probable',
 	'bankRecon.state.suggested': 'Suggéré',
-	'bankRecon.confidence': '{confidence} % de confiance',
+	'bankRecon.confidence': '{confidence} de confiance',
 	'bankRecon.suggestedHelp':
 		'Rapproché uniquement par similarité du nom du fournisseur — une suggestion, pas un fait. Confirmez-le ou effacez-le.',
 	'bankRecon.method.provider_id': 'Correspondance de référence',
@@ -4425,7 +4425,7 @@ export const messages = {
 	'adaptive.routing.intro': 'Classe les approbateurs possibles pour une facture d’après leur propre historique. Consultatif : rien n’est affecté tant que vous n’appliquez pas, et l’application passe par le chemin d’affectation audité habituel.',
 	'adaptive.routing.noInvoices': 'Aucune facture n’attend de revue pour l’instant.',
 	'adaptive.routing.noPenalty': 'aucune pondération négative ({n} décisions au dossier)',
-	'adaptive.routing.penalty': '−{points} pour un taux d’annulation de {pct}% sur {n} décisions',
+	'adaptive.routing.penalty': '−{points} pour un taux d’annulation de {pct} sur {n} décisions',
 	'adaptive.routing.pickInvoice': 'Facture en attente de revue',
 	'adaptive.routing.pickPlaceholder': 'Choisir une facture…',
 	'adaptive.suggestions.col.confidence': 'Confiance',

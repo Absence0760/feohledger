@@ -24,6 +24,7 @@
 		type MoneyAmount
 	} from '#lib/utils/money.ts';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { formatPercent } from '#lib/utils/percent.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import {
 		kpiRollupDisclosure,
@@ -338,7 +339,7 @@
 			     (Ardent Partners 2025, ~49%) — the old 80% bar was set for a
 			     cleared-vs-rejected figure and is out of reach for a true one. -->
 			<KpiCard
-				value={data ? `${data.touchless_rate}%` : null}
+				value={data ? formatPercent(data.touchless_rate) : null}
 				label={m('dashboard.kpi.touchlessRate')}
 				helpTerm="touchless-rate"
 				highlight={data && data.touchless_rate >= TOUCHLESS_BEST_IN_CLASS_PCT ? 'green' : null}
@@ -396,7 +397,7 @@
 							: data.discount_capture.insufficient_data
 								? m('dashboard.discount.rateUnknown')
 								: m('dashboard.discount.rate', {
-										pct: data.discount_capture.capture_rate_pct ?? 0
+										pct: formatPercent(data.discount_capture.capture_rate_pct ?? 0)
 									})}
 					/>
 				{/if}
@@ -647,7 +648,7 @@
 						{#if dc.insufficient_data}
 							{m('dashboard.discount.rateUnknown')}
 						{:else}
-							{m('dashboard.discount.rate', { pct: dc.capture_rate_pct ?? 0 })}
+							{m('dashboard.discount.rate', { pct: formatPercent(dc.capture_rate_pct ?? 0) })}
 						{/if}
 					</p>
 				{/if}

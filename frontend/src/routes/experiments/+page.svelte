@@ -34,12 +34,20 @@
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
+	import { formatPercent } from '#lib/utils/percent.ts';
+	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 
 	const canMutate = $derived(auth.isAdmin);
+
+	// Counts group by the active locale ("1,234" / "1.234" / "1 234"), the
+	// same holder money, dates and `formatPercent` read.
+	function formatCount(n: number): string {
+		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
+	}
 
 	const METRICS: PrimaryMetric[] = [
 		'time_to_approval_days',
@@ -374,8 +382,8 @@
 					</td>
 					<td>{exp.workflow_definition_name ?? '—'}</td>
 					<td>{m(PRIMARY_METRIC_LABEL_KEYS[exp.primary_metric])}</td>
-					<td class="mono">{exp.split_a_pct}% / {100 - exp.split_a_pct}%</td>
-					<td class="right mono">{exp.assigned_count}</td>
+					<td class="mono">{formatPercent(exp.split_a_pct)} / {formatPercent(100 - exp.split_a_pct)}</td>
+					<td class="right mono">{formatCount(exp.assigned_count)}</td>
 					<td>
 						<Badge tone={STATUS_TONES[exp.status]} variant={exp.status}>
 							{statusLabel(exp.status)}
@@ -542,8 +550,8 @@
 					</tr>
 				</thead>
 				<tbody>
-					<tr><td>{m('experiments.results.assigned')}</td><td class="right mono">{results.variant_a.assigned_count}</td><td class="right mono">{results.variant_b.assigned_count}</td></tr>
-					<tr><td>{m('experiments.results.completed')}</td><td class="right mono">{results.variant_a.completed_count}</td><td class="right mono">{results.variant_b.completed_count}</td></tr>
+					<tr><td>{m('experiments.results.assigned')}</td><td class="right mono">{formatCount(results.variant_a.assigned_count)}</td><td class="right mono">{formatCount(results.variant_b.assigned_count)}</td></tr>
+					<tr><td>{m('experiments.results.completed')}</td><td class="right mono">{formatCount(results.variant_a.completed_count)}</td><td class="right mono">{formatCount(results.variant_b.completed_count)}</td></tr>
 					<tr class:primary={results.primary_metric === 'time_to_approval_days'}>
 						<td>{m('experiments.results.medianTime')}</td>
 						<td class="right mono">{results.variant_a.median_time_to_approval_days}</td>
@@ -551,18 +559,18 @@
 					</tr>
 					<tr class:primary={results.primary_metric === 'touchless_rate_pct'}>
 						<td>{m('experiments.results.touchlessRate')}</td>
-						<td class="right mono">{results.variant_a.touchless_rate_pct}%</td>
-						<td class="right mono">{results.variant_b.touchless_rate_pct}%</td>
+						<td class="right mono">{formatPercent(results.variant_a.touchless_rate_pct)}</td>
+						<td class="right mono">{formatPercent(results.variant_b.touchless_rate_pct)}</td>
 					</tr>
 					<tr class:primary={results.primary_metric === 'exception_rate_pct'}>
 						<td>{m('experiments.results.exceptionRate')}</td>
-						<td class="right mono">{results.variant_a.exception_rate_pct}%</td>
-						<td class="right mono">{results.variant_b.exception_rate_pct}%</td>
+						<td class="right mono">{formatPercent(results.variant_a.exception_rate_pct)}</td>
+						<td class="right mono">{formatPercent(results.variant_b.exception_rate_pct)}</td>
 					</tr>
 					<tr class:primary={results.primary_metric === 'rejection_rate_pct'}>
 						<td>{m('experiments.results.rejectionRate')}</td>
-						<td class="right mono">{results.variant_a.rejection_rate_pct}%</td>
-						<td class="right mono">{results.variant_b.rejection_rate_pct}%</td>
+						<td class="right mono">{formatPercent(results.variant_a.rejection_rate_pct)}</td>
+						<td class="right mono">{formatPercent(results.variant_b.rejection_rate_pct)}</td>
 					</tr>
 				</tbody>
 			</table>

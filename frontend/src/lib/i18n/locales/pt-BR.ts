@@ -425,7 +425,7 @@ export const messages = {
 	'dashboard.discount.missed': 'Perdidos',
 	'dashboard.discount.pending': 'Ainda aproveitáveis',
 	'dashboard.discount.count': '{n, plural, one {# fatura} other {# faturas}}',
-	'dashboard.discount.rate': '{pct}% dos prazos de desconto decididos foram aproveitados.',
+	'dashboard.discount.rate': '{pct} dos prazos de desconto decididos foram aproveitados.',
 	'dashboard.discount.rateUnknown':
 		'Nenhum prazo de desconto encerrou ainda — não há taxa de aproveitamento a informar.',
 	'dashboard.discount.unconverted':
@@ -3143,7 +3143,7 @@ export const messages = {
 	'bankRecon.state.confirmed': 'Confirmada',
 	'bankRecon.state.probable': 'Provável',
 	'bankRecon.state.suggested': 'Sugerida',
-	'bankRecon.confidence': '{confidence}% de confiança',
+	'bankRecon.confidence': '{confidence} de confiança',
 	'bankRecon.suggestedHelp':
 		'Conciliado apenas por semelhança do nome do fornecedor — uma sugestão, não um fato. Confirme ou limpe.',
 	'bankRecon.method.provider_id': 'Correspondência de referência',
@@ -4420,7 +4420,7 @@ export const messages = {
 	'adaptive.routing.intro': 'Classifica os aprovadores possíveis para uma fatura pelo próprio histórico deles. Consultivo: nada é atribuído até você aplicar, e aplicar passa pelo caminho de atribuição auditado de sempre.',
 	'adaptive.routing.noInvoices': 'Nenhuma fatura aguarda revisão no momento.',
 	'adaptive.routing.noPenalty': 'sem desconto ({n} decisões registradas)',
-	'adaptive.routing.penalty': '−{points} por taxa de reversão de {pct}% em {n} decisões',
+	'adaptive.routing.penalty': '−{points} por taxa de reversão de {pct} em {n} decisões',
 	'adaptive.routing.pickInvoice': 'Fatura aguardando revisão',
 	'adaptive.routing.pickPlaceholder': 'Escolha uma fatura…',
 	'adaptive.suggestions.col.confidence': 'Confiança',
