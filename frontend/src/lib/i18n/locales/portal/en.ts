@@ -158,6 +158,7 @@ export const enPortal = {
 	'portal.po.col.status': 'Status',
 	'portal.po.createInvoice': 'Create invoice',
 	'portal.po.refusal.notInvoiceable': 'No longer open for invoicing',
+	'portal.po.refusal.alreadyInvoiced': 'Already invoiced',
 	'portal.po.totalUnverifiable': 'Being confirmed',
 	'portal.po.totalUnverifiableNote':
 		'Totals shown as “Being confirmed” are being re-checked by your customer, so an invoice cannot be created from those orders here. Submit your own invoice for them instead.',

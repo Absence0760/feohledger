@@ -4151,6 +4151,7 @@ export const messages = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.",
 	'refusal.poNotInvoiceable': "Diese Bestellung ist nicht mehr fakturierbar.",
+	'refusal.poAlreadyInvoiced': "Sie haben diese Bestellung bereits in Rechnung gestellt. Reichen Sie für einen Restbetrag stattdessen eine eigene Rechnung ein.",
 	'refusal.approvalSegregationReceiver': "Funktionstrennung: Wer einen Wareneingang zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.",
 	'refusal.approvalSegregationInspector': "Funktionstrennung: Wer eine Qualitätsprüfung der Ware zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.",
 	'refusal.approvalLevelReuse': "Sie haben bereits eine frühere Stufe dieser Freigabekette freigegeben; eine andere Person muss freigeben.",

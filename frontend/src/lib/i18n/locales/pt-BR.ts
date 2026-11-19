@@ -4147,6 +4147,7 @@ export const messages = {
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Segregação de funções: um usuário envolvido na criação desta fatura não pode também aprová-la.",
 	'refusal.poNotInvoiceable': "Este pedido de compra não pode mais ser faturado.",
+	'refusal.poAlreadyInvoiced': "Você já faturou este pedido de compra. Para qualquer valor restante, envie sua própria fatura.",
 	'refusal.approvalSegregationReceiver': "Segregação de funções: um usuário que registrou um recebimento de mercadorias faturado nesta fatura não pode também aprová-la.",
 	'refusal.approvalSegregationInspector': "Segregação de funções: um usuário que registrou uma inspeção de qualidade das mercadorias faturadas nesta fatura não pode também aprová-la.",
 	'refusal.approvalLevelReuse': "Você já aprovou um nível anterior desta cadeia; é necessário um aprovador diferente.",
