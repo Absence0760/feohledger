@@ -48,6 +48,7 @@
 	import { formatList } from '#lib/utils/list.ts';
 	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import { errorMessage } from '#lib/utils/apiError.ts';
 	import SetupChecklist from '#lib/components/ui/SetupChecklist.svelte';
 	import { setupStepDone, setupStepHref, type SetupStepId } from '#lib/utils/onboarding.ts';
 	import type { OnboardingResponse } from '#lib/types/analytics.ts';
@@ -291,7 +292,7 @@
 				model: extractionOllamaModel,
 			});
 		} catch (err) {
-			extractionTestResult = { success: false, message: err instanceof Error ? err.message : m('org.toast.testFailed') };
+			extractionTestResult = { success: false, message: errorMessage(err, m('org.toast.testFailed')) };
 		} finally {
 			testingExtraction = false;
 		}
@@ -854,7 +855,7 @@
 		} catch (err) {
 			paymentsTestResult = {
 				success: false,
-				message: err instanceof Error ? err.message : m('org.toast.testFailed'),
+				message: errorMessage(err, m('org.toast.testFailed')),
 			};
 		} finally {
 			testingPayments = false;
@@ -889,7 +890,7 @@
 				},
 			});
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.toast.saveFailed')), 'error');
 		} finally {
 			savingProfile = false;
 		}
@@ -928,7 +929,7 @@
 			orgCurrency.reset();
 			void orgCurrency.ensureLoaded();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.toast.saveFailed')), 'error');
 		} finally {
 			savingDefaults = false;
 		}
@@ -983,7 +984,7 @@
 			unopenable.extraction = false;
 		} catch (err) {
 			noteUnopenable(err);
-			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.toast.saveFailed')), 'error');
 		} finally {
 			savingExtraction = false;
 		}
@@ -1011,7 +1012,7 @@
 			unopenable.cards = false;
 		} catch (err) {
 			noteUnopenable(err);
-			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.toast.saveFailed')), 'error');
 		} finally {
 			savingCards = false;
 		}
@@ -1024,7 +1025,7 @@
 				mfa: { required: mfaRequired },
 			});
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.toast.saveFailed')), 'error');
 		} finally {
 			savingSecurity = false;
 		}
@@ -1042,7 +1043,7 @@
 			await patchSettings(m('org.section.fraudSaved'), { fraud_rules: payload });
 			fraud = payload;
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.toast.saveFailed')), 'error');
 		} finally {
 			savingFraud = false;
 		}
@@ -1118,7 +1119,7 @@
 			unopenable.payments = false;
 		} catch (err) {
 			noteUnopenable(err);
-			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.toast.saveFailed')), 'error');
 		} finally {
 			savingPayments = false;
 		}
@@ -1245,7 +1246,7 @@
 			await brand.ensureLoadedAndApply();
 			toast(m('org.branding.toast.saved'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.toast.saveFailed')), 'error');
 		} finally {
 			savingBranding = false;
 		}
@@ -1300,7 +1301,7 @@
 			);
 			customDomains = data.custom_domains ?? [];
 		} catch (err) {
-			domainsError = err instanceof Error ? err.message : m('org.customDomains.toast.loadFailed');
+			domainsError = errorMessage(err, m('org.customDomains.toast.loadFailed'));
 		} finally {
 			loadingDomains = false;
 		}
@@ -1323,10 +1324,7 @@
 			// ("already registered to another organization") or the
 			// platform-domain refusal reads as itself instead of a generic
 			// "Failed to save".
-			domainSaveError =
-				err instanceof Error && err.message
-					? err.message
-					: m('org.customDomains.toast.saveFailed');
+			domainSaveError = errorMessage(err, m('org.customDomains.toast.saveFailed'));
 			return false;
 		} finally {
 			savingDomains = false;
@@ -1413,7 +1411,7 @@
 		try {
 			applyResidency(await api.get<ResidencyResponse>('/api/organization/data-residency'));
 		} catch (err) {
-			residencyError = err instanceof Error ? err.message : m('org.residency.toast.loadFailed');
+			residencyError = errorMessage(err, m('org.residency.toast.loadFailed'));
 		} finally {
 			loadingResidency = false;
 		}
@@ -1431,7 +1429,7 @@
 			);
 			toast(m('org.residency.toast.saved'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('org.residency.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.residency.toast.saveFailed')), 'error');
 			// Snap the control back to what is actually persisted, so the panel
 			// never shows a region the tenant is not pinned to.
 			residencyRegion = residencySavedRegion;
@@ -1539,7 +1537,7 @@
 		try {
 			applyChat(await getChatNotifications());
 		} catch (err) {
-			chatError = err instanceof Error ? err.message : m('org.chat.toast.loadFailed');
+			chatError = errorMessage(err, m('org.chat.toast.loadFailed'));
 		} finally {
 			loadingChat = false;
 		}
@@ -1559,7 +1557,7 @@
 			);
 			toast(m('org.chat.toast.saved'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('org.chat.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.chat.toast.saveFailed')), 'error');
 		} finally {
 			savingChat = false;
 		}
@@ -1579,7 +1577,7 @@
 			newChatWebhook = '';
 			toast(m('org.chat.webhook.toast.saved'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('org.chat.webhook.toast.saveFailed'), 'error');
+			toast(errorMessage(err, m('org.chat.webhook.toast.saveFailed')), 'error');
 		} finally {
 			savingChatWebhook = false;
 		}
@@ -1598,7 +1596,7 @@
 			toast(m('org.chat.webhook.toast.removed'), 'success');
 		} catch (err) {
 			toast(
-				err instanceof Error ? err.message : m('org.chat.webhook.toast.removeFailed'),
+				errorMessage(err, m('org.chat.webhook.toast.removeFailed')),
 				'error'
 			);
 		} finally {
@@ -1687,7 +1685,7 @@
 		try {
 			applySso(await getSsoSettings());
 		} catch (err) {
-			ssoLoadError = err instanceof Error ? err.message : m('orgSso.toast.loadFailed');
+			ssoLoadError = errorMessage(err, m('orgSso.toast.loadFailed'));
 		} finally {
 			loadingSso = false;
 		}
@@ -1796,7 +1794,7 @@
 			// available, not silently reporting a working one as switched off.
 			intakeDomainConfigured = data.domain_configured ?? true;
 		} catch (err) {
-			intakeError = err instanceof Error ? err.message : m('org.emailIntake.toast.loadFailed');
+			intakeError = errorMessage(err, m('org.emailIntake.toast.loadFailed'));
 		} finally {
 			loadingIntake = false;
 		}
@@ -1874,7 +1872,7 @@
 			toast(successMessage, 'success');
 		} catch (err) {
 			toast(
-				err instanceof Error ? err.message : m('org.emailIntake.toast.rotateFailed'),
+				errorMessage(err, m('org.emailIntake.toast.rotateFailed')),
 				'error'
 			);
 		} finally {
