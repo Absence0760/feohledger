@@ -61,6 +61,11 @@ const PRELOADED_READERS: { slice: SliceName; file: string; why: string }[] = [
 		slice: 'refusal',
 		file: '/src/lib/api/codedRefusals.ts',
 		why: 'codedRefusalText resolves through resolvedOnly(): a key m() cannot resolve yet makes the refusal null, and the caller shows the server\'s English sentence.'
+	},
+	{
+		slice: 'refusal',
+		file: '/src/lib/api/erpRefusals.ts',
+		why: 'erpRefusalText resolves through resolvedOnly() too: a sentence whose key m() cannot resolve yet is null, and the caller shows the server\'s sentence or last_error.'
 	}
 ];
 
@@ -290,6 +295,9 @@ describe('catalogue slices', () => {
 			expect(OWNERS.get(s) ?? [], `${s} is preloaded; a component need not load it`).toEqual([]);
 		}
 		for (const r of PRELOADED_READERS) expect(PRELOADED_SLICES, r.file).toContain(r.slice);
+		// What makes a reader safe before its slice lands: it reads through
+		// resolvedOnly(), so an unresolved key is null, never a raw key on screen.
+		for (const r of PRELOADED_READERS) expect(SOURCES[r.file], r.file).toMatch(/\bresolvedOnly\(t\)/);
 	});
 
 	it('are rendered only where they are loaded', () => {
@@ -300,7 +308,7 @@ describe('catalogue slices', () => {
 					if (!PRELOADED_READERS.some((r) => r.slice === slice && r.file === file))
 						failures.push(
 							`${file} names ${slice}-slice key ${list[0]}, but that slice is preloaded and may still be loading: ` +
-								`state it through api/codedRefusals.ts, or keep the key in the main catalogue`
+								`state it through a PRELOADED_READERS module (api/codedRefusals.ts, api/erpRefusals.ts), or keep the key in the main catalogue`
 						);
 					continue;
 				}

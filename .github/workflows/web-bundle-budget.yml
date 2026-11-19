@@ -239,6 +239,15 @@ env:
   # split when that runs low: `erpRefusal.*` (~4 KB, read only through
   # api/erpRefusals.ts::erpRefusalText) can join the refusal slice once that
   # function resolves keys the way codedRefusalText does.
+  # 2026-11-19 — no ceiling change; that split, taken. The 73 `erpRefusal.*`
+  # sentences moved to the preloaded `refusal` slice (prefix `erpRefusal.`),
+  # and erpRefusalText now reads through the shared resolvedOnly()
+  # (api/resolvedOnly.ts), so before the slice lands it is null and the
+  # caller shows the server's sentence or last_error. Measured locally:
+  # gated 456 KB of 480 (shell 206, heaviest route 98 /help/guides/[id],
+  # main 89, refusal 14, audit 6, settings 28, help 10, portal 6,
+  # marketing 4), largest chunk 89 KB (the ja main catalogue, 89,869 bytes
+  # gzipped by gzip -6), 11 KB of per-chunk headroom.
   MAX_TOTAL_KB: 480
   MAX_LARGEST_CHUNK_KB: 100
 

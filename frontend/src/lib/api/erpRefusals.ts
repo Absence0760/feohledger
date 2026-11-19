@@ -16,7 +16,8 @@
  *
  * **Anything this build cannot state → `null`**, and the caller shows the
  * server's sentence: an unknown code (a newer backend), a row written before
- * refusals were coded (no `refusal`), a malformed param.
+ * refusals were coded (no `refusal`), a malformed param, or a sentence whose
+ * `refusal` catalogue slice has not loaded yet.
  *
  * `erpRefusals.test.ts` reads `ERP_REFUSAL_CODES` out of the backend source and
  * fails when a code there has no message here, or one here is not there.
@@ -25,6 +26,7 @@
  */
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import { formatList } from '#lib/utils/list.ts';
+import { resolvedOnly } from '#lib/api/resolvedOnly.ts';
 import { exceptionTypeFallback, exceptionTypeLabelKey } from '#lib/types/exception.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
@@ -199,8 +201,23 @@ export function parseErpRefusal(value: unknown): { code: string; params: Params 
 /**
  * The localized, actionable sentence for a recorded refusal, or `null` — then
  * the caller renders the server's English. Never throws.
+ *
+ * The `erpRefusal.*` sentences live in the PRELOADED `refusal` catalogue slice,
+ * which is not awaited before the first paint, so this reads them through
+ * `resolvedOnly()`: a key `m()` cannot resolve yet makes the whole sentence
+ * `null` and the caller shows the server's sentence or `last_error`, never a
+ * raw key. A caller that renders this from a template or `$derived` re-renders
+ * when the slice lands, since `m()` reads the slice reactively.
  */
 export function erpRefusalText(value: unknown, t: Translate): string | null {
+	try {
+		return statedRefusal(value, resolvedOnly(t));
+	} catch {
+		return null;
+	}
+}
+
+function statedRefusal(value: unknown, t: Translate): string | null {
 	const refusal = parseErpRefusal(value);
 	if (!refusal) return null;
 	const key = KEYS[refusal.code];

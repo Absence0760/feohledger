@@ -66,6 +66,7 @@ import {
 	erpRefusalText
 } from '#lib/api/erpRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
+import { resolvedOnly } from '#lib/api/resolvedOnly.ts';
 import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
 import { refusalBlockers } from '#lib/types/workspaceClosureRefusal.ts';
@@ -1011,23 +1012,6 @@ const BUILDERS: Record<string, Builder> = {
 	status_sync_needs_reconnect: fixed('refusal.statusSyncNeedsReconnect')
 };
 
-/**
- * `t`, but throwing for a key it cannot resolve — which `m()` signals by
- * returning the key itself. The `refusal.*` sentences are a catalogue slice
- * that loads beside the main catalogue at startup but is not awaited before
- * the first paint (`PRELOADED_SLICES` in `i18n/catalogues.ts`), so a refusal
- * in that window would otherwise become a toast reading `refusal.cardsNotEnabled`.
- * The throw lands in {@link codedRefusalText}'s catch: `null`, and the caller
- * shows the server's English sentence until the slice is there.
- */
-function resolvedOnly(t: Translate): Translate {
-	return (key, params) => {
-		const text = t(key, params);
-		if (text === key) throw new Error(`unresolved message key: ${key}`);
-		return text;
-	};
-}
-
 /** The codes this registry states (the money-path + MFA table; the GL-chart
  *  and auth refusals have their own modules and pins). */
 export const CODED_REFUSAL_CODES = Object.keys(BUILDERS);
@@ -1035,7 +1019,7 @@ export const CODED_REFUSAL_CODES = Object.keys(BUILDERS);
 /**
  * The localized sentence for a `{code, params}` refusal this table knows, or
  * `null` — then the caller renders the server's `message`. Also `null` while
- * the `refusal` slice is still loading ({@link resolvedOnly}). Never throws.
+ * the `refusal` slice is still loading (`api/resolvedOnly.ts`). Never throws.
  */
 export function codedRefusalText(code: string, params: Params, t: Translate): string | null {
 	const build = BUILDERS[code];
