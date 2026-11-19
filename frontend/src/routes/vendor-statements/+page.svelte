@@ -283,6 +283,7 @@
 	let confirmDeleteId = $state<string | null>(null);
 
 	async function deleteRecon(r: Reconciliation) {
+		if (busyId) return;
 		if (confirmDeleteId !== r.id) {
 			confirmDeleteId = r.id;
 			return;
@@ -422,7 +423,8 @@
 								<RowAction
 									variant="danger"
 									armed={confirmDeleteId === recon.id}
-									disabled={busyId === recon.id}
+									busy={busyId === recon.id}
+									disabled={busyId !== null && busyId !== recon.id}
 									onclick={() => deleteRecon(recon)}
 									ariaLabel={m('common.rowActionAria', { action: confirmDeleteId === recon.id ? m('vendorStatements.row.confirm') : m('vendorStatements.row.delete'), name: `${recon.vendor_name ?? m('vendorStatements.vendorFallback')} ${formatDate(recon.statement_date)}` })}
 								>

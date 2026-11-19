@@ -2824,7 +2824,6 @@ export const messages = {
 	'glAccounts.empty.errored': 'Der Kontenplan konnte nicht geladen werden.',
 	'glAccounts.onboarding.heading': 'Noch kein Kontenplan',
 	'glAccounts.onboarding.description': 'Auf Sachkonten werden Rechnungspositionen, Ausgaben und Bestellanforderungen kontiert. Synchronisieren Sie sie aus einem verbundenen ERP oder legen Sie sie hier einzeln an.',
-	'glAccounts.toast.loadFailed': 'Kontenplan konnte nicht geladen werden',
 	'glAccounts.toast.syncFailed': 'ERP-Synchronisierung fehlgeschlagen',
 	'glAccounts.createModal.aria': 'Neues Sachkonto',
 	'glAccounts.createModal.title': 'Neues Sachkonto',

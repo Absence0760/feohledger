@@ -21,6 +21,7 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { invoiceStatusLabelKey } from '#lib/types/invoice.ts';
+	import { poStatusLabel } from '#lib/types/purchaseOrder.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { untrack } from 'svelte';
 
@@ -122,20 +123,11 @@
 		cancelled: 'muted'
 	};
 
-	// The badge text is the chip's label, not the raw column value — `open`
-	// is a database token, "Open" is what a clerk reads (and the only form
-	// the five other locales can translate). A status with no known label
-	// is shown as-is, like its `neutral` tone.
-	const STATUS_LABEL_KEYS = {
-		open: 'purchaseOrders.filter.open',
-		unissued: 'purchaseOrders.filter.unissued',
-		closed: 'purchaseOrders.filter.closed',
-		cancelled: 'purchaseOrders.filter.cancelled'
-	} as const;
-	function statusLabel(status: string): string {
-		const key = STATUS_LABEL_KEYS[status as keyof typeof STATUS_LABEL_KEYS];
-		return key ? m(key) : status;
-	}
+	// The badge text is the shared PO status label (`poStatusLabel`), not the
+	// raw column value — `open` is a database token, "Open" is what a clerk
+	// reads, and `partially_received` / `received` / `voided` read as words
+	// too (a local 4-entry map showed them raw). Unknown values show as-is.
+	const statusLabel = (status: string) => poStatusLabel(status, m);
 	function invoiceStatusLabel(status: string): string {
 		const key = invoiceStatusLabelKey(status);
 		return key ? m(key) : status;

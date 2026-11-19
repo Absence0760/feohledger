@@ -2987,7 +2987,6 @@ export const en = {
 	'glAccounts.empty.errored': 'Couldn’t load the chart of accounts.',
 	'glAccounts.onboarding.heading': 'No chart of accounts yet',
 	'glAccounts.onboarding.description': 'GL codes are what invoice lines, expenses and requisitions get coded to. Sync them from a connected ERP, or add them here one at a time.',
-	'glAccounts.toast.loadFailed': 'Failed to load the chart of accounts',
 	'glAccounts.toast.syncFailed': 'ERP sync failed',
 	'glAccounts.createModal.aria': 'New GL account',
 	'glAccounts.createModal.title': 'New GL Account',

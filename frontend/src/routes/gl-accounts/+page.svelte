@@ -223,7 +223,9 @@
 			// it never ran. `/exceptions` sets the same precedent for the same
 			// reason.
 			accounts = [];
-			toast(err instanceof Error ? err.message : m('glAccounts.toast.loadFailed'), 'error');
+			// No toast: `LoadError` already states the failure (with Retry) as
+			// a `role="alert"`, and a toast on top would announce it twice.
+			// There is no load-more here, so this is always a first-page load.
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -242,6 +244,7 @@
 	 * "Include inactive", which is where Reactivate lives.
 	 */
 	async function setActive(acct: GlAccount, active: boolean) {
+		if (busyId) return;
 		confirmRetireId = null;
 		busyId = acct.id;
 		try {
@@ -489,7 +492,8 @@
 														name: acct.code
 													})
 												: m('glAccounts.row.retireAria', { code: acct.code })}
-											disabled={busyId === acct.id}
+											busy={busyId === acct.id}
+											disabled={busyId !== null && busyId !== acct.id}
 											onclick={(e) => {
 												e.stopPropagation();
 												if (confirmRetireId === acct.id) void setActive(acct, false);
@@ -503,7 +507,8 @@
 									{:else}
 										<RowAction
 											ariaLabel={m('glAccounts.row.reactivateAria', { code: acct.code })}
-											disabled={busyId === acct.id}
+											busy={busyId === acct.id}
+											disabled={busyId !== null && busyId !== acct.id}
 											onclick={() => void setActive(acct, true)}
 										>
 											{m('glAccounts.row.reactivate')}

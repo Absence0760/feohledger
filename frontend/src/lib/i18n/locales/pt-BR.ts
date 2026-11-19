@@ -2824,7 +2824,6 @@ export const messages = {
 	'glAccounts.empty.errored': 'Não foi possível carregar o plano de contas.',
 	'glAccounts.onboarding.heading': 'Ainda não há plano de contas',
 	'glAccounts.onboarding.description': 'As contas contábeis são aquelas em que linhas de fatura, despesas e requisições são classificadas. Sincronize-as de um ERP conectado ou adicione-as aqui uma por uma.',
-	'glAccounts.toast.loadFailed': 'Não foi possível carregar o plano de contas',
 	'glAccounts.toast.syncFailed': 'A sincronização com o ERP falhou',
 	'glAccounts.createModal.aria': 'Nova conta contábil',
 	'glAccounts.createModal.title': 'Nova conta contábil',
