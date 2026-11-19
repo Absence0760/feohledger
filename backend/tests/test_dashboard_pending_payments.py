@@ -21,10 +21,10 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.services.payment_adapters.base import PENDING_PAYMENT_STATUSES
 from app.models.entity import Entity
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment
+from app.services.payment_adapters.base import PENDING_PAYMENT_STATUSES
 from app.utils.dates import utc_today
 
 TENANT = "a"
