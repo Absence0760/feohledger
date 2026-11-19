@@ -333,7 +333,8 @@
 	// then contradict the "N of M" footer. `total_amount` on `/queue` covers
 	// every payable row; on `/queue/ids` only the selectable (unblocked) ones.
 	interface QueueCurrencySlice {
-		currency: string;
+		/** `null` groups the invoices that record no currency (decisions §473). */
+		currency: string | null;
 		count: number;
 		total_amount: string;
 		total_savings: string;
