@@ -801,7 +801,7 @@ export function revealedProposalFields(
 				? proposed
 				: null;
 	if (!inner || typeof inner !== 'object' || Array.isArray(inner)) return null;
-	const rows: { field: string; value: string }[] = [];
+	const rows: RevealedProposalField[] = [];
 	for (const [key, value] of Object.entries(inner as Record<string, unknown>)) {
 		if (value === null || value === undefined) continue;
 		if (typeof value === 'object') return null; // nested — fall back to JSON
