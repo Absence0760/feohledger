@@ -10,15 +10,13 @@ import { describe, expect, it } from 'vitest';
 import { EN_ALL, loadAllMessages } from '#lib/i18n/allMessages.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import { interpolate } from '#lib/i18n/interpolate.ts';
+import { PO_STATUS_LABEL_KEYS, poStatusLabel, poStatusLabelKey } from './purchaseOrder.ts';
 import {
 	PO_ALREADY_INVOICED,
 	PO_NOT_INVOICEABLE,
-	PO_STATUS_LABEL_KEYS,
 	PO_TOTAL_UNVERIFIABLE,
-	poFlipRefusalText,
-	poStatusLabel,
-	poStatusLabelKey
-} from './purchaseOrder.ts';
+	poFlipRefusalText
+} from './portalPurchaseOrder.ts';
 
 const PROCUREMENT = readFileSync(
 	new URL('../../../../backend/app/models/procurement.py', import.meta.url),

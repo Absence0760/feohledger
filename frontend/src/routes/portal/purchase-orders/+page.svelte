@@ -15,11 +15,8 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { isAllowed } from '#lib/api/actionVerdicts.ts';
-	import {
-		PO_TOTAL_UNVERIFIABLE,
-		poFlipRefusalText,
-		poStatusLabel
-	} from '#lib/types/purchaseOrder.ts';
+	import { poStatusLabel } from '#lib/types/purchaseOrder.ts';
+	import { PO_TOTAL_UNVERIFIABLE, poFlipRefusalText } from '#lib/types/portalPurchaseOrder.ts';
 
 	// `flip_verdict` is the server's answer to "would the flip mint an invoice
 	// from this PO?" (`api/portal.po_flip_refusal`) — read it, never restate

@@ -231,7 +231,7 @@ through still returns its invoice even if the PO has since closed. The PO is
 vendor-scoped (404 for any other vendor's) before the gate runs, so the
 refusal only ever names the caller's own order's status, and the
 already-invoiced check reads only the caller's own vendor's invoices. The portal page shows
-the status through the shared label map `frontend/src/lib/types/purchaseOrder.ts`.
+the status through the shared label map `frontend/src/lib/types/purchaseOrder.ts` and each refusal through `frontend/src/lib/types/portalPurchaseOrder.ts` (portal catalogue slice only).
 
 ### Company self-service (`portal.py`)
 
