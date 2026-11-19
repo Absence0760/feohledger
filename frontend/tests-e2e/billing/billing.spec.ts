@@ -177,7 +177,10 @@ test.describe('/billing (admin)', () => {
 			// The granted entitlement surfaces under the name the pricing page
 			// gives it (`planFeature.publicApi`), not as its raw `public_api` key.
 			await expect(plan.getByText('Public API and webhooks', { exact: true })).toBeVisible();
-			await expect(plan.getByText('public api')).toHaveCount(0);
+			// Exact: a bare `getByText` is a case-insensitive substring match, and
+			// 'public api' is a substring of the correct label itself.
+			await expect(plan.getByText('public api', { exact: true })).toHaveCount(0);
+			await expect(plan.getByText('public_api', { exact: true })).toHaveCount(0);
 			// Usage meters still render.
 			await expect(page.locator('.kpi-label', { hasText: 'Extractions' }).first()).toBeVisible();
 		} finally {
