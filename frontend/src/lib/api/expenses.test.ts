@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { messages as de } from '#lib/i18n/locales/de.ts';
+import { messages as deMain } from '#lib/i18n/locales/de.ts';
+import { messages as deRefusal } from '#lib/i18n/locales/refusal/de.ts';
 import { interpolate } from '#lib/i18n/interpolate.ts';
 
 // `submitReport` hand-rolls its fetch (to keep the 422 violation list intact),
@@ -16,7 +17,9 @@ vi.mock('#lib/tenant.ts', () => ({
 }));
 vi.mock('#lib/entity.ts', () => ({ getSelectedEntityId: () => null }));
 vi.mock('#lib/i18n/store.svelte.ts', async () => {
-	const { messages } = await import('#lib/i18n/locales/de.ts');
+	const { messages: main } = await import('#lib/i18n/locales/de.ts');
+	const { messages: refusal } = await import('#lib/i18n/locales/refusal/de.ts');
+	const messages = { ...main, ...refusal };
 	const { interpolate: fill } = await import('#lib/i18n/interpolate.ts');
 	return {
 		m: (key: string, params?: Record<string, string | number>) =>
@@ -27,6 +30,7 @@ vi.mock('#lib/i18n/store.svelte.ts', async () => {
 });
 
 const { submitReport } = await import('#lib/api/expenses.ts');
+const de = { ...deMain, ...deRefusal };
 
 const fetchMock = vi.fn();
 

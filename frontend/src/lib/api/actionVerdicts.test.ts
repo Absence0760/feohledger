@@ -5,12 +5,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import { en } from '../i18n/locales/en';
+import { enRefusal } from '../i18n/locales/refusal/en';
 import { interpolate } from '../i18n/interpolate';
 import type { MessageKey } from '../i18n/messages';
 import { ROLE_NOT_PERMITTED, isAllowed, isOffered, refusalText } from './actionVerdicts';
 
 const t = (key: MessageKey, params?: Record<string, string | number>) =>
-	interpolate((en as Record<string, string>)[key], params, 'en');
+	interpolate(({ ...en, ...enRefusal } as Record<string, string>)[key], params, 'en');
 
 const sod = { code: 'payment_run_segregation', message: 'server English', params: {} };
 

@@ -7,13 +7,19 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { en } from '../i18n/locales/en';
+import { en as enMain } from '../i18n/locales/en';
+import { enRefusal } from '../i18n/locales/refusal/en';
 import { EN_ALL } from '#lib/i18n/allMessages.ts';
-import { messages as de } from '../i18n/locales/de';
-import { messages as fr } from '../i18n/locales/fr';
-import { messages as es } from '../i18n/locales/es';
-import { messages as ptBR } from '../i18n/locales/pt-BR';
-import { messages as ja } from '../i18n/locales/ja';
+import { messages as deMain } from '../i18n/locales/de';
+import { messages as deRefusal } from '../i18n/locales/refusal/de';
+import { messages as frMain } from '../i18n/locales/fr';
+import { messages as frRefusal } from '../i18n/locales/refusal/fr';
+import { messages as esMain } from '../i18n/locales/es';
+import { messages as esRefusal } from '../i18n/locales/refusal/es';
+import { messages as ptBRMain } from '../i18n/locales/pt-BR';
+import { messages as ptBRRefusal } from '../i18n/locales/refusal/pt-BR';
+import { messages as jaMain } from '../i18n/locales/ja';
+import { messages as jaRefusal } from '../i18n/locales/refusal/ja';
 import { interpolate } from '../i18n/interpolate';
 import { setActiveFormatLocale } from '../i18n/formatLocale';
 import type { MainMessageKey, MessageKey } from '../i18n/messages';
@@ -29,6 +35,15 @@ import {
 	localizeApiDetail,
 	refusalField
 } from './codedRefusals';
+
+// The refusal sentences are a catalogue slice (i18n/catalogues.ts); the app
+// reads both through `m()`, so the tests read them together.
+const en = { ...enMain, ...enRefusal };
+const de = { ...deMain, ...deRefusal };
+const fr = { ...frMain, ...frRefusal };
+const es = { ...esMain, ...esRefusal };
+const ptBR = { ...ptBRMain, ...ptBRRefusal };
+const ja = { ...jaMain, ...jaRefusal };
 
 const translator =
 	(messages: Record<string, string>, locale: string) =>
@@ -564,6 +579,17 @@ describe('the no-rail pilot refusals (issue #517)', () => {
 });
 
 describe('localizeApiDetail', () => {
+	it('states nothing while the refusal slice is still loading, so the caller shows the server sentence, never a raw key', () => {
+		// `m()` before the preloaded slice lands: the main catalogue resolves,
+		// a `refusal.*` key comes back as itself.
+		const mainOnly = (key: MessageKey, params?: Record<string, string | number>) =>
+			key in enMain ? interpolate((enMain as Record<string, string>)[key], params, 'en') : key;
+		expect(localizeApiDetail(detail('cards_not_enabled'), mainOnly)).toBeNull();
+		expect(codedRefusalText('approval_segregation', {}, mainOnly)).toBeNull();
+		// Once it has landed the same refusal is stated.
+		expect(localizeApiDetail(detail('cards_not_enabled'), enT)).toBe(en['refusal.cardsNotEnabled']);
+	});
+
 	it('reaches the money-path table from a raw detail', () => {
 		expect(localizeApiDetail(detail('approval_segregation'), deT)).toBe(
 			de['refusal.approvalSegregation']

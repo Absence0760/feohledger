@@ -1,6 +1,6 @@
 import { browser } from '$app/env';
 import { en } from './locales/en';
-import { CATALOGUE_LOADERS, EN_FALLBACK, SLICE_LOADERS, SLICE_NAMES, sliceOf } from './catalogues';
+import { CATALOGUE_LOADERS, EN_FALLBACK, PRELOADED_SLICES, SLICE_LOADERS, SLICE_NAMES, sliceOf } from './catalogues';
 import { interpolate } from './interpolate';
 import { setActiveFormatLocale } from './formatLocale';
 import type { MessageKey, Messages, SliceName } from './messages';
@@ -188,7 +188,8 @@ export async function setLocale(next: Locale): Promise<void> {
 
 /**
  * Detect the visitor's locale on first client mount: a stored choice wins,
- * else `navigator.languages`, else English. Called once from `+layout.svelte`.
+ * else `navigator.languages`, else English, and load it together with the
+ * preloaded slices (catalogues.ts). Called once from `+layout.svelte`.
  */
 export function initLocale(): void {
 	if (!browser) return;
@@ -213,6 +214,10 @@ export function initLocale(): void {
 	// messages; formatting the user's OWN explicit locale choice is still the
 	// right read for them, so it is deliberately not rolled back.)
 	setActiveFormatLocale(resolveFormatLocale(next));
+	// The preloaded slices (the refusal sentences) are wanted from the start, so
+	// `setLocale` fetches them in `next` beside the main catalogue: one parallel
+	// round trip in the reader's language, never an English copy first.
+	for (const s of PRELOADED_SLICES) wanted.add(s);
 	void setLocale(next);
 }
 
