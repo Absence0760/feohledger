@@ -750,7 +750,12 @@ centred dialog with backdrop-click + Esc to close:
   means the dialog's *body* (custom field grids, pickers, footers) is
   feature-specific — the shell, backdrop, and close behaviour are not.
   If you find yourself writing `position: fixed; inset: 0` or
-  `role="dialog"` in a component, stop and use `<Modal>`.
+  `role="dialog"` in a component, stop and use `<Modal>`. Guard:
+  `src/lib/modalShell.test.ts` fails on a `role="dialog"` attribute or a
+  `class="backdrop"` in any `.svelte` file but `ui/Modal.svelte`; its
+  allowlist (`InvoiceModal`, `RunDetailModal`, `NotificationBell`'s non-modal
+  popover, the portal login's decorative backdrop) is shrink-only and fails
+  when a listed file no longer needs its entry.
 - **The page behind an open dialog is `inert`** (decisions §384). While any
   modal dialog is open, everything outside the topmost one carries `inert`:
   no focus, no pointer or touch, nothing in the accessibility tree. A dialog
@@ -1337,11 +1342,11 @@ inherit it for free. Reuse these; don't re-solve them per page.
   The page outside the topmost dialog is `inert` while it is open (§ Modals,
   decisions §384), and that is taken off before the restore runs, so the
   trigger can take focus again.
-  Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` uses it, and so do the four pre-existing hand-rolled
-  feature shells (`InvoiceModal`, `RunDetailModal`, `BulkRecodeGLModal`,
-  portal discount-accept) so every dialog gets identical focus management.
-  Prefer `ui/Modal` for new dialogs; if you must hand-roll a shell, add
-  `use:focusTrap` rather than re-implementing it.
+  Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` uses it, and so do
+  the two hand-rolled feature shells still waiting to move onto it
+  (`InvoiceModal`, `RunDetailModal`), so every dialog gets identical focus
+  management. New dialogs use `ui/Modal`; `src/lib/modalShell.test.ts` refuses
+  a new hand-rolled shell.
 - **Reorder controls** (WCAG 2.5.7 Dragging Movements) — any drag-to-reorder
   needs a single-pointer + keyboard alternative. The workflow-builder
   `StepNode` pairs its drag handle with per-node Move ↑ / Move ↓ buttons

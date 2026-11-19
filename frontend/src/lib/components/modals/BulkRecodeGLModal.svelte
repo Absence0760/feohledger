@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { focusTrap } from '#lib/actions/focusTrap.ts';
 	import { api } from '#lib/api.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface Props {
@@ -11,16 +11,6 @@
 	}
 
 	let { onclose, onapplied }: Props = $props();
-
-	// Freeze background page scroll while the dialog is open (restored on close),
-	// so a wheel event over the backdrop can't bleed through to the list behind it.
-	$effect(() => {
-		const prev = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			document.body.style.overflow = prev;
-		};
-	});
 
 	interface RecodeChange {
 		invoice_id: string;
@@ -111,18 +101,12 @@
 			busy = false;
 		}
 	}
-
-	// Esc + focus trap/restore are handled by the shared `focusTrap` action.
 </script>
 
-<div
-	class="backdrop"
-	role="presentation"
-	onclick={(e) => {
-		if (e.target === e.currentTarget) onclose();
-	}}
->
-	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-modal="true" aria-label={m('invoices.bulkRecode.dialogLabel')} tabindex="-1">
+<!-- The shell (backdrop, focus trap, Esc / backdrop-click close, page-scroll
+     lock, background inert) is the shared Modal's; this file owns the body. -->
+<Modal ariaLabel={m('invoices.bulkRecode.dialogLabel')} width="lg" {onclose}>
+	{#snippet header()}
 		<header class="modal-header">
 			<div class="help-row">
 				<h2>{m('invoices.bulkRecode.title')}</h2>
@@ -130,148 +114,127 @@
 			</div>
 			<button type="button" class="btn-icon" onclick={onclose} aria-label={m('invoices.bulkRecode.close')}>&times;</button>
 		</header>
+	{/snippet}
 
-		<div class="modal-body">
-			<p class="intro">{m('invoices.bulkRecode.intro')}</p>
+	<div class="modal-body">
+		<p class="intro">{m('invoices.bulkRecode.intro')}</p>
 
-			<div class="filters">
-				<label>
-					{m('invoices.bulkRecode.from')}
-					<input type="date" bind:value={from_date} disabled={busy} />
-				</label>
-				<label>
-					{m('invoices.bulkRecode.to')}
-					<input type="date" bind:value={to_date} disabled={busy} />
-				</label>
-			</div>
-
-			<label class="ai-toggle">
-				<input type="checkbox" bind:checked={include_ai_fallback} disabled={busy} />
-				{m('invoices.bulkRecode.aiToggle')}
-				<span class="ai-warning">{m('invoices.bulkRecode.aiBilled')}</span>
+		<div class="filters">
+			<label>
+				{m('invoices.bulkRecode.from')}
+				<input type="date" bind:value={from_date} disabled={busy} />
 			</label>
+			<label>
+				{m('invoices.bulkRecode.to')}
+				<input type="date" bind:value={to_date} disabled={busy} />
+			</label>
+		</div>
 
-			{#if !preview}
+		<label class="ai-toggle">
+			<input type="checkbox" bind:checked={include_ai_fallback} disabled={busy} />
+			{m('invoices.bulkRecode.aiToggle')}
+			<span class="ai-warning">{m('invoices.bulkRecode.aiBilled')}</span>
+		</label>
+
+		{#if !preview}
+			<div class="actions">
+				<button class="btn-cancel" onclick={onclose} disabled={busy}>{m('common.cancel')}</button>
+				<button class="btn-primary" onclick={runDryRun} disabled={busy}>
+					{busy ? m('invoices.bulkRecode.previewing') : m('invoices.bulkRecode.preview')}
+				</button>
+			</div>
+		{:else}
+			<div class="report">
+				<dl class="summary">
+					<dt>{m('invoices.bulkRecode.summary.matched')}</dt>
+					<dd>{preview.matched}</dd>
+					<dt>{m('invoices.bulkRecode.summary.wouldChange')}</dt>
+					<dd class="emph">{preview.would_change ?? preview.applied ?? 0}</dd>
+					<dt>{m('invoices.bulkRecode.summary.fromPriors')}</dt>
+					<dd>{preview.by_source.vendor_prior}</dd>
+					{#if include_ai_fallback}
+						<dt>{m('invoices.bulkRecode.summary.aiCandidates')}</dt>
+						<dd>
+							{preview.ai_candidates}
+							<span class="hint">{m('invoices.bulkRecode.summary.aiHint')}</span>
+						</dd>
+					{/if}
+					<dt>{m('invoices.bulkRecode.summary.skippedNoChange')}</dt>
+					<dd>{preview.skipped.no_change}</dd>
+					<dt>{m('invoices.bulkRecode.summary.skippedImmutable')}</dt>
+					<dd>{preview.skipped.immutable_status}</dd>
+					<dt>{m('invoices.bulkRecode.summary.skippedNoPrior')}</dt>
+					<dd>{preview.skipped.no_prior_no_ai}</dd>
+				</dl>
+
+				{#if preview.changes.length > 0}
+					<h3>{m('invoices.bulkRecode.changes', { n: preview.changes.length })}</h3>
+					<div class="changes">
+						<table>
+							<thead>
+								<tr>
+									<th>{m('invoices.bulkRecode.col.invoice')}</th>
+									<th>{m('invoices.bulkRecode.col.vendor')}</th>
+									<th>{m('invoices.bulkRecode.col.old')}</th>
+									<th>{m('invoices.bulkRecode.col.new')}</th>
+									<th>{m('invoices.bulkRecode.col.source')}</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each preview.changes.slice(0, 20) as c (c.invoice_id)}
+									<tr>
+										<td class="mono">{c.invoice_number}</td>
+										<td>{c.vendor_name}</td>
+										<td class="mono muted">{c.old_gl ?? '—'}</td>
+										<td class="mono">{c.new_gl}</td>
+										<td><span class="src src-{c.source}">{sourceLabel(c.source)}</span></td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+						{#if preview.changes.length > 20}
+							<div class="more">{m('invoices.bulkRecode.more', { n: preview.changes.length - 20 })}</div>
+						{/if}
+					</div>
+				{:else}
+					<div class="empty">{m('invoices.bulkRecode.empty')}</div>
+				{/if}
+
 				<div class="actions">
-					<button class="btn-cancel" onclick={onclose} disabled={busy}>{m('common.cancel')}</button>
-					<button class="btn-primary" onclick={runDryRun} disabled={busy}>
-						{busy ? m('invoices.bulkRecode.previewing') : m('invoices.bulkRecode.preview')}
+					<button class="btn-cancel" onclick={() => (preview = null)} disabled={busy}>
+						{m('invoices.bulkRecode.editFilters')}
+					</button>
+					<button
+						class="btn-primary"
+						onclick={applyChanges}
+						disabled={busy || (preview.changes.length === 0 && preview.ai_candidates === 0)}
+					>
+						{busy ? m('invoices.bulkRecode.applying') : applyButtonLabel(preview)}
 					</button>
 				</div>
-			{:else}
-				<div class="report">
-					<dl class="summary">
-						<dt>{m('invoices.bulkRecode.summary.matched')}</dt>
-						<dd>{preview.matched}</dd>
-						<dt>{m('invoices.bulkRecode.summary.wouldChange')}</dt>
-						<dd class="emph">{preview.would_change ?? preview.applied ?? 0}</dd>
-						<dt>{m('invoices.bulkRecode.summary.fromPriors')}</dt>
-						<dd>{preview.by_source.vendor_prior}</dd>
-						{#if include_ai_fallback}
-							<dt>{m('invoices.bulkRecode.summary.aiCandidates')}</dt>
-							<dd>
-								{preview.ai_candidates}
-								<span class="hint">{m('invoices.bulkRecode.summary.aiHint')}</span>
-							</dd>
-						{/if}
-						<dt>{m('invoices.bulkRecode.summary.skippedNoChange')}</dt>
-						<dd>{preview.skipped.no_change}</dd>
-						<dt>{m('invoices.bulkRecode.summary.skippedImmutable')}</dt>
-						<dd>{preview.skipped.immutable_status}</dd>
-						<dt>{m('invoices.bulkRecode.summary.skippedNoPrior')}</dt>
-						<dd>{preview.skipped.no_prior_no_ai}</dd>
-					</dl>
-
-					{#if preview.changes.length > 0}
-						<h3>{m('invoices.bulkRecode.changes', { n: preview.changes.length })}</h3>
-						<div class="changes">
-							<table>
-								<thead>
-									<tr>
-										<th>{m('invoices.bulkRecode.col.invoice')}</th>
-										<th>{m('invoices.bulkRecode.col.vendor')}</th>
-										<th>{m('invoices.bulkRecode.col.old')}</th>
-										<th>{m('invoices.bulkRecode.col.new')}</th>
-										<th>{m('invoices.bulkRecode.col.source')}</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each preview.changes.slice(0, 20) as c (c.invoice_id)}
-										<tr>
-											<td class="mono">{c.invoice_number}</td>
-											<td>{c.vendor_name}</td>
-											<td class="mono muted">{c.old_gl ?? '—'}</td>
-											<td class="mono">{c.new_gl}</td>
-											<td><span class="src src-{c.source}">{sourceLabel(c.source)}</span></td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
-							{#if preview.changes.length > 20}
-								<div class="more">{m('invoices.bulkRecode.more', { n: preview.changes.length - 20 })}</div>
-							{/if}
-						</div>
-					{:else}
-						<div class="empty">{m('invoices.bulkRecode.empty')}</div>
-					{/if}
-
-					<div class="actions">
-						<button class="btn-cancel" onclick={() => (preview = null)} disabled={busy}>
-							{m('invoices.bulkRecode.editFilters')}
-						</button>
-						<button
-							class="btn-primary"
-							onclick={applyChanges}
-							disabled={busy || (preview.changes.length === 0 && preview.ai_candidates === 0)}
-						>
-							{busy ? m('invoices.bulkRecode.applying') : applyButtonLabel(preview)}
-						</button>
-					</div>
-				</div>
-			{/if}
-		</div>
+			</div>
+		{/if}
 	</div>
-</div>
+</Modal>
 
 <style>
-	.backdrop {
-		position: fixed;
-		inset: 0;
-		background: var(--overlay);
-		display: grid;
-		place-items: center;
-		z-index: 100;
-		backdrop-filter: blur(2px);
-	}
-
-	.modal {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		width: min(720px, 95vw);
-		max-height: 90vh;
-		display: flex;
-		flex-direction: column;
-		box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
-	}
-
 	.modal-header {
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		padding: 16px 20px;
+		gap: 12px;
+		padding-bottom: 16px;
 		border-bottom: 1px solid var(--border);
 	}
 
-	.modal h2 {
+	.help-row h2 {
 		margin: 0;
 		font-size: 1.1rem;
 		font-weight: 600;
 	}
+
 	.modal-body {
-		padding: 20px;
-		overflow-y: auto;
-		flex: 1;
+		padding-top: 20px;
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
