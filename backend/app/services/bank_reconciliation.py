@@ -74,13 +74,14 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import NamedTuple
 
-from sqlalchemy import and_, case, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bank_reconciliation import BankStatement, BankTransaction
 from app.models.invoice import Invoice
 from app.models.payment import Payment
 from app.services.numeric_bounds import STATEMENT_NUMERIC, fits_numeric
+from app.services.payment_runs import CURRENCY_TRIM_CHARS
 from app.services.vendor_matching import _normalize, _similarity
 from app.utils.currency_code import iso_currency_or_none
 from app.utils.dates import parse_ambiguous_date
@@ -193,7 +194,11 @@ def settlement_amount_and_currency(payment, invoice_currency: str | None) -> tup
     """
     source_amount = getattr(payment, "source_amount", None)
     source_currency = getattr(payment, "source_currency", None)
-    if source_amount is not None and source_currency not in (None, ""):
+    # `reconciliation_currency`, not `not in (None, "")`: a whitespace-only
+    # stamp is no currency either, and reading it as one skipped the currency
+    # check on an FX leg (fail open). It now falls back to the invoice-currency
+    # figure, which a home-currency bank line does not match (fail closed).
+    if source_amount is not None and reconciliation_currency(source_currency):
         return Decimal(source_amount), reconciliation_currency(source_currency)
     return Decimal(payment.amount), reconciliation_currency(invoice_currency)
 
@@ -204,7 +209,7 @@ def settlement_amount_sql():
     Kept adjacent to the Python definition so an aggregate over the whole set
     and a per-row response can't disagree about what the bank debited. The
     predicate is written to be *structurally* identical to the Python one —
-    including the empty-string case — rather than merely equivalent for the
+    including the blank (whitespace-only) case — rather than merely equivalent for the
     values `services.international_payments` happens to write today.
     """
     return case(
@@ -212,7 +217,8 @@ def settlement_amount_sql():
             and_(
                 Payment.source_amount.is_not(None),
                 Payment.source_currency.is_not(None),
-                Payment.source_currency != "",
+                # Mirrors `reconciliation_currency`'s blank test (trimmed).
+                func.btrim(Payment.source_currency, CURRENCY_TRIM_CHARS) != "",
             ),
             Payment.source_amount,
         ),

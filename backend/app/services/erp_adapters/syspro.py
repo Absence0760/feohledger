@@ -653,17 +653,27 @@ def po_is_foreign(header_currency: str | None, local_currency: str | None) -> bo
 
     A PO with no header ``Currency`` is read as local: it carries no label (the
     payload's ``currency`` is None) and its prices are ``MPrice``. A labelled
-    PO is foreign when its code differs from the local currency, and None when
-    the local currency could not be read — the caller must then skip the PO,
-    never guess which side of the line it is on.
+    PO is compared under SYSPRO's own code rule first (``_CURRENCY_CODE_RE``:
+    ``$`` is a valid SYSPRO code and is not ISO 4217), so a header equal to the
+    local currency is local. Otherwise it is foreign when it is an ISO code or
+    a SYSPRO code that differs from the local one. None — the caller must skip
+    the PO, never guess which side of the line it is on — when the local
+    currency could not be read, or the label matches neither rule.
     """
     if header_currency is None or not header_currency.strip():
         return False
-    code = iso_currency_or_none(header_currency)
-    # A label that is not a currency code is unknown, never local.
-    if code is None or local_currency is None:
+    if local_currency is None:
         return None
-    return code != local_currency
+    header = header_currency.strip().upper()
+    if _CURRENCY_CODE_RE.fullmatch(header) and header == local_currency.strip().upper():
+        return False
+    code = iso_currency_or_none(header)
+    if code is not None:
+        return code != local_currency.strip().upper()
+    if _CURRENCY_CODE_RE.fullmatch(header):
+        return True
+    # A label that is no currency code under either rule is unknown, never local.
+    return None
 
 
 #: A SYSPRO currency code: up to three characters (SYSPRO's own codes are not
