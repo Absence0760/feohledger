@@ -1054,7 +1054,7 @@ async def test_realdb_two_invoices_against_one_receipt_warn_beyond_receipt(reald
     assert warnings[0]["type"] == "po_overbilled"
     assert warnings[0]["severity"] == "warning"
     assert warnings[0]["params"] == {
-        "billedAmount": "400.00",
+        "totalBilled": "800.00",
         "poNumber": number,
         "receivedValue": "400.00",
         "currency": "USD",

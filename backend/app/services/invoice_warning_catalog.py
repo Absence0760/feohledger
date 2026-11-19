@@ -324,15 +324,16 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
     # Cumulative, receipt leg: the same siblings plus this invoice bill past
     # the received slice of the PO (`po_total × received / ordered`), though
     # each fits it alone (decisions §470). Same type, so it stops
-    # every unattended approval as the total leg does.
+    # every unattended approval as the total leg does; past approval it is
+    # also the sentence of the payment-blocking `po_mismatch` it raises.
+    # `totalBilled` includes this invoice: received is never part of billed.
     WarningSpec(
         "po_billed_beyond_receipt",
         "po_overbilled",
-        "Other invoices already bill {billedAmount} {currency} against PO {poNumber}, "
-        "of which goods worth {receivedValue} {currency} have been received — this "
-        "invoice takes it past what was received",
+        "Invoices on PO {poNumber} bill {totalBilled} {currency}, this one included; "
+        "goods worth {receivedValue} {currency} have been received",
         {
-            "billedAmount": "money",
+            "totalBilled": "money",
             "poNumber": "text",
             "receivedValue": "money",
             "currency": "currency",
