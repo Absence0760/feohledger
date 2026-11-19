@@ -23895,9 +23895,11 @@ it carries; `materialize_reporting_amount` never locks one and clears a 1:1
 lock written before this decision; the payment-amount resolver behind the
 1099, risk and cash-flow totals reads it as not expressible; and the
 unrealized-FX report counts it without valuing it. **More doors closed.** Email
-intake creates its invoice with `currency=None`; inbound PEPPOL records a
-missing or malformed `DocumentCurrencyCode` as NULL (UBL requires the code, so
-it is a malformed document, not a USD one); a PO flip on a PO with no currency
+intake creates its invoice with `currency=None`; inbound PEPPOL never guesses
+one (UBL requires `DocumentCurrencyCode`: a missing or short code fails the
+structural validator and books no invoice, and a code that passes it but is
+not an ISO shape, such as `ÉUR`, is recorded as NULL — corrected in the round
+29 gate review, which found the first half was a rejection, not a NULL); a PO flip on a PO with no currency
 books NULL; an invoice warning carries an unknown currency as `""`, which both
 clients render as bare digits; the supplier portal's payment list, the
 email-approval page, the virtual-card email and the workflow builder's context
