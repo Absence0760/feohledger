@@ -1,3 +1,4 @@
+import type { Payment } from '#lib/types/payment.ts';
 import type { VendorChangeRequestPage } from '#lib/types/vendor.ts';
 
 import { expect, test } from '../fixtures/helpers';
@@ -54,6 +55,7 @@ const CASES: Case[] = [
 	},
 	{
 		name: 'payments (history tab)',
+		retry: true,
 		route: '/payments',
 		apiPathname: '/api/payments',
 		notShown: /No payments match your filters/,
@@ -281,5 +283,168 @@ test('vendor change requests: a failed RE-load clears the previous filter\'s row
 	await expect(page.getByText(STALE_VENDOR)).toHaveCount(0);
 	// ...and the footer must not keep reporting the stale tally as this
 	// filter's answer either.
+	await expect(page.getByText(/Showing all 1/)).toHaveCount(0);
+});
+
+/**
+ * Retry has to be a real retry, every time — not only the first.
+ *
+ * `ui/LoadError` expects the caller's error flag to clear when the request
+ * STARTS: that unmounts the block (the loading line shows while the request is
+ * out), and a second failure mounts a fresh `role="alert"`, which is what a
+ * screen reader announces. The contracts / expenses / payments stores cleared
+ * `errored` only on success, so Retry left the block standing — a silent no-op
+ * to look at — and a second failure changed nothing, so it was never announced.
+ *
+ * The second response is HELD until the test has seen the block go: that is
+ * the observable difference, since the block reads the same before and after.
+ * Requests are answered by a `mode` the test sets, not by a count, so an extra
+ * mount-time fetch cannot shift which response is which.
+ */
+const EMPTY_LIST = JSON.stringify({ items: [], total: 0, page: 1, page_size: 20 });
+
+interface RetryCase {
+	name: string;
+	route: string;
+	apiPathname: string;
+	errorText: RegExp;
+}
+
+const RETRY_CASES: RetryCase[] = [
+	{
+		name: 'contracts',
+		route: '/contracts',
+		apiPathname: '/api/contracts',
+		errorText: /Could not load contracts/
+	},
+	{
+		name: 'payments (history tab)',
+		route: '/payments?tab=history',
+		apiPathname: '/api/payments',
+		errorText: /Could not load payments/
+	}
+];
+
+for (const c of RETRY_CASES) {
+	test(`${c.name}: a Retry that fails a second time still shows the error (and recovers on the third)`, async ({
+		page
+	}) => {
+		let mode: 'fail' | 'hold-then-fail' | 'ok' = 'fail';
+		let release: () => void = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+
+		await page.route(`**${c.apiPathname}*`, async (route) => {
+			// Exact pathname only — `/api/payments/counts`, `/queue`, `/summary`
+			// hang off the same prefix and keep loading normally.
+			if (new URL(route.request().url()).pathname !== c.apiPathname) {
+				await route.continue();
+				return;
+			}
+			if (mode === 'ok') {
+				await route.fulfill({ status: 200, contentType: 'application/json', body: EMPTY_LIST });
+				return;
+			}
+			if (mode === 'hold-then-fail') await held;
+			await route.fulfill({
+				status: 500,
+				contentType: 'application/json',
+				body: JSON.stringify({ detail: 'boom' })
+			});
+		});
+
+		await page.goto(c.route);
+
+		const alert = page.getByRole('alert').filter({ hasText: c.errorText });
+		await expect(alert).toBeVisible();
+
+		// Retry #1: the block must come down while the request is out.
+		mode = 'hold-then-fail';
+		await alert.getByRole('button', { name: 'Retry' }).click();
+		await expect(alert).toHaveCount(0);
+
+		// ...and come back when that request fails too.
+		release();
+		await expect(alert).toBeVisible();
+
+		// Retry #2 succeeds: the error is gone and the (empty) table stands.
+		mode = 'ok';
+		await alert.getByRole('button', { name: 'Retry' }).click();
+		await expect(page.getByTestId('table-empty')).toBeVisible();
+		await expect(alert).toHaveCount(0);
+	});
+}
+
+/**
+ * /payments History: a failed RE-load replaces the previous filter's rows.
+ *
+ * The History error used to be gated on an empty list
+ * (`paymentStore.errored && all.length === 0`), but the store keeps its rows
+ * on a failed fetch — so a chip click whose request 500'd left the PREVIOUS
+ * filter's payments under the new chip, with nothing saying they were stale.
+ * It now gates like /invoices: errored and not loading.
+ */
+test('payments history: a failed RE-load replaces the previous filter\'s rows', async ({
+	page
+}) => {
+	const PATHNAME = '/api/payments';
+	const STALE_VENDOR = 'Stale History Vendor';
+
+	const stalePayment = {
+		id: '00000000-0000-4000-8000-0000000000c1',
+		correlation_id: null,
+		invoice_id: '00000000-0000-4000-8000-0000000000c2',
+		payment_run_id: null,
+		amount: 125,
+		method: 'ach',
+		status: 'completed',
+		reference: null,
+		created_at: new Date().toISOString(),
+		updated_at: null,
+		currency: 'USD',
+		vendor_name: STALE_VENDOR,
+		invoice_number: 'INV-STALE-1',
+		card_last_four: null,
+		card_provider: null,
+		card_id: null,
+		void_refusal: null
+	} satisfies Payment;
+
+	// Answered by mode, not by count, so a second mount-time fetch still gets
+	// the good page.
+	let failing = false;
+	await page.route(`**${PATHNAME}*`, async (route) => {
+		if (new URL(route.request().url()).pathname !== PATHNAME) {
+			await route.continue();
+			return;
+		}
+		if (!failing) {
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ items: [stalePayment], total: 1, page: 1, page_size: 20 })
+			});
+			return;
+		}
+		await route.fulfill({
+			status: 500,
+			contentType: 'application/json',
+			body: JSON.stringify({ detail: 'boom' })
+		});
+	});
+
+	await page.goto('/payments?tab=history');
+
+	// The good load landed — this is the row that must not survive the next one.
+	await expect(page.getByText(STALE_VENDOR)).toBeVisible();
+
+	// A chip click re-queries the server, and that query fails. Non-exact: the
+	// chip's accessible name carries its tally once `/counts` lands.
+	failing = true;
+	await page.getByRole('button', { name: /^Failed/ }).click();
+
+	await expect(page.getByTestId('history-error')).toContainText('Could not load payments.');
+	await expect(page.getByText(STALE_VENDOR)).toHaveCount(0);
 	await expect(page.getByText(/Showing all 1/)).toHaveCount(0);
 });

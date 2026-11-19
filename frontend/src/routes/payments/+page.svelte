@@ -1452,6 +1452,10 @@
 		// execute/void via onRunChanged drops rows). Drop matching mode so the
 		// prune effect resumes narrowing the selection to what's on screen.
 		selectedAllQueueMatching = false;
+		// Cleared when the request STARTS so Retry takes `LoadError` down while
+		// the new request is out, and a second failure remounts (re-announces)
+		// it — cleared only on success, Retry looked like a no-op.
+		queueErrored = false;
 		try {
 			const data = await api.get<QueueResponse>(
 				`/api/payments/queue?page=1&page_size=${QUEUE_PAGE_SIZE}`
@@ -1605,7 +1609,12 @@
 		// reload must not append a stale page onto the new list.
 		const token = cardsSequence.start();
 		if (opts.append) loadingMoreCards = true;
-		else loadingCards = true;
+		else {
+			loadingCards = true;
+			// Cleared when a fresh load STARTS so Retry takes `LoadError` down
+			// while the request is out and a second failure re-announces it.
+			cardsErrored = false;
+		}
 		try {
 			const listReq = api.get<{ items: CardItem[]; total: number }>(
 				`/api/cards?page=${nextPage}&page_size=${CARDS_PAGE_SIZE}`
@@ -1627,7 +1636,12 @@
 			// read as current, and let the table render the errored copy.
 			if (cardsSequence.isCurrentRequest(token)) {
 				cardsErrored = true;
-				if (!opts.append) cards = [];
+				// The total goes with the rows: left behind, the footer read
+				// "Load more (0 of N)" under the error.
+				if (!opts.append) {
+					cards = [];
+					cardsTotal = 0;
+				}
 				toast(err instanceof Error ? err.message : m('payments.cards.errored'), 'error');
 			}
 		} finally {
@@ -1851,7 +1865,12 @@
 		// reload must not append a stale page onto the new list.
 		const token = rebatesSequence.start();
 		if (opts.append) loadingMoreRebates = true;
-		else loadingRebates = true;
+		else {
+			loadingRebates = true;
+			// Cleared when a fresh load STARTS so Retry takes `LoadError` down
+			// while the request is out and a second failure re-announces it.
+			rebatesErrored = false;
+		}
 		try {
 			const list = await listCardRebates({ page: nextPage, pageSize: REBATES_PAGE_SIZE });
 			if (!rebatesSequence.canCommit(token)) return; // superseded
@@ -1871,7 +1890,16 @@
 			// failed read (mirrors `/exceptions`, `frontend/CLAUDE.md`).
 			if (rebatesSequence.isCurrentRequest(token)) {
 				rebatesErrored = true;
-				if (!opts.append) rebates = [];
+				// The envelope figures go with the rows: left behind, the footer
+				// read "Load more (0 of N)" under the error, beside a total and a
+				// mixed-currency notice for a list no longer on screen.
+				if (!opts.append) {
+					rebates = [];
+					rebateCount = 0;
+					rebateTotalAmount = null;
+					rebateListCurrency = null;
+					rebateExcludedCount = 0;
+				}
 				toast(
 					err instanceof Error ? err.message : m('payments.rebates.errored'),
 					'error'
@@ -2547,7 +2575,11 @@
 		{/if}
 
 	{:else if activeTab === 'history'}
-		{#if paymentStore.errored && paymentStore.all.length === 0}
+		{#if paymentStore.errored && !paymentStore.loading}
+			<!-- A failed list load replaces the table, rows or not (as /invoices
+			     does): gated on an empty list, a failed chip / search / sort
+			     re-fetch left the PREVIOUS filter's rows under the new chip with
+			     nothing saying they were stale. -->
 			<LoadError
 				message={m('payments.history.empty.errored')}
 				onretry={retryHistory}

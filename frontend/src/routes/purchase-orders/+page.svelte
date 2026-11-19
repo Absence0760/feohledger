@@ -217,6 +217,11 @@
 	) {
 		const token = fetchSequence.start();
 		loading = !opts.append;
+		// Cleared when a fresh load STARTS (as /credit-memos does) so Retry
+		// takes `LoadError` down while the request is out and a second
+		// failure re-announces it — cleared only on success, Retry looked
+		// like a no-op.
+		if (!opts.append) errored = false;
 		try {
 			const nextPage = opts.nextPage ?? 1;
 			const params = new URLSearchParams({

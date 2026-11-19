@@ -40,6 +40,12 @@ function createPaymentStore() {
 		const nextPage = opts.nextPage ?? 1;
 		const token = fetchSequence.start();
 		loading = true;
+		// A non-append load clears the flag when it STARTS, not only on
+		// success: `ui/LoadError`'s Retry relies on the flag dropping so the
+		// block unmounts while the new request is out, and remounts
+		// (re-announcing) if it fails again. Cleared only on success, Retry was
+		// a silent no-op and a second failure was never announced.
+		if (!opts.append) errored = false;
 		try {
 			const query = new URLSearchParams({
 				...params,

@@ -28,6 +28,12 @@ function createContractStore() {
 	async function fetch(params: ContractListParams = {}) { // noqa: raw-fetch-in-component — store method name; routes through listContracts → api client
 		const token = fetchSequence.start();
 		loading = true;
+		// Cleared when the request STARTS, not only on success: `ui/LoadError`'s
+		// Retry relies on the flag dropping so the block unmounts while the new
+		// request is out, and remounts (re-announcing) if it fails again. Cleared
+		// only on success, Retry was a silent no-op and a second failure was
+		// never announced.
+		errored = false;
 		try {
 			const res = await listContracts({ ...params, page: 1, page_size: 20 });
 			// Superseded by a newer fetch/loadMore, or by a local edit.

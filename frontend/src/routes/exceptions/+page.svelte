@@ -565,8 +565,12 @@
 			errored = true;
 			// A failed first page is stated in place, with a Retry (`LoadError`
 			// below); a failed Load more keeps its rows, so only a toast can say so.
-			if (!opts.append) exceptions = [];
-			else toast(m('exceptions.toast.loadFailed'), 'error');
+			// The total goes with the rows: left behind, the footer read
+			// "Load more (0 of N)" under the in-place error.
+			if (!opts.append) {
+				exceptions = [];
+				total = 0;
+			} else toast(m('exceptions.toast.loadFailed'), 'error');
 		} finally {
 			// Flags and selection belong to the newest request only: a stale
 			// response used to clear the spinner while the live fetch was still

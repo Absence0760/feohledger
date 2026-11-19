@@ -184,7 +184,14 @@
 		// KPI rollup tracks the same filter state — refresh it on a fresh load.
 		if (!opts.append) void loadSummary();
 		if (opts.append) loadingMore = true;
-		else loading = true;
+		else {
+			loading = true;
+			// Cleared when a fresh load STARTS (as /credit-memos does) so Retry
+			// takes `LoadError` down while the request is out and a second
+			// failure re-announces it — cleared only on success, Retry looked
+			// like a no-op.
+			errored = false;
+		}
 		try {
 			const res = await listIntake({
 				...buildParams(),
