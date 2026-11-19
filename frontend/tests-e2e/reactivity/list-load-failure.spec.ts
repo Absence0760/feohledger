@@ -136,6 +136,30 @@ const CASES: Case[] = [
 		apiPathname: '/api/budgets',
 		notShown: /No budgets match your filters/,
 		shown: /Could not load budgets/
+	},
+	{
+		retry: true,
+		name: 'vendor statements',
+		route: '/vendor-statements',
+		apiPathname: '/api/vendor-statements',
+		notShown: /No reconciliations/,
+		shown: /Failed to load reconciliations/
+	},
+	{
+		retry: true,
+		name: 'positive pay',
+		route: '/positive-pay',
+		apiPathname: '/api/positive-pay',
+		notShown: /No Positive Pay files/,
+		shown: /Failed to load Positive Pay files/
+	},
+	{
+		retry: true,
+		name: 'discount offers',
+		route: '/discounts',
+		apiPathname: '/api/discounts/offers',
+		notShown: /No discount offers match this filter/,
+		shown: /Failed to load discount offers/
 	}
 ];
 

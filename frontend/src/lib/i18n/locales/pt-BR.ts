@@ -3228,6 +3228,7 @@ export const messages = {
 	'positivePay.runLabel': 'Lote {id}',
 	'positivePay.fileLabel': '{type} {id}',
 	'positivePay.empty': 'Nenhum arquivo Positive Pay corresponde aos seus filtros.',
+	'positivePay.emptyNone': 'Ainda não há arquivos Positive Pay.',
 	'positivePay.notFound': 'Arquivo Positive Pay não encontrado',
 	'positivePay.row.open': 'Abrir arquivo Positive Pay {label}',
 	'positivePay.row.delete': 'Excluir',
@@ -4282,6 +4283,7 @@ export const messages = {
 	'discounts.opt.unrankableHeading': 'Sem classificação — TIR desconhecida',
 	'discounts.opt.unrankableNote': '{n, plural, one {# oferta não tem} other {# ofertas não têm}} data de vencimento líquida, portanto não há horizonte para anualizar o retorno. A economia é real e aparece abaixo; a TIR fica retida em vez de ser informada como 0 %. Elas não entram em nenhum total acima e nunca foram selecionadas — registre a data de vencimento da fatura para classificá-las.',
 	'discounts.opt.aprUnknown': 'TIR desconhecida — sem data de vencimento',
+	'discounts.opt.apr': '{pct} ao ano',
 	'discounts.opt.notRanked': 'Sem classificação',
 
 	'discounts.redirecting': 'Redirecionando…',
@@ -4499,6 +4501,7 @@ export const messages = {
 
 	'vendorStatements.col.vendor': 'Fornecedor',
 	'vendorStatements.empty': 'Nenhuma conciliação corresponde aos seus filtros.',
+	'vendorStatements.emptyNone': 'Ainda não há conciliações.',
 	'vendorStatements.kpi.blocking': '{n} bloqueando',
 	'vendorStatements.kpi.closeReadiness': 'Prontidão para o fechamento',
 	'vendorStatements.kpi.openDiscrepancies': 'Divergências abertas',

@@ -3228,6 +3228,7 @@ export const messages = {
 	'positivePay.runLabel': 'Lot {id}',
 	'positivePay.fileLabel': '{type} {id}',
 	'positivePay.empty': 'Aucun fichier Positive Pay ne correspond à vos filtres.',
+	'positivePay.emptyNone': 'Aucun fichier Positive Pay pour l’instant.',
 	'positivePay.notFound': 'Fichier Positive Pay introuvable',
 	'positivePay.row.open': 'Ouvrir le fichier Positive Pay {label}',
 	'positivePay.row.delete': 'Supprimer',
@@ -4287,6 +4288,7 @@ export const messages = {
 	'discounts.opt.unrankableHeading': 'Non classée — TAEG inconnu',
 	'discounts.opt.unrankableNote': '{n, plural, one {# offre n’a pas} other {# offres n’ont pas}} de date d’échéance nette : il n’y a donc pas d’horizon sur lequel annualiser le rendement. L’économie est réelle et affichée ; le TAEG est retenu plutôt que rapporté à 0 %. Elles n’entrent dans aucun total ci-dessus et n’ont jamais été sélectionnées — renseignez la date d’échéance de la facture pour les classer.',
 	'discounts.opt.aprUnknown': 'TAEG inconnu — pas de date d’échéance',
+	'discounts.opt.apr': '{pct} TAEG',
 	'discounts.opt.notRanked': 'Non classée',
 
 	'discounts.redirecting': 'Redirection…',
@@ -4504,6 +4506,7 @@ export const messages = {
 
 	'vendorStatements.col.vendor': 'Fournisseur',
 	'vendorStatements.empty': 'Aucun rapprochement ne correspond à vos filtres.',
+	'vendorStatements.emptyNone': 'Aucun rapprochement pour l’instant.',
 	'vendorStatements.kpi.blocking': '{n} bloquant(s)',
 	'vendorStatements.kpi.closeReadiness': 'Aptitude à la clôture',
 	'vendorStatements.kpi.openDiscrepancies': 'Écarts ouverts',

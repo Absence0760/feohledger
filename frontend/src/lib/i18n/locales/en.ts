@@ -3402,6 +3402,7 @@ export const en = {
 	'positivePay.runLabel': 'Run {id}',
 	'positivePay.fileLabel': '{type} {id}',
 	'positivePay.empty': 'No Positive Pay files match your filters.',
+	'positivePay.emptyNone': 'No Positive Pay files yet.',
 	'positivePay.notFound': 'Positive Pay file not found',
 	'positivePay.row.open': 'Open Positive Pay file {label}',
 	'positivePay.row.delete': 'Delete',
@@ -4463,6 +4464,7 @@ export const en = {
 	'discounts.opt.unrankableHeading': 'Not ranked — APR unknown',
 	'discounts.opt.unrankableNote': '{n, plural, one {# offer has} other {# offers have}} no net due date, so there is no horizon to annualize the return over. The saving is real and shown; the APR is withheld rather than reported as 0%. They are in no total above and were never selected — set the invoice due date to rank them.',
 	'discounts.opt.aprUnknown': 'APR unknown — no due date',
+	'discounts.opt.apr': '{pct} APR',
 	'discounts.opt.notRanked': 'Not ranked',
 
 	'discounts.redirecting': 'Redirecting…',
@@ -4682,6 +4684,7 @@ export const en = {
 
 	'vendorStatements.col.vendor': 'Vendor',
 	'vendorStatements.empty': 'No reconciliations match your filters.',
+	'vendorStatements.emptyNone': 'No reconciliations yet.',
 	'vendorStatements.kpi.blocking': '{n} blocking',
 	'vendorStatements.kpi.closeReadiness': 'Close readiness',
 	'vendorStatements.kpi.openDiscrepancies': 'Open discrepancies',

@@ -3225,6 +3225,7 @@ export const messages = {
 	'positivePay.runLabel': 'Lote {id}',
 	'positivePay.fileLabel': '{type} {id}',
 	'positivePay.empty': 'Ningún archivo Positive Pay coincide con sus filtros.',
+	'positivePay.emptyNone': 'Aún no hay archivos Positive Pay.',
 	'positivePay.notFound': 'Archivo Positive Pay no encontrado',
 	'positivePay.row.open': 'Abrir archivo Positive Pay {label}',
 	'positivePay.row.delete': 'Eliminar',
@@ -4278,6 +4279,7 @@ export const messages = {
 	'discounts.opt.unrankableHeading': 'Sin clasificar: TAE desconocida',
 	'discounts.opt.unrankableNote': '{n, plural, one {# oferta no tiene} other {# ofertas no tienen}} fecha de vencimiento neta, por lo que no hay horizonte sobre el que anualizar el rendimiento. El ahorro es real y se muestra; la TAE se omite en lugar de informarse como 0 %. No entran en ningún total de arriba y nunca se seleccionaron: registre la fecha de vencimiento de la factura para clasificarlas.',
 	'discounts.opt.aprUnknown': 'TAE desconocida: sin fecha de vencimiento',
+	'discounts.opt.apr': '{pct} TAE',
 	'discounts.opt.notRanked': 'Sin clasificar',
 
 	'discounts.redirecting': 'Redirigiendo…',
@@ -4495,6 +4497,7 @@ export const messages = {
 
 	'vendorStatements.col.vendor': 'Proveedor',
 	'vendorStatements.empty': 'Ninguna conciliación coincide con sus filtros.',
+	'vendorStatements.emptyNone': 'Aún no hay conciliaciones.',
 	'vendorStatements.kpi.blocking': '{n} bloqueante(s)',
 	'vendorStatements.kpi.closeReadiness': 'Preparación para el cierre',
 	'vendorStatements.kpi.openDiscrepancies': 'Discrepancias abiertas',

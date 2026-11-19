@@ -3229,6 +3229,7 @@ export const messages = {
 	'positivePay.runLabel': 'Lauf {id}',
 	'positivePay.fileLabel': '{type} {id}',
 	'positivePay.empty': 'Keine Positive-Pay-Dateien entsprechen Ihren Filtern.',
+	'positivePay.emptyNone': 'Noch keine Positive-Pay-Dateien.',
 	'positivePay.notFound': 'Positive-Pay-Datei nicht gefunden',
 	'positivePay.row.open': 'Positive-Pay-Datei {label} öffnen',
 	'positivePay.row.delete': 'Löschen',
@@ -4286,6 +4287,7 @@ export const messages = {
 	'discounts.opt.unrankableHeading': 'Nicht bewertet — Rendite unbekannt',
 	'discounts.opt.unrankableNote': '{n, plural, one {# Angebot hat} other {# Angebote haben}} kein Nettofälligkeitsdatum, also gibt es keinen Zeitraum, über den sich die Rendite hochrechnen lässt. Die Ersparnis ist real und wird angezeigt; die Rendite wird zurückgehalten statt als 0 % gemeldet. Sie fließen in keine Summe oben ein und wurden nie ausgewählt — hinterlegen Sie das Rechnungsfälligkeitsdatum, um sie zu bewerten.',
 	'discounts.opt.aprUnknown': 'Rendite unbekannt — kein Fälligkeitsdatum',
+	'discounts.opt.apr': '{pct} effektiver Jahreszins',
 	'discounts.opt.notRanked': 'Nicht bewertet',
 
 	'discounts.redirecting': 'Weiterleitung…',
@@ -4503,6 +4505,7 @@ export const messages = {
 
 	'vendorStatements.col.vendor': 'Lieferant',
 	'vendorStatements.empty': 'Keine Abstimmungen entsprechen Ihren Filtern.',
+	'vendorStatements.emptyNone': 'Noch keine Abstimmungen.',
 	'vendorStatements.kpi.blocking': '{n} blockierend',
 	'vendorStatements.kpi.closeReadiness': 'Abschlussbereitschaft',
 	'vendorStatements.kpi.openDiscrepancies': 'Offene Abweichungen',

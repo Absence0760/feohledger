@@ -23,6 +23,7 @@
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
@@ -72,6 +73,10 @@
 	let pageNum = $state(1);
 	let loading = $state(true);
 	let loadingMore = $state(false);
+	// A failed first-page load is its own state: rendering the table's empty
+	// row instead told the reader no reconciliation matched, when nothing had
+	// been read at all.
+	let loadError = $state(false);
 
 	let closeReady = $state<boolean | null>(null);
 	let blockingCount = $state(0);
@@ -160,12 +165,18 @@
 			recons = opts.append ? appendUnique(recons, data.items) : data.items;
 			total = data.total;
 			pageNum = nextPage;
+			loadError = false;
 		} catch (e) {
 			// `isCurrentRequest`, not `canCommit`: a load superseded by a local
 			// edit still failed, and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			if (!opts.append) recons = [];
-			toast(e instanceof Error ? e.message : m('vendorStatements.toast.loadFailed'), 'error');
+			if (opts.append) {
+				toast(e instanceof Error ? e.message : m('vendorStatements.toast.loadFailed'), 'error');
+			} else {
+				recons = [];
+				total = 0;
+				loadError = true;
+			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -357,63 +368,75 @@
 		<HelpTip term="statement-reconciliation" />
 	</div>
 
-	<DataTable
-		columns={COLUMNS}
-		isEmpty={!loading && recons.length === 0}
-		empty={loading ? m('common.loading') : m('vendorStatements.empty')}
-		colspan={8}
-	>
-		{#snippet body()}
-			{#each recons as recon (recon.id)}
-				<tr
-					class="clickable"
-					onclick={(e) => {
-						if (isRowOpenClick(e)) openDetail(recon);
-					}}
-				>
-					<td>
-						<RowLink
-							onclick={() => openDetail(recon)}
-							ariaLabel={m('vendorStatements.row.openAria', { vendor: recon.vendor_name ?? m('vendorStatements.vendorFallback'), date: recon.statement_date })}
-						>
-							{recon.vendor_name ?? '—'}
-						</RowLink>
-					</td>
-					<td class="muted">{formatDate(recon.statement_date)}</td>
-					<td class="muted">{recon.statement_reference ?? '—'}</td>
-					<td class="right mono">
-						{#if discrepancyCount(recon) > 0}
-							<Badge tone="danger" variant="disc-badge">{discrepancyCount(recon)}</Badge>
-						{:else}
-							<span class="disc-clean">0</span>
-						{/if}
-					</td>
-					<td class="right mono"><Money amount={recon.summary.statement_total} currency={recon.currency} /></td>
-					<td class="right mono"><Money amount={recon.summary.ledger_total} currency={recon.currency} /></td>
-					<td>
-						<Badge tone={RECON_STATUS_TONES[recon.status]} variant={recon.status}>
-							{statusLabel(recon.status)}
-						</Badge>
-					</td>
-					<td class="actions">
-						{#if canCreate}
-							<RowAction
-								variant="danger"
-								armed={confirmDeleteId === recon.id}
-								disabled={busyId === recon.id}
-								onclick={() => deleteRecon(recon)}
-								ariaLabel={m('vendorStatements.row.deleteAria', { vendor: recon.vendor_name ?? m('vendorStatements.vendorFallback'), date: recon.statement_date })}
+	{#if loadError && !loading}
+		<LoadError
+			message={m('vendorStatements.toast.loadFailed')}
+			onretry={() => load()}
+			testId="vendor-statements-load-error"
+		/>
+	{:else}
+		<DataTable
+			columns={COLUMNS}
+			isEmpty={!loading && recons.length === 0}
+			empty={loading
+				? m('common.loading')
+				: statusFilter !== 'all' || appliedSearch
+					? m('vendorStatements.empty')
+					: m('vendorStatements.emptyNone')}
+			colspan={8}
+		>
+			{#snippet body()}
+				{#each recons as recon (recon.id)}
+					<tr
+						class="clickable"
+						onclick={(e) => {
+							if (isRowOpenClick(e)) openDetail(recon);
+						}}
+					>
+						<td>
+							<RowLink
+								onclick={() => openDetail(recon)}
+								ariaLabel={m('vendorStatements.row.openAria', { vendor: recon.vendor_name ?? m('vendorStatements.vendorFallback'), date: formatDate(recon.statement_date) })}
 							>
-								{confirmDeleteId === recon.id ? m('vendorStatements.row.confirm') : m('vendorStatements.row.delete')}
-							</RowAction>
-						{/if}
-					</td>
-				</tr>
-			{/each}
-		{/snippet}
-	</DataTable>
+								{recon.vendor_name ?? '—'}
+							</RowLink>
+						</td>
+						<td class="muted">{formatDate(recon.statement_date)}</td>
+						<td class="muted">{recon.statement_reference ?? '—'}</td>
+						<td class="right mono">
+							{#if discrepancyCount(recon) > 0}
+								<Badge tone="danger" variant="disc-badge">{discrepancyCount(recon)}</Badge>
+							{:else}
+								<span class="disc-clean">0</span>
+							{/if}
+						</td>
+						<td class="right mono"><Money amount={recon.summary.statement_total} currency={recon.currency} /></td>
+						<td class="right mono"><Money amount={recon.summary.ledger_total} currency={recon.currency} /></td>
+						<td>
+							<Badge tone={RECON_STATUS_TONES[recon.status]} variant={recon.status}>
+								{statusLabel(recon.status)}
+							</Badge>
+						</td>
+						<td class="actions">
+							{#if canCreate}
+								<RowAction
+									variant="danger"
+									armed={confirmDeleteId === recon.id}
+									disabled={busyId === recon.id}
+									onclick={() => deleteRecon(recon)}
+									ariaLabel={m('vendorStatements.row.deleteAria', { vendor: recon.vendor_name ?? m('vendorStatements.vendorFallback'), date: formatDate(recon.statement_date) })}
+								>
+									{confirmDeleteId === recon.id ? m('vendorStatements.row.confirm') : m('vendorStatements.row.delete')}
+								</RowAction>
+							{/if}
+						</td>
+					</tr>
+				{/each}
+			{/snippet}
+		</DataTable>
+	{/if}
 
-	{#if hasMore}
+	{#if hasMore && !loadError}
 		<div class="load-more-row">
 			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
 				{loadingMore ? m('common.loading') : m('vendorStatements.loadMore', { shown: recons.length, total })}
