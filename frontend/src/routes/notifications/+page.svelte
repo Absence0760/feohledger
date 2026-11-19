@@ -54,11 +54,17 @@
 	let hasMore = $derived(notificationStore.hasMore);
 
 	/** The one WRITER of this route's query string. Untracked: it is called from
-	 *  the filter effect and must never become one of its dependencies. */
+	 *  the filter effect and must never become one of its dependencies. It
+	 *  edits only `filter` on the current URL, so any other parameter survives,
+	 *  and writes only on a real change — the effect runs at mount and on every
+	 *  Back/Forward too, and an unchanged replaceState is a wasted history call
+	 *  that counts toward Safari's per-30-second cap. */
 	function syncUrl() {
 		untrack(() => {
-			const qs = filter === 'unread' ? '?filter=unread' : '';
-			replaceState(`${pageStore.url.pathname}${qs}`, {});
+			const url = new URL(pageStore.url.href);
+			if (filter === 'unread') url.searchParams.set('filter', 'unread');
+			else url.searchParams.delete('filter');
+			if (url.search !== pageStore.url.search) replaceState(`${url.pathname}${url.search}`, {});
 		});
 	}
 

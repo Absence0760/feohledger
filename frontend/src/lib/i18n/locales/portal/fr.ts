@@ -191,6 +191,7 @@ export const messages = {
 	'portal.discounts.dialog.accept': 'Accepter l\'escompte',
 	'portal.discounts.dialog.accepting': 'Acceptation…',
 	'portal.company.title': 'Informations sur l\'entreprise',
+	'portal.company.loadFailed': "Impossible de charger les informations de votre entreprise. Réessayez.",
 	'portal.company.pendingBanner': 'Une modification de votre « {changeType} » est en attente d\'approbation par la comptabilité fournisseurs. Elle prendra effet une fois que votre client l\'aura approuvée.',
 	'portal.company.contact.title': 'Coordonnées',
 	'portal.company.contact.note': 'Celles-ci sont enregistrées immédiatement.',
