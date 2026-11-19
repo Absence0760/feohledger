@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import {
 		getPortalNotificationPreferences,
 		updatePortalNotificationPreferences,
@@ -13,6 +14,10 @@
 	let saving = $state(false);
 	let msg = $state('');
 	let err = $state('');
+	// A failed read of the saved preferences. The form is withheld while it
+	// stands: it would otherwise show the `true` defaults as if they were the
+	// supplier's settings, and Save would write them over the real ones.
+	let loadErr = $state('');
 
 	function apply(p: PortalNotificationPreferences) {
 		emailOnPayment = p.email_on_payment;
@@ -21,11 +26,11 @@
 
 	async function load() {
 		loading = true;
-		err = '';
+		loadErr = '';
 		try {
 			apply(await getPortalNotificationPreferences());
 		} catch (e) {
-			err = e instanceof Error ? e.message : m('portal.notifications.loadFailed');
+			loadErr = e instanceof Error ? e.message : m('portal.notifications.loadFailed');
 		} finally {
 			loading = false;
 		}
@@ -68,6 +73,8 @@
 		<p class="note">{m('portal.notifications.cardNote')}</p>
 		{#if loading}
 			<p class="note">{m('portal.notifications.loading')}</p>
+		{:else if loadErr}
+			<LoadError message={loadErr} onretry={load} testId="portal-notifications-load-error" />
 		{:else}
 			<form onsubmit={save}>
 				<label class="toggle">
