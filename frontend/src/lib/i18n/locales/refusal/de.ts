@@ -56,6 +56,7 @@ export const messages = {
 	'refusal.creditMemoEntityMismatch': "Gutschrift und Rechnung gehören zu unterschiedlichen Einheiten; eine Gutschrift kann keine Verbindlichkeit einer anderen Tochtergesellschaft mindern.",
 	'refusal.creditMemoCurrencyMismatch': "Die Währung der Gutschrift stimmt nicht mit der Währung der Rechnung überein.",
 	'refusal.creditMemoInvoiceCurrencyUnknown': "Die Rechnung hat keine Währung, daher kann keine Gutschrift mit ihrem Saldo abgeglichen werden. Legen Sie zuerst die Währung der Rechnung fest und wenden Sie dann die Gutschrift an.",
+	'refusal.discountOfferInvoiceCurrencyUnknown': "Die Rechnung hat keine Währung, daher kann kein Skonto darauf angeboten werden. Legen Sie zuerst die Währung der Rechnung fest.",
 	'refusal.billingProviderUnavailable': "Der Abrechnungsanbieter ist nicht erreichbar. Bitte versuchen Sie es erneut.",
 	'refusal.creditMemoInvoiceSettled': "Die Rechnung hat den Status {status}: Es wird keine Zahlung mehr darauf geleistet, eine angewendete Gutschrift würde also nichts mindern. Lassen Sie die Gutschrift offen und wenden Sie sie auf die nächste Rechnung des Lieferanten an.",
 	'refusal.creditMemoNotEditable': "Nur eine offene, nie angewendete Gutschrift kann bearbeitet werden (diese hat den Status {status}).",

@@ -56,6 +56,7 @@ export const messages = {
 	'refusal.creditMemoEntityMismatch': "L'avoir et la facture appartiennent à des entités différentes ; un avoir ne peut pas réduire la dette d'une autre filiale.",
 	'refusal.creditMemoCurrencyMismatch': "La devise de l'avoir ne correspond pas à la devise de la facture.",
 	'refusal.creditMemoInvoiceCurrencyUnknown': "La facture n'indique aucune devise : un avoir ne peut donc pas être rapproché de son solde. Renseignez d'abord la devise de la facture, puis appliquez l'avoir.",
+	'refusal.discountOfferInvoiceCurrencyUnknown': "La facture n'indique aucune devise : aucun escompte ne peut donc être proposé sur elle. Renseignez d'abord la devise de la facture.",
 	'refusal.billingProviderUnavailable': "Le prestataire de facturation est indisponible. Veuillez réessayer.",
 	'refusal.creditMemoInvoiceSettled': "La facture est au statut {status} : plus aucun paiement ne sera effectué sur elle, un avoir appliqué ne réduirait donc rien. Laissez l'avoir ouvert et appliquez-le à la prochaine facture du fournisseur.",
 	'refusal.creditMemoNotEditable': "Seul un avoir ouvert et jamais appliqué peut être modifié (celui-ci est au statut {status}).",

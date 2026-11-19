@@ -547,6 +547,8 @@ const BUILDERS: Record<string, Builder> = {
 	credit_memo_entity_mismatch: fixed('refusal.creditMemoEntityMismatch'),
 	credit_memo_currency_mismatch: fixed('refusal.creditMemoCurrencyMismatch'),
 	credit_memo_invoice_currency_unknown: fixed('refusal.creditMemoInvoiceCurrencyUnknown'),
+	// `api/discounts.py` — an invoice-scoped offer on an invoice in no stated currency.
+	discount_offer_invoice_currency_unknown: fixed('refusal.discountOfferInvoiceCurrencyUnknown'),
 	credit_memo_invoice_settled: (p, t) => {
 		const status = str(p, 'status');
 		return status === null

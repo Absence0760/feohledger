@@ -28,6 +28,7 @@ from app.services.discount_auto_trigger import (
     settled_invoice_status,
 )
 from app.services.discount_optimizer import OfferOpportunity
+from app.utils.currency_code import iso_currency_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -94,8 +95,11 @@ async def build_opportunity(
         base_amount=offer.base_amount,
         # `base_amount`'s own currency. The optimizer's totals are sums, and a
         # sum across currencies is not a number — see `optimize`'s
-        # `reporting_currency` guard.
-        currency=(offer.currency or "USD").upper(),
+        # `reporting_currency` guard. A missing or malformed code is `None`,
+        # never a guessed USD: `optimize` reads it as unconvertible, so the
+        # offer keeps its (currency-free) ROI but joins no total and is never
+        # spent against a cash budget (decisions §473).
+        currency=iso_currency_or_none(offer.currency),
         tier_days=int(tier["days"]),
         discount_percent=offers_svc.tier_percent(tier),
         pay_by=pay_by,

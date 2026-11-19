@@ -53,6 +53,7 @@ export const enRefusal = {
 	'refusal.creditMemoEntityMismatch': "The credit memo and the invoice belong to different entities; a credit cannot reduce another subsidiary's payable.",
 	'refusal.creditMemoCurrencyMismatch': "The credit memo's currency does not match the invoice's currency.",
 	'refusal.creditMemoInvoiceCurrencyUnknown': "The invoice records no currency, so a credit cannot be matched against its balance. Set the invoice's currency first, then apply the credit.",
+	'refusal.discountOfferInvoiceCurrencyUnknown': "The invoice records no currency, so no discount can be offered against it. Set the invoice's currency first.",
 	'refusal.billingProviderUnavailable': "The billing provider is unavailable. Please try again.",
 	'refusal.creditMemoInvoiceSettled': "The invoice is {status}: no payment will be made against it any more, so a credit applied to it would reduce nothing. Leave the credit memo open and apply it to the vendor's next invoice.",
 	'refusal.creditMemoNotEditable': "Only an open credit memo that has never been applied can be edited (this one is {status}).",

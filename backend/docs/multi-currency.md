@@ -224,8 +224,10 @@ are unknown). Such a row is never the reporting currency:
   /api/payments`, dispatch and the card mint refuse it as `currency_unknown`; a
   linked credit memo or an apply onto it is the 409
   `credit_memo_invoice_currency_unknown` and neither picker offers it; an
-  invoice-scoped discount offer naming no currency is the 422
-  `discount_offer_currency_required`. Setting the invoice's own currency clears
+  invoice-scoped discount offer onto it is the 409
+  `discount_offer_invoice_currency_unknown`, whether or not the caller names a
+  currency. An offer whose own code is missing or malformed is unconvertible
+  in the optimizer, whatever the reporting currency. Setting the invoice's own currency clears
   all of them.
 
 ### Per-vendor rollups

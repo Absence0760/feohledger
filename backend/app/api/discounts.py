@@ -66,6 +66,7 @@ from app.services.discount_auto_trigger import (
 from app.services.discount_opportunities import build_opportunity, name_maps
 from app.services.discount_optimizer import optimize
 from app.services.discount_roi import compute_roi, days_between
+from app.services.payment_runs import payable_currency_code
 from app.services.payment_schedules import latest_schedule
 from app.tenant import (
     apply_entity_scope,
@@ -74,12 +75,15 @@ from app.tenant import (
     get_tenant_db,
     get_write_entity_id,
 )
-from app.utils.currency_code import iso_currency_or_none
 from app.utils.dates import utc_today
 
-#: An invoice-scoped offer on an invoice that records no currency, with none
-#: named in the body (decisions §473).
-DISCOUNT_OFFER_CURRENCY_REQUIRED = "discount_offer_currency_required"
+#: An invoice-scoped offer on an invoice that records no usable currency (NULL,
+#: blank or malformed — `payment_runs.payable_currency_code`, the predicate the
+#: run builder and the credit-memo guard read), whether or not the body names
+#: one. The offer prices a payable in no stated currency, and an accepted offer
+#: in a caller-named code would later all but decide the invoice's currency for
+#: it — the same reasoning as `credit_memo_invoice_currency_unknown` (§473).
+DISCOUNT_OFFER_INVOICE_CURRENCY_UNKNOWN = "discount_offer_invoice_currency_unknown"
 
 router = APIRouter(prefix="/discounts", tags=["discounts"])
 
@@ -295,19 +299,21 @@ async def create_offer(
                 status_code=422, detail="vendor_id does not match the invoice's vendor"
             )
         base_amount = base_amount if base_amount is not None else invoice.amount
-        currency = currency or iso_currency_or_none(invoice.currency)
-        if currency is None:
-            # The invoice records no currency and the caller named none: the
-            # org currency below would label the offer with a code nobody
-            # stated for this payable (decisions §473).
+        invoice_currency = payable_currency_code(invoice.currency)
+        if invoice_currency is None:
+            # Refused even when the caller names a currency: a EUR offer on a
+            # balance in no stated currency cannot be proved to price it, and
+            # the run builder refuses the invoice as `currency_unknown` until
+            # someone sets its code anyway (decisions §473).
             raise HTTPException(
-                status_code=422,
+                status_code=409,
                 detail=coded_refusal(
-                    DISCOUNT_OFFER_CURRENCY_REQUIRED,
-                    "The invoice records no currency, so the offer cannot inherit one. "
-                    "Name the offer's currency, or set the invoice's first.",
+                    DISCOUNT_OFFER_INVOICE_CURRENCY_UNKNOWN,
+                    "The invoice records no currency, so no discount can be offered "
+                    "against it. Set the invoice's currency first.",
                 ),
             )
+        currency = currency or invoice_currency
     elif body.scope == OFFER_SCOPE_VENDOR:
         if not body.vendor_id:
             raise HTTPException(status_code=422, detail="vendor_id required for vendor scope")

@@ -56,6 +56,7 @@ export const messages = {
 	'refusal.creditMemoEntityMismatch': "La nota de crédito y la factura pertenecen a entidades distintas; un crédito no puede reducir la deuda de otra filial.",
 	'refusal.creditMemoCurrencyMismatch': "La moneda de la nota de crédito no coincide con la moneda de la factura.",
 	'refusal.creditMemoInvoiceCurrencyUnknown': "La factura no registra ninguna moneda, por lo que no se puede cotejar un crédito con su saldo. Establezca primero la moneda de la factura y luego aplique el crédito.",
+	'refusal.discountOfferInvoiceCurrencyUnknown': "La factura no registra ninguna moneda, por lo que no se puede ofrecer un descuento sobre ella. Establezca primero la moneda de la factura.",
 	'refusal.billingProviderUnavailable': "El proveedor de facturación no está disponible. Inténtelo de nuevo.",
 	'refusal.creditMemoInvoiceSettled': "La factura está en estado {status}: ya no se realizará ningún pago contra ella, por lo que un crédito aplicado no reduciría nada. Deje la nota de crédito abierta y aplíquela a la próxima factura del proveedor.",
 	'refusal.creditMemoNotEditable': "Solo se puede editar una nota de crédito abierta que nunca se haya aplicado (esta está en estado {status}).",
