@@ -31,6 +31,12 @@ from app.services.currency_conversion import (
     rollup_from_grouped_rows,
 )
 from app.services.onboarding import compute_onboarding
+from app.services.open_ap_due import (
+    OUTFLOW_STATUSES,
+    effective_due_date,
+    is_overdue,
+    latest_schedule_subquery,
+)
 from app.services.touchless import touchless_counts_select
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.dates import utc_today
@@ -454,6 +460,56 @@ async def get_dashboard(
         if unconverted:
             upcoming_unconverted_count += 1
 
+    # Overdue and due-soon AP, counted in SQL over the whole book — not folded
+    # from `upcoming_payments`, which is capped at ten rows (and, sorted by due
+    # date, fills with overdue rows first), so a count derived from it stops at
+    # ten and a due-soon count read off it can reach zero while invoices fall
+    # due this week. The population, the effective due date (latest payment
+    # schedule, else the invoice's own) and "overdue" are
+    # `services/open_ap_due`'s, the same statement the cash-flow forecast reads
+    # — so `overdue_count` here and the /cfo "Overdue (owed now)" card count
+    # the same invoices (decisions §449). Due soon is today through seven days
+    # out, the window `upcoming_payments` uses on its future side.
+    #
+    # Per currency, at FACE value, grouped on the invoice's own code: a count
+    # of invoices owed now has no business depending on whether each one has a
+    # rate lock, and a client shows `€1.2K · $3.4K` rather than a converted
+    # figure that may be part face value. A row with no code groups under
+    # `null`, which a client renders without a symbol rather than guessing one.
+    _due_latest = latest_schedule_subquery()
+    _due = effective_due_date(_due_latest)
+    _overdue = is_overdue(_due, today)
+    _due_soon = and_(_due >= today, _due <= week_ahead)
+    _due_ccy = func.nullif(func.upper(func.trim(Invoice.currency)), "")
+    due_rows = await db.execute(
+        _inv(
+            select(
+                _due_ccy.label("currency"),
+                func.count(case((_overdue, Invoice.id))),
+                func.coalesce(func.sum(case((_overdue, Invoice.amount))), 0),
+                func.count(case((_due_soon, Invoice.id))),
+                func.coalesce(func.sum(case((_due_soon, Invoice.amount))), 0),
+            )
+            .outerjoin(_due_latest, _due_latest.c.invoice_id == Invoice.id)
+            .where(Invoice.status.in_(OUTFLOW_STATUSES), _due.isnot(None), _due <= week_ahead)
+            .group_by(_due_ccy)
+            .order_by(_due_ccy.asc().nulls_last())
+        )
+    )
+    overdue_total: list[dict] = []
+    due_soon_total: list[dict] = []
+    for ccy, n_overdue, overdue_sum, n_soon, soon_sum in due_rows.all():
+        if n_overdue:
+            overdue_total.append(
+                {"currency": ccy, "amount": Decimal(str(overdue_sum)), "count": int(n_overdue)}
+            )
+        if n_soon:
+            due_soon_total.append(
+                {"currency": ccy, "amount": Decimal(str(soon_sum)), "count": int(n_soon)}
+            )
+    overdue_count = sum(r["count"] for r in overdue_total)
+    due_soon_count = sum(r["count"] for r in due_soon_total)
+
     # Touchless rate — the share of DECIDED invoices that went straight
     # through: approved automatically, no field or line-item correction, no
     # exception a person decided. Classified entirely by the shared predicates
@@ -856,6 +912,10 @@ async def get_dashboard(
         "upcoming_total_amount": upcoming_total_amount,
         "upcoming_total_amount_reporting": upcoming_total_amount_reporting,
         "upcoming_unconverted_count": upcoming_unconverted_count,
+        "overdue_count": overdue_count,
+        "overdue_total": overdue_total,
+        "due_soon_count": due_soon_count,
+        "due_soon_total": due_soon_total,
         "processing_time": {
             "avg_upload_to_approval_days": float(pt.avg_upload_to_approval_days),
             "median_upload_to_approval_days": float(pt.median_upload_to_approval_days),

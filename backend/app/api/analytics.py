@@ -33,9 +33,8 @@ from app.database import get_control_db
 from app.models.expense import Expense, ExpenseReport
 from app.models.gl_account import GLAccount
 from app.models.invoice import Invoice, InvoiceStatus
-from app.models.invoice_status import IN_REVIEW_STATUSES
 from app.models.organization import Organization
-from app.models.payment import Payment, PaymentSchedule
+from app.models.payment import Payment
 from app.models.procurement import GoodsReceipt, PurchaseOrder, po_currency_code
 from app.models.user import User
 from app.models.virtual_card import CardRebate, VirtualCard
@@ -78,7 +77,13 @@ from app.services.currency_conversion import (
     vendor_spend_grouped_select,
 )
 from app.services.fx_adapters import get_fx_adapter
-from app.services.payment_schedules import LATEST_SCHEDULE_ORDER
+from app.services.open_ap_due import (
+    COMMITTED_STATUSES,
+    PENDING_STATUSES,
+    effective_due_date,
+    is_overdue,
+    latest_schedule_subquery,
+)
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -116,10 +121,11 @@ CASH_FORECAST_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
 # still-in-flight pipeline (new / pending / ready_for_review) — projected,
 # lower-certainty outflow. Everything else (rejected / paid / done /
 # failed) is excluded: terminal, already-paid, or never going to pay.
-# Both are the shared sets (`models/invoice_status`), named here rather than
-# re-listed: committed IS the open-AP population the aging and AP balance read.
-_COMMITTED_STATUSES = OPEN_AP_STATUSES
-_PENDING_STATUSES = tuple(s.value for s in IN_REVIEW_STATUSES)
+# Both are the shared sets (`models/invoice_status`, via `services/open_ap_due`),
+# named here rather than re-listed: committed IS the open-AP population the
+# aging and AP balance read.
+_COMMITTED_STATUSES = COMMITTED_STATUSES
+_PENDING_STATUSES = PENDING_STATUSES
 
 
 async def _commitment_rows(
@@ -170,40 +176,17 @@ async def _commitment_rows(
         statuses += list(_PENDING_STATUSES)
     horizon_end = today + timedelta(days=horizon_days)
 
-    # ONE schedule row per invoice, newest first. A bare
-    # `outerjoin(PaymentSchedule)` fans an invoice out to one row per schedule,
-    # and the loop below appends a commitment row per result — so an invoice
-    # with two schedules was counted TWICE at its FULL amount: in the forecast,
-    # the cash-position curve, the what-if, every copilot planning tool and the
-    # `plan_id` hash, all at once, with nothing on any surface to show it.
-    # Unreachable today only because nothing but `scripts/seed.py` constructs a
-    # `PaymentSchedule` — an accident of the current feature set, not a
-    # guarantee, and this query is the single source every cash projection reads.
-    #
-    # `DISTINCT ON` with `services/payment_schedules.LATEST_SCHEDULE_ORDER`, the
-    # same rule the discount engine's `latest_schedule` reads — so its idea of an
-    # invoice's due date and the cash forecast's cannot diverge. `id` is the
-    # tiebreak, so two rows written in one transaction (identical `created_at`)
-    # still resolve deterministically rather than letting the plan hash flap.
-    latest_schedule = (
-        select(
-            PaymentSchedule.invoice_id.label("invoice_id"),
-            PaymentSchedule.due_date.label("sched_due"),
-            PaymentSchedule.discount_date.label("discount_date"),
-            PaymentSchedule.discount_percent.label("discount_percent"),
-        )
-        .distinct(PaymentSchedule.invoice_id)
-        .order_by(PaymentSchedule.invoice_id, *LATEST_SCHEDULE_ORDER)
-        .subquery()
-    )
-
-    # The effective due date the loop below times each row on: the latest
-    # schedule's, else the invoice's own. Bounded here at the future edge only
-    # — no lower bound, because a past-due row is an overdue outflow, not one
-    # to drop — so a horizon's worth of open AP is what crosses the wire rather
-    # than every open invoice with a far-future date. A NULL effective due date
-    # fails `<=` and is excluded: it cannot be timed into any period.
-    effective_due = func.coalesce(latest_schedule.c.sched_due, Invoice.due_date)
+    # ONE schedule row per invoice, and the effective due date the loop below
+    # times each row on — both from `services/open_ap_due`, the module the
+    # dashboard's overdue figure reads too, so the /cfo "Overdue (owed now)"
+    # card (§449) and the dashboard count the same rows. Bounded here at the
+    # future edge only — no lower bound, because a past-due row is an overdue
+    # outflow, not one to drop — so a horizon's worth of open AP is what
+    # crosses the wire rather than every open invoice with a far-future date.
+    # A NULL effective due date fails `<=` and is excluded: it cannot be timed
+    # into any period.
+    latest_schedule = latest_schedule_subquery()
+    effective_due = effective_due_date(latest_schedule)
 
     result = await db.execute(
         apply_entity_scope(
@@ -218,6 +201,7 @@ async def _commitment_rows(
                 Invoice.currency,
                 Invoice.reporting_amount,
                 Invoice.reporting_currency,
+                is_overdue(effective_due, today).label("overdue"),
             )
             .outerjoin(latest_schedule, latest_schedule.c.invoice_id == Invoice.id)
             .where(Invoice.status.in_(statuses))
@@ -242,6 +226,7 @@ async def _commitment_rows(
         inv_currency,
         rep_amount,
         rep_currency,
+        overdue,
     ) in result.all():
         due = sched_due or inv_due
         # The SQL bound above already excludes these; kept so the loop's own
@@ -269,9 +254,10 @@ async def _commitment_rows(
                 "currency": target_currency,
                 "unconverted": unconverted,
                 "committed": status_value in committed_set,
-                # Past due as of `today`: carried into the first period as
-                # overdue (see the docstring), not dropped.
-                "overdue": due < today,
+                # Past due as of `today` (`open_ap_due.is_overdue`, in SQL):
+                # carried into the first period as overdue (see the
+                # docstring), not dropped.
+                "overdue": bool(overdue),
                 "discount_date": discount_date,
                 "discount_percent": discount_percent,
             }

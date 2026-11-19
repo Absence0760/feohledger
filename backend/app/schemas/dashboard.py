@@ -92,6 +92,19 @@ class UpcomingPayment(BaseModel):
     is_overdue: bool
 
 
+class DueByCurrency(BaseModel):
+    """One currency's share of `overdue_total` / `due_soon_total`.
+
+    `amount` is the FACE sum of those invoices in `currency`, never converted.
+    `currency` is null for invoices that record no code: a client renders that
+    figure without a symbol rather than substituting one.
+    """
+
+    currency: str | None
+    amount: MoneyAmount
+    count: int
+
+
 class ProcessingTimeMetrics(BaseModel):
     """Time-to-X distributions in business days — not money, stays float."""
 
@@ -204,6 +217,16 @@ class DashboardResponse(BaseModel):
     upcoming_total_amount: MoneyAmount
     upcoming_total_amount_reporting: MoneyAmount
     upcoming_unconverted_count: int
+    #: Open AP (approved and still owed, plus the in-review pipeline) whose
+    #: effective due date — latest payment schedule, else the invoice's own —
+    #: is before today. Counted in SQL over the whole book by
+    #: `services/open_ap_due`, the predicate the /cfo overdue card reads too;
+    #: never derived from `upcoming_payments`, which is capped at ten rows.
+    overdue_count: int = 0
+    overdue_total: list[DueByCurrency] = []
+    #: The same population, due today through seven days out.
+    due_soon_count: int = 0
+    due_soon_total: list[DueByCurrency] = []
     processing_time: ProcessingTimeMetrics
     approval_bottleneck: list[ApprovalBottleneckEntry]
     discount_capture: DiscountCapture
