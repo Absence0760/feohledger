@@ -4,8 +4,8 @@ import { deleteInvoicesWhere, expect, tenantPsql, test } from '../fixtures/helpe
  * /invoices — bulk operations bar.
  *
  * Selecting any row reveals the bulk-bar with "X selected", a Clear
- * button, a Change Status dropdown, a Delete button, and CSV/JSON/XML
- * export buttons. System-managed statuses can't be selected (the row
+ * button, a Change Status dropdown, a Delete button, and an Export menu
+ * (CSV/JSON/XML). System-managed statuses can't be selected (the row
  * checkbox is disabled), so this spec selects rows whose status is
  * known to be selectable (new / ready_for_review / approved / rejected).
  */
@@ -49,7 +49,7 @@ test.describe('/invoices bulk bar (acme admin)', () => {
 		await expect(page.locator('.bulk-count')).toContainText('2 selected');
 	});
 
-	test('Change Status, Delete, and CSV/JSON/XML buttons are present', async ({
+	test('Change Status, Delete, and an Export menu of CSV/JSON/XML are present', async ({
 		page
 	}) => {
 		await page
@@ -60,9 +60,10 @@ test.describe('/invoices bulk bar (acme admin)', () => {
 		const bar = page.locator('.bulk-bar');
 		await expect(bar.getByRole('button', { name: 'Change Status' })).toBeVisible();
 		await expect(bar.getByRole('button', { name: 'Delete' })).toBeVisible();
-		await expect(bar.getByRole('button', { name: 'CSV' })).toBeVisible();
-		await expect(bar.getByRole('button', { name: 'JSON' })).toBeVisible();
-		await expect(bar.getByRole('button', { name: 'XML' })).toBeVisible();
+		// The three formats sit behind one Export menu button (ui/MenuButton).
+		await bar.getByRole('button', { name: 'Export' }).click();
+		const menu = bar.getByRole('menu', { name: 'Export' });
+		await expect(menu.getByRole('menuitem')).toHaveText(['CSV', 'JSON', 'XML']);
 	});
 
 	test('Change Status dropdown opens with the valid transitions', async ({ page }) => {

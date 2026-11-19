@@ -619,6 +619,7 @@ export const en = {
 	'invoices.bulk.delete': 'Delete',
 	'invoices.bulk.confirmDelete': 'Confirm Delete',
 	'invoices.bulk.changeStatus': 'Change Status',
+	'invoices.bulk.export': 'Export',
 	'invoices.bulk.cannotDelete': 'Cannot delete invoices in system-managed statuses',
 	'invoices.bulk.noTransitions': 'No common status transitions for the selected invoices',
 	'invoices.bulk.newStatusAria': 'New status for selected invoices',

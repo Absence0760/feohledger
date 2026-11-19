@@ -550,6 +550,7 @@ export const messages = {
 	'invoices.bulk.delete': 'Löschen',
 	'invoices.bulk.confirmDelete': 'Löschen bestätigen',
 	'invoices.bulk.changeStatus': 'Status ändern',
+	'invoices.bulk.export': 'Exportieren',
 	'invoices.bulk.cannotDelete': 'Rechnungen in systemverwalteten Status können nicht gelöscht werden',
 	'invoices.bulk.noTransitions': 'Keine gemeinsamen Statusübergänge für die ausgewählten Rechnungen',
 	'invoices.bulk.newStatusAria': 'Neuer Status für ausgewählte Rechnungen',

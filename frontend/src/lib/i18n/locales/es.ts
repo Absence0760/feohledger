@@ -552,6 +552,7 @@ export const messages = {
 	'invoices.bulk.delete': 'Eliminar',
 	'invoices.bulk.confirmDelete': 'Confirmar eliminación',
 	'invoices.bulk.changeStatus': 'Cambiar estado',
+	'invoices.bulk.export': 'Exportar',
 	'invoices.bulk.cannotDelete': 'No se pueden eliminar facturas en estados gestionados por el sistema',
 	'invoices.bulk.noTransitions': 'No hay transiciones de estado comunes para las facturas seleccionadas',
 	'invoices.bulk.newStatusAria': 'Nuevo estado para las facturas seleccionadas',

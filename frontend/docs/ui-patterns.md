@@ -375,6 +375,14 @@ appears when one or more rows are selected:
   local `.bulk-delete-btn` copy — `/invoices` carried one until it drifted,
   and a hand-rolled `.bulk-bar` with it (it now uses `<BulkBar>`, so it has the
   `role="toolbar"` and its name).
+- **Several variants of one action go behind one `MenuButton`.** `/invoices`'
+  CSV, JSON and XML exports are one **Export** menu (`ui/MenuButton.svelte`):
+  as three buttons they wrapped the bar to three rows at 375px. A page with a
+  single format (`/vendors`, `/contracts`: CSV only) keeps its one button —
+  a menu of one is a slower button. The menu flips above the bar, since the
+  bar is pinned to the bottom of the viewport. Specs open it first:
+  `getByRole('button', { name: 'Export' })`, then
+  `getByRole('menuitem', { name: 'CSV' })`.
 - Bulk endpoints return a partial-success shape — `{deleted: [],
   failed: [{id, reason, ...}]}` — and the page surfaces the per-row
   reason in a toast. See `bulk_delete_users` in `backend/app/api/admin.py`

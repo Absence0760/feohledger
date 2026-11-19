@@ -545,6 +545,7 @@ export const messages = {
 	'invoices.bulk.delete': '削除',
 	'invoices.bulk.confirmDelete': '削除を確認',
 	'invoices.bulk.changeStatus': 'ステータスを変更',
+	'invoices.bulk.export': 'エクスポート',
 	'invoices.bulk.cannotDelete': 'システム管理ステータスの請求書は削除できません',
 	'invoices.bulk.noTransitions': '選択した請求書に共通するステータス遷移がありません',
 	'invoices.bulk.newStatusAria': '選択した請求書の新しいステータス',

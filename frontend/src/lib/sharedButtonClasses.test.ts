@@ -49,6 +49,7 @@ const COVERED = [
 	'lib/components/reports/ResultTable.svelte',
 	'lib/components/ui/BulkBar.svelte',
 	'lib/components/ui/BulkDeleteButton.svelte',
+	'lib/components/ui/MenuButton.svelte',
 	'lib/components/workflow-mgmt/ImportExportControls.svelte',
 	'lib/components/workflow-mgmt/SimulationModal.svelte',
 	'lib/components/workflow-mgmt/TemplateLibraryModal.svelte',
