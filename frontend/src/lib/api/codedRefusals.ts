@@ -549,6 +549,8 @@ const BUILDERS: Record<string, Builder> = {
 	credit_memo_invoice_currency_unknown: fixed('refusal.creditMemoInvoiceCurrencyUnknown'),
 	// `api/discounts.py` — an invoice-scoped offer on an invoice in no stated currency.
 	discount_offer_invoice_currency_unknown: fixed('refusal.discountOfferInvoiceCurrencyUnknown'),
+	// `api/organization.py` — `payments.home_currency` that is not a code.
+	organization_home_currency_invalid: fixed('refusal.organizationHomeCurrencyInvalid'),
 	credit_memo_invoice_settled: (p, t) => {
 		const status = str(p, 'status');
 		return status === null
@@ -1024,6 +1026,7 @@ const BUILDERS: Record<string, Builder> = {
 	card_skip_compliance_hold: fixed('refusal.cardSkipComplianceHold'),
 	card_skip_erp_bill: fixed('refusal.cardSkipErpBill'),
 	card_skip_currency_unknown: fixed('refusal.cardSkipCurrencyUnknown'),
+	card_skip_home_currency_invalid: fixed('refusal.cardSkipHomeCurrencyInvalid'),
 	card_skip_issue_failed: fixed('refusal.cardSkipIssueFailed'),
 	// The whole `/cards/generate` call, on a tenant whose programme is off.
 	cards_not_enabled: fixed('refusal.cardsNotEnabled'),

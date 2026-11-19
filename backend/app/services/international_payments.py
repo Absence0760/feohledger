@@ -81,27 +81,65 @@ def normalize_currency_code(value: str | None) -> str | None:
     return iso_currency_or_none(value)
 
 
-def configured_home_currency(org_settings: dict | None) -> str | None:
-    """The home-currency SETTING as written, normalised — or ``None``.
+#: `failure_reason` / skip family for a home-currency SETTING that is set but is
+#: not a three-letter code (decisions §473, amended). Only an UNSET setting
+#: falls back to `DEFAULT_HOME_CURRENCY`.
+HOME_CURRENCY_INVALID = "home_currency_invalid"
 
-    ``None`` means the tenant has not usably set one (absent, blank, not a
-    three-ASCII-letter code, or the
-    surrounding JSON is not the shape it should be), which is a *different*
-    answer from "their home currency is USD". `resolve_home_currency` collapses
-    the two because the payment path has to pick something; the
-    reporting-currency chain in `currency_conversion` must not, because
-    `settings.payments.home_currency` is only its SECOND rung and an absent
-    value has to fall through to the next one rather than short-circuit it.
+
+class HomeCurrencyInvalidError(InternationalPaymentError):
+    """`settings.payments.home_currency` is set but malformed.
+
+    A subclass of `InternationalPaymentError`, so the dispatch site's
+    `international_payment_error:` failure (retry-safe: refused before any
+    order exists at the processor) carries it without a new prefix."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            f"{HOME_CURRENCY_INVALID}: the organisation's home currency setting is not a "
+            "three-letter currency code; correct it before paying"
+        )
+
+
+def _home_currency_setting(org_settings: dict | None) -> tuple[bool, str | None]:
+    """``(is_set, code)`` for the raw setting.
+
+    ``is_set`` is False for an absent, ``None`` or whitespace-only value (and
+    for a settings blob or ``payments`` block that is not a dict); ``code`` is
+    the normalised code, or ``None`` when the set value is malformed.
 
     This is the only place in `app/` that reads the raw setting out of the
     settings JSON — see `tests/test_payment_home_currency.py`.
     """
     if not isinstance(org_settings, dict):
-        return None
+        return False, None
     payments = org_settings.get("payments")
     if not isinstance(payments, dict):
-        return None
-    return normalize_currency_code(payments.get("home_currency"))
+        return False, None
+    raw = payments.get("home_currency")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return False, None
+    return True, normalize_currency_code(raw)
+
+
+def configured_home_currency(org_settings: dict | None) -> str | None:
+    """The home-currency SETTING as written, normalised — or ``None``.
+
+    ``None`` means the tenant has not usably set one (absent, blank, not a
+    three-ASCII-letter code, or the surrounding JSON is not the shape it
+    should be), which is a *different* answer from "their home currency is
+    USD". Callers that must tell unset from malformed use
+    `home_currency_is_malformed`; the reporting-currency chain in
+    `currency_conversion` does, because a malformed value there is not "fall
+    through to the next rung" either.
+    """
+    return _home_currency_setting(org_settings)[1]
+
+
+def home_currency_is_malformed(org_settings: dict | None) -> bool:
+    """True when the setting is SET but is not a three-letter code."""
+    is_set, code = _home_currency_setting(org_settings)
+    return is_set and code is None
 
 
 def resolve_home_currency(org_settings: dict | None) -> str:
@@ -110,24 +148,24 @@ def resolve_home_currency(org_settings: dict | None) -> str:
     The denomination of `Payment.source_amount`, of every money threshold in
     `settings.compliance`, and of the comparison that decides whether an
     invoice even needs an FX leg. **One owner, because four call sites used to
-    normalise it four ways.** `compliance._home_currency` stripped and
-    upper-cased; `currency_conversion.resolve_reporting_currency` stripped and
-    upper-cased; `prepare_international_payment` only upper-cased what it was
-    handed; and `api/payments._execute_single_payment` — the site that decides
-    the FX leg — only upper-cased too.
+    normalise it four ways** (a trailing space once routed every domestic
+    payment through `international_wire`).
 
-    A trailing space was therefore enough to route **every domestic payment**
-    through `international_wire`: `"USD "` != `"USD"`, so the invoice's currency
-    looked foreign, `prepare_international_payment` picked a cross-border
-    corridor, an FX rate was locked onto the row, and the KYC gate then read a
-    different (stripped) value for the same setting. Nothing validates the
-    field on write, and the tenant's own settings JSON is where it comes from.
-
-    Never raises and never returns blank: a missing or whitespace-only setting
-    degrades to ``DEFAULT_HOME_CURRENCY`` rather than producing a code that
-    compares equal to nothing.
+    Never returns blank. Only an UNSET setting (absent, ``None``, blank, or a
+    settings blob of the wrong shape) degrades to ``DEFAULT_HOME_CURRENCY``.
+    A set-but-malformed value raises `HomeCurrencyInvalidError` (decisions
+    §473, amended): reading ``"EURO"`` as USD paid a USD→EUR leg at a real FX
+    lock, and a GBP org that typed ``"GBR"`` paid a USD invoice as domestic and
+    skipped the international KYC. The organisation settings endpoint refuses
+    such a value on write (`organization_home_currency_invalid`), so
+    only a row written before that check, or by hand, reaches here.
     """
-    return configured_home_currency(org_settings) or DEFAULT_HOME_CURRENCY
+    is_set, code = _home_currency_setting(org_settings)
+    if not is_set:
+        return DEFAULT_HOME_CURRENCY
+    if code is None:
+        raise HomeCurrencyInvalidError()
+    return code
 
 
 def _quantize_money(value: Decimal) -> Decimal:
@@ -175,7 +213,12 @@ async def prepare_international_payment(
     # One normaliser, so a trailing space in the org's setting can no longer
     # make the home currency compare unequal to itself here while comparing
     # equal in the compliance gate. See `resolve_home_currency`.
-    source_currency = normalize_currency_code(org_home_currency) or DEFAULT_HOME_CURRENCY
+    # A home currency that is not a code is refused, never read as USD
+    # (decisions §473, amended): callers pass `resolve_home_currency`'s answer,
+    # which has already refused a malformed setting, so this guards any other.
+    source_currency = normalize_currency_code(org_home_currency)
+    if source_currency is None:
+        raise HomeCurrencyInvalidError()
     # Never defaulted to the home currency: a blank invoice currency is unknown,
     # and pricing it as domestic pays it in a currency nobody recorded
     # (decisions §453). Dispatch refuses it first (`dispatch_preflight`); this

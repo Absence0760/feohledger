@@ -4249,6 +4249,22 @@ async def _execute_single_payment(
         payment.completed_at = now
         return
 
+    # The org's home currency decides the FX leg and denominates every
+    # compliance threshold, on the card leg as well as the processor leg, so it
+    # is resolved once here, before either. A setting that is set but not a
+    # code is refused, never read as USD (decisions §473, amended): "EURO" paid
+    # a USD→EUR leg at a real FX lock. `international_payment_error:` keeps the
+    # refusal retry-safe — nothing has reached a processor yet.
+    from app.services.international_payments import HomeCurrencyInvalidError
+
+    try:
+        org_home_currency = resolve_home_currency(org.settings)
+    except HomeCurrencyInvalidError as exc:
+        payment.status = "failed"
+        payment.failure_reason = f"international_payment_error: {exc}"
+        payment.completed_at = now
+        return
+
     vendor_bank: dict | None = None
     if invoice and invoice.vendor_id:
         v_result = await db.execute(
@@ -4509,7 +4525,6 @@ async def _execute_single_payment(
     # No `or "USD"`: `dispatch_preflight` has already refused an invoice that
     # records no currency (`currency_unknown`), so a blank never reaches here.
     invoice_currency = normalize_currency_code(invoice.currency)
-    org_home_currency = resolve_home_currency(org.settings)
     has_intl_bank_fields = bool(
         vendor_bank and (vendor_bank.get("iban") or vendor_bank.get("swift_bic"))
     )
