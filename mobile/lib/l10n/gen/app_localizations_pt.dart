@@ -57,6 +57,22 @@ class AppLocalizationsPt extends AppLocalizations {
   String get commonRetry => 'Tentar novamente';
 
   @override
+  String get listShowingSavedCopy =>
+      'Mostrando uma cópia salva — não foi possível conectar ao servidor. Puxe para baixo para tentar novamente.';
+
+  @override
+  String get listRefreshFailed =>
+      'Não foi possível atualizar — mostrando a última lista carregada. Puxe para baixo para tentar novamente.';
+
+  @override
+  String get exceptionsLoadError =>
+      'Não foi possível carregar as exceções. Verifique sua conexão e toque em Tentar novamente.';
+
+  @override
+  String get contractsLoadError =>
+      'Não foi possível carregar os contratos. Verifique sua conexão e toque em Tentar novamente.';
+
+  @override
   String get commonAll => 'Todas';
 
   @override
@@ -4590,6 +4606,22 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get commonRetry => 'Tentar novamente';
+
+  @override
+  String get listShowingSavedCopy =>
+      'Mostrando uma cópia salva — não foi possível conectar ao servidor. Puxe para baixo para tentar novamente.';
+
+  @override
+  String get listRefreshFailed =>
+      'Não foi possível atualizar — mostrando a última lista carregada. Puxe para baixo para tentar novamente.';
+
+  @override
+  String get exceptionsLoadError =>
+      'Não foi possível carregar as exceções. Verifique sua conexão e toque em Tentar novamente.';
+
+  @override
+  String get contractsLoadError =>
+      'Não foi possível carregar os contratos. Verifique sua conexão e toque em Tentar novamente.';
 
   @override
   String get commonAll => 'Todas';

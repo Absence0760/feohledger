@@ -57,6 +57,20 @@ class AppLocalizationsJa extends AppLocalizations {
   String get commonRetry => '再試行';
 
   @override
+  String get listShowingSavedCopy =>
+      '保存済みのコピーを表示中 — サーバーに接続できませんでした。下に引いて再試行してください。';
+
+  @override
+  String get listRefreshFailed =>
+      '更新できませんでした — 最後に読み込んだ一覧を表示しています。下に引いて再試行してください。';
+
+  @override
+  String get exceptionsLoadError => '例外を読み込めませんでした。接続を確認して「再試行」をタップしてください。';
+
+  @override
+  String get contractsLoadError => '契約を読み込めませんでした。接続を確認して「再試行」をタップしてください。';
+
+  @override
   String get commonAll => 'すべて';
 
   @override

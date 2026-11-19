@@ -57,6 +57,22 @@ class AppLocalizationsFr extends AppLocalizations {
   String get commonRetry => 'Réessayer';
 
   @override
+  String get listShowingSavedCopy =>
+      'Copie enregistrée affichée — serveur injoignable. Tirez vers le bas pour réessayer.';
+
+  @override
+  String get listRefreshFailed =>
+      'Actualisation impossible — la dernière liste chargée est affichée. Tirez vers le bas pour réessayer.';
+
+  @override
+  String get exceptionsLoadError =>
+      'Impossible de charger les exceptions. Vérifiez votre connexion et appuyez sur Réessayer.';
+
+  @override
+  String get contractsLoadError =>
+      'Impossible de charger les contrats. Vérifiez votre connexion et appuyez sur Réessayer.';
+
+  @override
   String get commonAll => 'Toutes';
 
   @override

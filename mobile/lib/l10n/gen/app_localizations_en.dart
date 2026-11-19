@@ -57,6 +57,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonRetry => 'Retry';
 
   @override
+  String get listShowingSavedCopy =>
+      'Showing a saved copy — couldn\'t reach the server. Pull down to try again.';
+
+  @override
+  String get listRefreshFailed =>
+      'Couldn\'t refresh — showing the last list loaded. Pull down to try again.';
+
+  @override
+  String get exceptionsLoadError =>
+      'Couldn\'t load exceptions. Check your connection and tap Retry.';
+
+  @override
+  String get contractsLoadError =>
+      'Couldn\'t load contracts. Check your connection and tap Retry.';
+
+  @override
   String get commonAll => 'All';
 
   @override

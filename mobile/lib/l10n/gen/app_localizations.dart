@@ -198,6 +198,30 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get commonRetry;
 
+  /// No description provided for @listShowingSavedCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing a saved copy — couldn\'t reach the server. Pull down to try again.'**
+  String get listShowingSavedCopy;
+
+  /// No description provided for @listRefreshFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t refresh — showing the last list loaded. Pull down to try again.'**
+  String get listRefreshFailed;
+
+  /// No description provided for @exceptionsLoadError.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load exceptions. Check your connection and tap Retry.'**
+  String get exceptionsLoadError;
+
+  /// No description provided for @contractsLoadError.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load contracts. Check your connection and tap Retry.'**
+  String get contractsLoadError;
+
   /// No description provided for @commonAll.
   ///
   /// In en, this message translates to:

@@ -57,6 +57,22 @@ class AppLocalizationsDe extends AppLocalizations {
   String get commonRetry => 'Erneut versuchen';
 
   @override
+  String get listShowingSavedCopy =>
+      'Gespeicherte Kopie wird angezeigt — Server nicht erreichbar. Zum Aktualisieren nach unten ziehen.';
+
+  @override
+  String get listRefreshFailed =>
+      'Aktualisierung fehlgeschlagen — die zuletzt geladene Liste wird angezeigt. Zum erneuten Versuch nach unten ziehen.';
+
+  @override
+  String get exceptionsLoadError =>
+      'Ausnahmen konnten nicht geladen werden. Prüfen Sie Ihre Verbindung und tippen Sie auf „Erneut versuchen“.';
+
+  @override
+  String get contractsLoadError =>
+      'Verträge konnten nicht geladen werden. Prüfen Sie Ihre Verbindung und tippen Sie auf „Erneut versuchen“.';
+
+  @override
   String get commonAll => 'Alle';
 
   @override

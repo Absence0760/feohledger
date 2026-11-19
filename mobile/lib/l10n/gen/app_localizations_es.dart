@@ -57,6 +57,22 @@ class AppLocalizationsEs extends AppLocalizations {
   String get commonRetry => 'Reintentar';
 
   @override
+  String get listShowingSavedCopy =>
+      'Mostrando una copia guardada — no se pudo conectar al servidor. Desliza hacia abajo para reintentar.';
+
+  @override
+  String get listRefreshFailed =>
+      'No se pudo actualizar — se muestra la última lista cargada. Desliza hacia abajo para reintentar.';
+
+  @override
+  String get exceptionsLoadError =>
+      'No se pudieron cargar las excepciones. Comprueba tu conexión y toca Reintentar.';
+
+  @override
+  String get contractsLoadError =>
+      'No se pudieron cargar los contratos. Comprueba tu conexión y toca Reintentar.';
+
+  @override
   String get commonAll => 'Todas';
 
   @override
