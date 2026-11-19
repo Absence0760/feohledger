@@ -7,7 +7,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import NamedTuple
 
 from sqlalchemy import and_, func, or_, select
@@ -1271,8 +1271,9 @@ async def _refresh_po_match(
         warnings.append(partial_receipt_flag)
 
     # Cumulative billing: this invoice plus the others already citing the PO
-    # take it past its total (decisions §469). Independent of the
-    # amount leg, which compares this invoice alone with the whole PO.
+    # take it past its total (decisions §469), or past the received slice of
+    # it (§TBD-receipts). Independent of the amount and receipt legs, which
+    # compare this invoice alone with the PO.
     await _refresh_po_overbilling(db, invoice, warnings, match, rule.tolerance_pct)
 
     # 3-way: the invoice bills beyond what has been received. Independent of
@@ -1381,7 +1382,8 @@ async def _refresh_po_match(
     )
 
 
-#: The warning type of the cumulative over-billing finding. Its own type,
+#: The warning type of the cumulative over-billing findings (past the PO's
+#: total, or past what has been received of it). Its own type,
 #: not ``po_mismatch``: the invoice modal shows ``po_mismatch`` warnings through
 #: the PO-match panel's own ``issues``, which this cross-invoice finding is not
 #: one of, and it raises no hold (decisions §469).
@@ -1391,7 +1393,8 @@ PO_OVERBILLED_TYPE = "po_overbilled"
 async def _refresh_po_overbilling(
     db: AsyncSession, invoice: Invoice, warnings: list[dict], match, tolerance_pct
 ) -> None:
-    """Warn when this invoice and the others citing its PO bill past its total.
+    """Warn when this invoice and the others citing its PO bill past its total,
+    or past what has been received of it.
 
     PO matching compares ONE invoice with the whole PO, so two invoices that
     each fit (a supplier's PO flip, then the same supplier's own invoice for
@@ -1414,7 +1417,14 @@ async def _refresh_po_overbilling(
       unstamped spans entities) and names the PO's vendor or no vendor. Another
       vendor's invoice citing the same number is another vendor's PO.
     - **The limit.** The match rule's own tolerance over the PO total, as the
-      amount leg uses.
+      amount leg uses (``po_billed_beyond_total``). Within that, on a short
+      receipt, the same tolerance over the received slice of the PO
+      (``MatchResult.received_value``, the figure the per-invoice receipt leg
+      measures against) raises ``po_billed_beyond_receipt``: two invoices of
+      400.00 against 400.00 received each fit on their own (decisions
+      §TBD-receipts). Skipped when this invoice alone bills beyond receipt,
+      which the matcher already holds. One finding at most: past the total,
+      no receipt could cure it, so only that sentence is written.
 
     A warning, never a hold: credit memos, corrective re-bills and a sibling
     rejected after this refresh all move the sum without re-running it here,
@@ -1504,8 +1514,9 @@ async def _refresh_po_overbilling(
         return
     po_total = Decimal(str(match.po_total))
     tolerance = Decimal(str(tolerance_pct))
+    total_billed = billed + Decimal(str(invoice.amount))
     limit = po_total + po_total * tolerance / Decimal("100")
-    if billed + Decimal(str(invoice.amount)) > limit:
+    if total_billed > limit:
         warnings.append(
             warning(
                 "po_billed_beyond_total",
@@ -1513,6 +1524,32 @@ async def _refresh_po_overbilling(
                 billedAmount=billed,
                 poNumber=po.po_number,
                 poTotal=po_total,
+                currency=code,
+            )
+        )
+        # Past the whole PO: no receipt can cure that, so the receipt
+        # sentence below would only repeat it with a smaller figure.
+        return
+    # The receipt leg (decisions §TBD-receipts): the same siblings measured
+    # against the received slice of the PO instead of its total. Only on a
+    # SHORT receipt (`received_value` is set only then; a full one is the PO
+    # total, which the check above already measured), and only when this
+    # invoice alone fits what arrived: if it does not, the matcher's own
+    # `billed_beyond_receipt` has already raised the payment-blocking hold.
+    if match.received_value is None or match.billed_beyond_receipt:
+        return
+    received_value = Decimal(str(match.received_value))
+    receipt_limit = received_value + received_value * tolerance / Decimal("100")
+    if total_billed > receipt_limit:
+        warnings.append(
+            warning(
+                "po_billed_beyond_receipt",
+                "warning",
+                billedAmount=billed,
+                poNumber=po.po_number,
+                # Display only: the comparison above used the exact share,
+                # which `po_total × received / ordered` can make non-terminating.
+                receivedValue=received_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
                 currency=code,
             )
         )
@@ -2540,7 +2577,9 @@ UNATTENDED_APPROVAL_PO_OVERBILLED = "po_overbilled"
 
 
 def has_po_overbilling_warning(invoice: Invoice) -> bool:
-    """Whether the last refresh left ``po_billed_beyond_total`` on ``invoice``.
+    """Whether the last refresh left a cumulative over-billing warning
+    (``po_billed_beyond_total`` or ``po_billed_beyond_receipt``, both of type
+    ``po_overbilled``) on ``invoice``.
 
     Read from ``invoice.warnings``, so asked after the refresh that ran the
     match, as :func:`po_match_hold_refusal` is."""
@@ -2572,9 +2611,10 @@ async def po_match_hold_refusal(
       approve an invoice the next statement re-holds. Asked with the would-be
       approver added to the approver set, the question
       :func:`_finding_cleared_by_a_person` asks after the stamp.
-    * the cumulative over-billing warning (decisions §469): this invoice and
-      the others billing its PO pass the PO's total. It raises no hold, so
-      only a person reading it may approve.
+    * a cumulative over-billing warning (decisions §469, §TBD-receipts): this
+      invoice and the others billing its PO pass the PO's total, or what has
+      been received of it. It raises no hold, so only a person reading it may
+      approve.
     """
     from app.services.payment_runs import blocking_exception_types
 

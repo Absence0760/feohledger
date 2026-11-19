@@ -839,6 +839,7 @@
   "invoiceWarningPoNotFound": "Commande {poNumber} introuvable",
   "invoiceWarningPoAmountVariance": "Écart de montant {variancePct} par rapport à la commande {poNumber} (facture {invoiceAmount} contre commande {poTotal})",
   "invoiceWarningPoBilledBeyondTotal": "D’autres factures facturent déjà {billedAmount} sur la commande {poNumber}, dont le total est de {poTotal} — cette facture dépasse ce total",
+  "invoiceWarningPoBilledBeyondReceipt": "D’autres factures facturent déjà {billedAmount} sur la commande {poNumber}, dont seuls {receivedValue} de marchandises ont été reçus — cette facture dépasse ce qui a été reçu",
   "invoiceWarningPoAmountVariancePoCurrencyUnknown": "Écart de montant {variancePct} par rapport à la commande {poNumber}, qui n’indique aucune devise (facture {invoiceAmount} contre commande {poTotal})",
   "invoiceWarningPoCurrencyMismatch": "La facture est en {invoiceCurrency} mais la commande {poNumber} est en {poCurrency} — les montants n’ont pas été comparés",
   "invoiceWarningPoCurrencyMismatchInvoiceCurrencyUnknown": "La facture n’indique aucune devise valide et les commandes derrière {poNumber} sont dans des devises différentes ({poCurrencies}) — les montants n’ont pas été comparés",

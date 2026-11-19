@@ -3123,6 +3123,15 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoBilledBeyondReceipt(
+    String billedAmount,
+    String poNumber,
+    String receivedValue,
+  ) {
+    return '他の請求書が発注 $poNumber に対してすでに $billedAmount を請求していますが、入荷済みの物品は $receivedValue 分です — この請求書で入荷分を超えます';
+  }
+
+  @override
   String invoiceWarningPoAmountVariancePoCurrencyUnknown(
     String variancePct,
     String poNumber,

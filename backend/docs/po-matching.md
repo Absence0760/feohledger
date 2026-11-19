@@ -593,6 +593,38 @@ normalised currency code.
 
 Reasoning: `docs/decisions.md` §469.
 
+#### And past what has been received
+
+The receipt leg has the same blind spot: it compares ONE invoice with the
+received slice of the PO (`received_value`, `po_total × received / ordered`),
+so with 400.00 of a 1000.00 PO received, two invoices of 400.00 each fit it.
+On a SHORT receipt the same refresh measures the same siblings plus this
+invoice against `received_value` at the same tolerance, and when they exceed
+it adds `po_billed_beyond_receipt` (type `po_overbilled`, severity `warning`),
+naming what the others already bill, the received value (to the cent; the
+comparison uses the exact share) and the currency code.
+
+- **One finding at most.** Past the PO total, only `po_billed_beyond_total` is
+  written: no receipt could cure that bill.
+- **Not when this invoice alone bills beyond receipt.** The matcher's own
+  `billed_beyond_receipt` has already raised the payment-blocking
+  `po_mismatch` for that.
+- **Not on a full receipt** (`received_value` is unset; the received slice is
+  the whole PO, which the total check measured).
+- **Same type, same consequences:** no unattended approval while it stands
+  (`po_match_hold_refusal` answers `po_overbilled`), the exception-agent
+  unwind, and a rebuild by `refresh_po_match_only`. Recording a goods receipt
+  re-matches every invoice citing the PO in the same transaction, so a
+  delivery that covers the bills drops the finding at once, and cancelling a
+  receipt raises it.
+- **A warning, not a hold**, for §469's staleness reason, and one more: the
+  finding cannot say which of the bills is the excess one, so every bill on
+  the PO carries it, and a hold would stop the legitimate first bill with the
+  second.
+
+Receipts are still valued pro rata across the PO's lines, not per line; see
+`docs/followups.md`. Reasoning: `docs/decisions.md` §TBD-receipts.
+
 ### Recording a goods receipt
 
 `POST /api/goods-receipts` (`services/goods_receipts.py`) is the one in-app
@@ -710,8 +742,9 @@ sends the invoice to `ready_for_review` instead, recorded as
 of one that the stamp itself would undo (`"po_match_hold_cleared_by_approver"`):
 the caller cleared the hold while not its approver, and the §422 re-judge would
 raise it again straight after stamping them. Neither door can leave an invoice
-`approved` with a PO-match hold open. So does the cumulative over-billing
-warning above, which raises no row: `"po_overbilled"` (decisions §469). An
+`approved` with a PO-match hold open. So do the cumulative over-billing
+warnings above, past the total or past what was received, which raise no row:
+`"po_overbilled"` (decisions §469, §TBD-receipts). An
 invoice with no PO reference has no such row, and the floor behaves as before.
 
 ### In the Review Step

@@ -3322,6 +3322,15 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoBilledBeyondReceipt(
+    String billedAmount,
+    String poNumber,
+    String receivedValue,
+  ) {
+    return 'D’autres factures facturent déjà $billedAmount sur la commande $poNumber, dont seuls $receivedValue de marchandises ont été reçus — cette facture dépasse ce qui a été reçu';
+  }
+
+  @override
   String invoiceWarningPoAmountVariancePoCurrencyUnknown(
     String variancePct,
     String poNumber,

@@ -601,6 +601,7 @@ export const messages = {
 	'invoices.warning.poNotFound': '発注 {poNumber} が見つかりません',
 	'invoices.warning.poAmountVariance': '発注 {poNumber} との金額差異 {variancePct}（請求 {invoiceAmount} / 発注 {poTotal}）',
 	'invoices.warning.poBilledBeyondTotal': '他の請求書が発注 {poNumber}（合計 {poTotal}）に対してすでに {billedAmount} を請求しています — この請求書でその合計を超えます',
+	'invoices.warning.poBilledBeyondReceipt': '他の請求書が発注 {poNumber} に対してすでに {billedAmount} を請求していますが、入荷済みの物品は {receivedValue} 分です — この請求書で入荷分を超えます',
 	'invoices.warning.poAmountVariancePoCurrencyUnknown': '通貨が記録されていない発注 {poNumber} との金額差異 {variancePct}（請求 {invoiceAmount} / 発注 {poTotal}）',
 	'invoices.warning.poCurrencyMismatch': '請求書は {invoiceCurrency}、発注 {poNumber} は {poCurrency} のため、金額を比較していません',
 	'invoices.warning.poCurrencyMismatchInvoiceCurrencyUnknown': '請求書に有効な通貨が記録されておらず、{poNumber} の発注は異なる通貨 ({poCurrencies}) のため、金額を比較していません',

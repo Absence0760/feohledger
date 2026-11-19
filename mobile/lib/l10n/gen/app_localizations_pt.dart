@@ -3311,6 +3311,15 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoBilledBeyondReceipt(
+    String billedAmount,
+    String poNumber,
+    String receivedValue,
+  ) {
+    return 'Outras faturas já cobram $billedAmount contra o pedido $poNumber, do qual foram recebidas mercadorias no valor de $receivedValue — esta fatura ultrapassa o que foi recebido';
+  }
+
+  @override
   String invoiceWarningPoAmountVariancePoCurrencyUnknown(
     String variancePct,
     String poNumber,
@@ -7814,6 +7823,15 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
     String poTotal,
   ) {
     return 'Outras faturas já cobram $billedAmount contra o pedido $poNumber, cujo total é $poTotal — esta fatura ultrapassa esse total';
+  }
+
+  @override
+  String invoiceWarningPoBilledBeyondReceipt(
+    String billedAmount,
+    String poNumber,
+    String receivedValue,
+  ) {
+    return 'Outras faturas já cobram $billedAmount contra o pedido $poNumber, do qual foram recebidas mercadorias no valor de $receivedValue — esta fatura ultrapassa o que foi recebido';
   }
 
   @override
