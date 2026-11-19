@@ -99,9 +99,10 @@ async function mockVoid(
 async function openVoidDialog(page: import('@playwright/test').Page) {
 	await page.goto('/payments');
 	await page.getByRole('tab', { name: 'History', exact: true }).click();
-	// `exact` matters: the status filter chips carry a "Voided" label, and the
-	// dialog's own confirm is "Void payment".
-	await page.getByRole('button', { name: 'Void', exact: true }).first().click();
+	// Anchored on the row action's per-row name ("Void — invoice …"): the
+	// status filter chips carry a "Voided" label, and the dialog's own confirm
+	// is "Void payment".
+	await page.getByRole('button', { name: /^Void — invoice / }).first().click();
 	await page.getByTestId('void-reason').fill('e2e: duplicate run');
 	await page.getByTestId('void-confirm').click();
 }
@@ -400,7 +401,7 @@ test.describe('/payments — a missing void reason is a field error', () => {
 
 		await page.goto('/payments');
 		await page.getByRole('tab', { name: 'History', exact: true }).click();
-		await page.getByRole('button', { name: 'Void', exact: true }).first().click();
+		await page.getByRole('button', { name: /^Void — invoice / }).first().click();
 		// Whitespace is not a reason.
 		await page.getByTestId('void-reason').fill('   ');
 		// Submit stays enabled so the reason can be said (§ Field validation).

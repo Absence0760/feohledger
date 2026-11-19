@@ -538,7 +538,7 @@ test.describe('/payments — dismissing a compliance hold', () => {
 		page.on('pageerror', (e) => pageErrors.push(e.message));
 		const calls = await mockComplianceHistory(page);
 		await openHistory(page);
-		await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+		await page.getByRole('button', { name: /^Dismiss — invoice / }).click();
 
 		// Submit stays enabled; a blank reason marks the field and sends nothing.
 		const reason = page.getByTestId('compliance-reason');

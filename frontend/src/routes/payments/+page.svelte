@@ -157,7 +157,9 @@
 	);
 
 	let sortField = $state<string | null>(page.url.searchParams.get('sort'));
-	let sortOrder = $state<SortOrder>((page.url.searchParams.get('order') as SortOrder) ?? 'desc');
+	// Only `asc` is honoured from the URL: a hand-edited `?order=` must not
+	// reach the API as an unknown direction.
+	let sortOrder = $state<SortOrder>(page.url.searchParams.get('order') === 'asc' ? 'asc' : 'desc');
 
 	// WRITER — every read untracked, `page.url` included (issue #168 / the
 	// self-trigger on replaceState). Called from the tab/status effect, the
@@ -1330,9 +1332,29 @@
 	}
 
 	// Three states, not two: a failed load must not read as "nothing matched".
+	// Three states the table can be empty in, never one sentence for all of
+	// them: still loading, a filter that matched nothing, and a tenant with no
+	// payments at all. "No payments match your filters." over an unfiltered
+	// first visit blamed filters nobody had set. A failed load renders
+	// `<LoadError>` instead of the table (see the template).
+	let historyFiltered = $derived(search.trim() !== '' || activeStatus !== 'all');
 	let historyEmptyMessage = $derived(
-		paymentStore.errored ? m('payments.history.empty.errored') : m('payments.history.empty')
+		paymentStore.loading
+			? m('common.loading')
+			: historyFiltered
+				? m('payments.history.empty')
+				: m('payments.history.empty.fresh')
 	);
+
+	function retryHistory() {
+		paymentStore.fetch(buildParams()).catch(() => {}); // noqa: raw-fetch-in-component — store method; routes through api.get
+		fetchPaymentCounts();
+	}
+
+	/** What a history row action names in its accessible label. */
+	function rowInvoice(p: Payment): string {
+		return p.invoice_number ?? p.id.slice(0, 8);
+	}
 
 	let searchTimer: ReturnType<typeof setTimeout>;
 	function debouncedFetch() {
@@ -2253,15 +2275,15 @@
 										</span>
 										<span class="pinned-method-why">{blockedReason(item)}</span>
 									{:else}
-										<select class="method-select" aria-label={`Payment method for ${item.invoice_number}`} value={paymentMethods[item.id] || 'ach'} onchange={(e) => (paymentMethods[item.id] = e.currentTarget.value)}>
-											<option value="ach">ACH</option>
-											<option value="wire">Wire</option>
-											<option value="check">Check</option>
+										<select class="method-select" aria-label={m('payments.queue.methodAria', { invoice: item.invoice_number })} value={paymentMethods[item.id] || 'ach'} onchange={(e) => (paymentMethods[item.id] = e.currentTarget.value)}>
+											<option value="ach">{m('payments.method.ach')}</option>
+											<option value="wire">{m('payments.method.wire')}</option>
+											<option value="check">{m('payments.method.check')}</option>
 											{#if canDispatchPayments(executionMode)}
 												<!-- Executing a card leg MINTS a card, which a record-only
 												     tenant's server refuses (`payments_record_only`); and a
 												     card is never a way to pay outside FeohLedger. -->
-												<option value="virtual_card">Virtual Card</option>
+												<option value="virtual_card">{m('payments.method.virtualCard')}</option>
 											{/if}
 										</select>
 									{/if}
@@ -2316,22 +2338,27 @@
 
 		{#if queueSavingsGroups.length > 0}
 			<div class="savings-banner">
-				<span class="savings-icon">💸</span>
+				<span class="savings-icon" aria-hidden="true">💸</span>
 				<span>
 					{m('payments.queue.savingsBanner', { amount: formatGroups(queueSavingsGroups) })}
 				</span>
 			</div>
 		{/if}
 
+		{#if queueErrored && queue.length === 0}
+			<!-- Same in-place failure + Retry as the Runs tab: the toast fades,
+			     and "Try again." with nothing to press was a dead end. -->
+			<LoadError
+				message={m('payments.queue.empty.errored')}
+				onretry={loadQueue}
+				testId="queue-error"
+			/>
+		{:else}
 		<div class="pay-table pay-queue">
 		<DataTable
 			fixed
 			isEmpty={queue.length === 0}
-			empty={queueLoading
-				? m('common.loading')
-				: queueErrored
-					? m('payments.queue.empty.errored')
-					: m('payments.queue.empty')}
+			empty={queueLoading ? m('common.loading') : m('payments.queue.empty')}
 			colspan={8 + (canCompareRoutes() ? 1 : 0) + (canRecordOutside() ? 1 : 0)}
 		>
 			{#snippet header()}
@@ -2378,7 +2405,7 @@
 									})}
 								/>
 							{:else}
-								<input type="checkbox" aria-label={`Select invoice ${item.invoice_number}`} checked={selectedQueue.has(item.id)} onchange={() => toggleQueueSelect(item)} />
+								<input type="checkbox" aria-label={m('payments.selectInvoiceAria', { invoice: item.invoice_number })} checked={selectedQueue.has(item.id)} onchange={() => toggleQueueSelect(item)} />
 							{/if}
 						</td>
 						<td class="mono">{item.invoice_number}</td>
@@ -2406,7 +2433,10 @@
 							{:else if item.discount_eligible && item.discount_amount && item.discount_percent}
 								<span
 									class="discount-chip"
-									title="{item.discount_percent}% discount expires {formatDate(item.discount_date)}"
+									title={m('payments.queue.discountTitle', {
+										percent: item.discount_percent,
+										date: formatDate(item.discount_date)
+									})}
 								>
 									{m('payments.queue.discountSave', { amount: formatCurrency(item.discount_amount, item.currency) })}
 									<span class="discount-pct">{m('payments.queue.discountBy', { percent: item.discount_percent, date: formatDate(item.discount_date) })}</span>
@@ -2514,8 +2544,16 @@
 				<span class="load-more-end">{m('payments.queue.showingAll', { total: queueTotal })}</span>
 			</div>
 		{/if}
+		{/if}
 
 	{:else if activeTab === 'history'}
+		{#if paymentStore.errored && paymentStore.all.length === 0}
+			<LoadError
+				message={m('payments.history.empty.errored')}
+				onretry={retryHistory}
+				testId="history-error"
+			/>
+		{:else}
 		<div class="pay-table pay-history">
 		<DataTable
 			fixed
@@ -2591,15 +2629,28 @@
 						<td class="muted">{formatDate(p.created_at)}</td>
 						<td class="actions">
 							{#if p.status === 'completed'}
-								<RowAction onclick={() => downloadRemittance(p)}>{m('payments.history.remittance')}</RowAction>
+								<RowAction
+									onclick={() => downloadRemittance(p)}
+									ariaLabel={m('payments.history.remittanceAria', { invoice: rowInvoice(p) })}
+								>
+									{m('payments.history.remittance')}
+								</RowAction>
 							{/if}
 							{#if canReleaseHold(p)}
-								<RowAction variant="accent" onclick={() => openCompliance(p, 'release')}>
+								<RowAction
+									variant="accent"
+									onclick={() => openCompliance(p, 'release')}
+									ariaLabel={m('payments.history.complianceReleaseAria', { invoice: rowInvoice(p) })}
+								>
 									{m('payments.history.complianceRelease')}
 								</RowAction>
 							{/if}
 							{#if canDismissHold(p)}
-								<RowAction variant="danger" onclick={() => openCompliance(p, 'dismiss')}>
+								<RowAction
+									variant="danger"
+									onclick={() => openCompliance(p, 'dismiss')}
+									ariaLabel={m('payments.history.complianceDismissAria', { invoice: rowInvoice(p) })}
+								>
 									{m('payments.history.complianceDismiss')}
 								</RowAction>
 							{/if}
@@ -2608,14 +2659,20 @@
 									variant="accent"
 									onclick={() => openSettlement(p)}
 									ariaLabel={m('payments.history.settlementAcceptAria', {
-										invoice: p.invoice_number ?? p.id.slice(0, 8)
+										invoice: rowInvoice(p)
 									})}
 								>
 									{m('payments.history.settlementAccept')}
 								</RowAction>
 							{/if}
 							{#if canVoid(p)}
-								<RowAction variant="danger" onclick={() => openVoid(p)}>{m('payments.history.void')}</RowAction>
+								<RowAction
+									variant="danger"
+									onclick={() => openVoid(p)}
+									ariaLabel={m('payments.history.voidAria', { invoice: rowInvoice(p) })}
+								>
+									{m('payments.history.void')}
+								</RowAction>
 							{/if}
 						</td>
 					</tr>
@@ -2638,6 +2695,7 @@
 					>{m('payments.history.showingAll', { total: paymentStore.total })}</span
 				>
 			</div>
+		{/if}
 		{/if}
 
 	{:else if activeTab === 'runs'}
@@ -2762,15 +2820,18 @@
 		{/if}
 
 		<div class="pay-table pay-rebates" data-testid="rebates-table">
+		{#if rebatesErrored && rebates.length === 0}
+			<LoadError
+				message={m('payments.rebates.errored')}
+				onretry={() => loadRebates()}
+				testId="rebates-error"
+			/>
+		{:else}
 		<DataTable
 			fixed
 			columns={REBATES_COLUMNS}
 			isEmpty={rebates.length === 0}
-			empty={loadingRebates
-				? m('payments.rebates.loading')
-				: rebatesErrored
-					? m('payments.rebates.errored')
-					: m('payments.rebates.empty')}
+			empty={loadingRebates ? m('payments.rebates.loading') : m('payments.rebates.empty')}
 			colspan={6}
 		>
 			{#snippet body()}
@@ -2819,6 +2880,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		{/if}
 		</div>
 
 		{#if hasMoreRebates}
@@ -2870,15 +2932,18 @@
 		     a real API, not scaffolding: without it the assertion silently
 		     starts counting a sibling table's rows. -->
 		<div class="pay-table pay-cards" data-testid="cards-table">
+		{#if cardsErrored && cards.length === 0}
+			<LoadError
+				message={m('payments.cards.errored')}
+				onretry={() => loadCards()}
+				testId="cards-error"
+			/>
+		{:else}
 		<DataTable
 			fixed
 			columns={CARDS_COLUMNS}
 			isEmpty={cards.length === 0}
-			empty={loadingCards
-				? m('payments.cards.loading')
-				: cardsErrored
-					? m('payments.cards.errored')
-					: m('payments.cards.empty')}
+			empty={loadingCards ? m('payments.cards.loading') : m('payments.cards.empty')}
 			colspan={8}
 		>
 			{#snippet body()}
@@ -2911,6 +2976,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		{/if}
 		</div>
 
 		{#if hasMoreCards}
