@@ -1,7 +1,14 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
+	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
 	import { focusTrap } from '#lib/actions/focusTrap.ts';
 	import Money from '#lib/components/ui/Money.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { DISCOUNT_STATUS_TONES, type DiscountStatus } from '#lib/types/discounts.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
@@ -22,6 +29,20 @@
 		{ key: 'declined,expired', labelKey: 'portal.discounts.filter.closed' },
 	] as const;
 
+	// `status` is a backend enum; it renders through the same keys and tones
+	// the AP-side /discounts list uses, never as the raw value.
+	const STATUS_KEY: Record<DiscountStatus, MessageKey> = {
+		offered: 'discounts.status.offered',
+		accepted: 'discounts.status.accepted',
+		captured: 'discounts.status.captured',
+		declined: 'discounts.status.declined',
+		expired: 'discounts.status.expired',
+	};
+	function statusLabel(status: string): string {
+		const key = STATUS_KEY[status as DiscountStatus];
+		return key ? m(key) : status;
+	}
+
 	let items = $state<PortalDiscountOffer[]>([]);
 	// Server-side count of the whole FILTERED offer set, not the loaded page —
 	// an offer past the first page still expires, so it has to be reachable.
@@ -30,8 +51,23 @@
 	let loading = $state(false);
 	let loadingMore = $state(false);
 	let error = $state('');
-	let activeFilter = $state('');
+	// A failed first-page read — never rendered as "no offers right now".
+	let loadError = $state('');
+	// An accept that failed while the dialog is open is reported IN the
+	// dialog; the page banner sits behind the modal where nobody can see it.
+	let acceptError = $state('');
+	// URL-backed like the invoice and payment lists: reload, back and a
+	// bookmark keep the chip. Validated against the known chips.
+	let activeFilter = $state(
+		(() => {
+			const raw = page.url.searchParams.get('status') ?? '';
+			return FILTERS.some((f) => f.key === raw) ? raw : '';
+		})()
+	);
 	let busy = $state<string | null>(null);
+	// Declining is not reversible from the portal, so it takes two clicks:
+	// the first arms the row's button, the second commits.
+	let armedDeclineId = $state<string | null>(null);
 	// The offer whose tier the vendor is choosing in the accept dialog.
 	let accepting = $state<PortalDiscountOffer | null>(null);
 	let chosenTierDays = $state<number | null>(null);
@@ -62,6 +98,7 @@
 		if (opts.append) loadingMore = true;
 		else loading = true;
 		error = '';
+		if (!opts.append) loadError = '';
 		try {
 			const res = await listPortalDiscountOffers(activeFilter || undefined, {
 				page: nextPage,
@@ -74,7 +111,14 @@
 		} catch (err) {
 			// `isCurrentRequest`, not `canCommit` — a superseded load still failed.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			error = err instanceof Error ? err.message : m('portal.discounts.loadFailed');
+			const msg = err instanceof Error ? err.message : m('portal.discounts.loadFailed');
+			if (opts.append) {
+				error = msg;
+			} else {
+				items = [];
+				total = 0;
+				loadError = msg;
+			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -90,10 +134,19 @@
 
 	function setFilter(key: string) {
 		activeFilter = key;
+		armedDeclineId = null;
+		untrack(() => {
+			const url = new URL(page.url.href);
+			if (key) url.searchParams.set('status', key);
+			else url.searchParams.delete('status');
+			replaceState(`${url.pathname}${url.search}`, {});
+		});
 		refresh();
 	}
 
 	function openAccept(offer: PortalDiscountOffer) {
+		armedDeclineId = null;
+		acceptError = '';
 		accepting = offer;
 		// Default to the best capturable tier today; fall back to the first tier.
 		chosenTierDays = offer.best_tier?.days ?? offer.tiers[0]?.days ?? null;
@@ -102,6 +155,7 @@
 	function closeAccept() {
 		accepting = null;
 		chosenTierDays = null;
+		acceptError = '';
 	}
 
 	async function confirmAccept() {
@@ -109,15 +163,25 @@
 		const offer = accepting;
 		busy = offer.id;
 		error = '';
+		acceptError = '';
 		try {
 			await acceptPortalDiscountOffer(offer.id, chosenTierDays ?? undefined);
 			closeAccept();
 			await refresh();
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('portal.discounts.acceptFailed');
+			acceptError = err instanceof Error ? err.message : m('portal.discounts.acceptFailed');
 		} finally {
 			busy = null;
 		}
+	}
+
+	function onDeclineClick(offer: PortalDiscountOffer) {
+		if (armedDeclineId !== offer.id) {
+			armedDeclineId = offer.id;
+			return;
+		}
+		armedDeclineId = null;
+		decline(offer);
 	}
 
 	async function decline(offer: PortalDiscountOffer) {
@@ -147,6 +211,14 @@
 	onMount(refresh);
 </script>
 
+<!-- A click anywhere but a row action disarms a pending Decline
+     (ui-patterns.md § Per-row actions). -->
+<svelte:window
+	onclick={(e) => {
+		if (armedDeclineId && !(e.target as HTMLElement).closest('.row-action')) armedDeclineId = null;
+	}}
+/>
+
 <div class="page">
 	<header>
 		<h1>{m('portal.discounts.title')}</h1>
@@ -169,10 +241,20 @@
 
 	{#if loading && !items.length}
 		<div class="loading">{m('portal.common.loading')}</div>
+	{:else if loadError}
+		<LoadError message={loadError} onretry={refresh} testId="portal-discounts-load-error" />
 	{:else if !items.length}
 		<div class="empty">
-			<p>{m('portal.discounts.empty')}</p>
-			<p class="hint">{m('portal.discounts.emptyHint')}</p>
+			{#if activeFilter}
+				<!-- Filtered to zero is not "no offers": say so, and offer the way back. -->
+				<p>{m('portal.discounts.emptyFiltered')}</p>
+				<button type="button" class="link-btn" onclick={() => setFilter('')}
+					>{m('portal.discounts.clearFilter')}</button
+				>
+			{:else}
+				<p>{m('portal.discounts.empty')}</p>
+				<p class="hint">{m('portal.discounts.emptyHint')}</p>
+			{/if}
 		</div>
 	{:else}
 		<table>
@@ -215,29 +297,34 @@
 							{:else if o.best_tier}
 								<Money amount={o.best_tier.savings} currency={o.currency} />
 							{:else}
-								—
+								{m('portal.common.dash')}
 							{/if}
 						</td>
 						<td class="window">{formatDate(o.valid_from, m('portal.common.dash'))} – {formatDate(o.valid_until, m('portal.common.dash'))}</td>
-						<td><span class="status s-{o.status}">{o.status}</span></td>
+						<td>
+							<Badge tone={DISCOUNT_STATUS_TONES[o.status as DiscountStatus] ?? 'neutral'} variant="status-badge {o.status}"
+								>{statusLabel(o.status)}</Badge
+							>
+						</td>
 						<td class="actions">
 							{#if o.status === 'offered'}
-								<button
-									type="button"
-									class="act accept"
+								<RowAction
+									variant="success"
 									disabled={busy === o.id || !o.best_tier}
 									onclick={() => openAccept(o)}
 								>
 									{m('portal.discounts.accept')}
-								</button>
-								<button
-									type="button"
-									class="act"
+								</RowAction>
+								<RowAction
+									variant="danger"
+									armed={armedDeclineId === o.id}
 									disabled={busy === o.id}
-									onclick={() => decline(o)}
+									onclick={() => onDeclineClick(o)}
 								>
-									{m('portal.discounts.decline')}
-								</button>
+									{armedDeclineId === o.id
+										? m('portal.discounts.declineConfirm')
+										: m('portal.discounts.decline')}
+								</RowAction>
 							{/if}
 						</td>
 					</tr>
@@ -286,6 +373,7 @@
 		>
 			<h2>{m('portal.discounts.dialog.title')}</h2>
 			<p class="dlg-sub">{m('portal.discounts.dialog.subtitle')}</p>
+			{#if acceptError}<div class="error" role="alert">{acceptError}</div>{/if}
 
 			{#if accepting.tiers.length > 1}
 				<label class="field">
@@ -413,45 +501,6 @@
 		gap: 6px;
 		white-space: nowrap;
 	}
-	.act {
-		padding: 4px 12px;
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		background: transparent;
-		color: var(--text);
-		font-size: 0.8rem;
-		cursor: pointer;
-	}
-	.act:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.act.accept:hover:not(:disabled) {
-		border-color: color-mix(in srgb, var(--success) 60%, transparent);
-		color: var(--success);
-	}
-	.act:disabled {
-		opacity: 0.5;
-		cursor: default;
-	}
-	.status {
-		padding: 2px 8px;
-		border-radius: 3px;
-		font-size: 0.75rem;
-		background: var(--bg);
-		border: 1px solid var(--border);
-		text-transform: capitalize;
-	}
-	.s-accepted,
-	.s-captured {
-		background: color-mix(in srgb, var(--success) 15%, transparent);
-		border-color: color-mix(in srgb, var(--success) 40%, transparent);
-	}
-	.s-declined,
-	.s-expired {
-		background: color-mix(in srgb, var(--danger) 12%, transparent);
-		border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-	}
 	.empty,
 	.loading {
 		padding: 40px;
@@ -460,6 +509,17 @@
 		border: 1px dashed var(--border);
 		border-radius: 4px;
 		color: var(--text-muted);
+	}
+	.link-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		margin-top: 6px;
+		font: inherit;
+		font-size: 0.82rem;
+		color: var(--accent);
+		cursor: pointer;
+		text-decoration: underline;
 	}
 	.empty .hint {
 		font-size: 0.82rem;

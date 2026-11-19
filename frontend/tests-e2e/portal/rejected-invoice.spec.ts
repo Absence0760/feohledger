@@ -154,14 +154,19 @@ test('the vendor can revise & resubmit a rejected invoice', async ({ page }) => 
 		const row = page.locator('tr.clickable', { hasText: NUM });
 		await expect(row).toHaveCount(1, { timeout: 10_000 });
 
-		// The file input is hidden inside the "Revise & resubmit" label.
-		await row
-			.locator('.resubmit-btn input[type="file"]')
-			.setInputFiles({
-				name: 'corrected.pdf',
-				mimeType: 'application/pdf',
-				buffer: Buffer.from('%PDF-1.4\ncorrected\n%%EOF'),
-			});
+		// "Revise & resubmit" is a real button (keyboard-reachable) that opens
+		// the page's one hidden picker — drive it the way a supplier does.
+		const resubmit = row.locator('button.resubmit-btn');
+		await resubmit.focus();
+		const [chooser] = await Promise.all([
+			page.waitForEvent('filechooser'),
+			page.keyboard.press('Enter'),
+		]);
+		await chooser.setFiles({
+			name: 'corrected.pdf',
+			mimeType: 'application/pdf',
+			buffer: Buffer.from('%PDF-1.4\ncorrected\n%%EOF'),
+		});
 
 		await expect(page.locator('.msg')).toContainText('resubmitted', { timeout: 15_000 });
 

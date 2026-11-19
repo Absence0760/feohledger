@@ -236,10 +236,14 @@
 		flex: 1;
 	}
 
+	/* Wraps rather than overflows: seven nav links plus the brand and the
+	   user block are far wider than a phone, and a no-wrap row pushed Log out
+	   off-screen at 390px (WCAG 1.4.10 Reflow). No breakpoint needed. */
 	.portal-header {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 24px;
+		gap: 12px 24px;
 		padding: 12px 24px;
 		background: var(--surface);
 		border-bottom: 1px solid var(--border);
@@ -283,9 +287,9 @@
 
 	nav {
 		display: flex;
-		gap: 16px;
-		flex: 1;
-		margin-left: 24px;
+		flex-wrap: wrap;
+		gap: 4px 16px;
+		flex: 1 1 auto;
 	}
 
 	nav a {

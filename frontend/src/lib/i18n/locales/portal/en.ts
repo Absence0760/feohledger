@@ -196,6 +196,9 @@ export const enPortal = {
 	'portal.discounts.tier': '{days}d → {percent}',
 	'portal.discounts.accept': 'Accept',
 	'portal.discounts.decline': 'Decline',
+	'portal.discounts.declineConfirm': 'Confirm decline',
+	'portal.discounts.emptyFiltered': 'No offers match this filter.',
+	'portal.discounts.clearFilter': 'Show all offers',
 	'portal.discounts.dialog.title': 'Accept early-payment discount',
 	'portal.discounts.dialog.subtitle':
 		"Accepting confirms you'll take the discount in exchange for earlier payment. It does not move any money — your customer still processes the payment.",

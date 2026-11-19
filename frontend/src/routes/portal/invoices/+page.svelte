@@ -10,7 +10,6 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { onMount, untrack } from 'svelte';
-	import { formatMoney } from '#lib/utils/money.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -22,6 +21,8 @@
 	} from '#lib/types/portalStatus.ts';
 	import PortalListFilters from '#lib/components/portal/PortalListFilters.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
 	import SupplierChatThread from '#lib/components/chat/SupplierChatThread.svelte';
 	import type { PortalChatThread } from '#lib/types/supplierChat.ts';
 	import {
@@ -50,6 +51,10 @@
 	let loadingMore = $state(false);
 	let uploading = $state(false);
 	let error = $state('');
+	// A failed FIRST-page read, kept apart from `error` (an action's failure):
+	// with no rows on screen the list would otherwise fall through to "no
+	// invoices yet, submit your first", which is a lie when the read failed.
+	let loadError = $state('');
 	let message = $state('');
 	let downloadingFileId = $state<string | null>(null);
 	let downloadingEinvoiceId = $state<string | null>(null);
@@ -57,6 +62,11 @@
 	// Ref to the header's hidden file input, so the onboarding EmptyState's
 	// action can open the same file picker.
 	let uploadInput: HTMLInputElement | undefined = $state();
+	// One hidden picker serves every rejected row's Resubmit button; the button
+	// records which invoice it is for and opens it. A picker wrapped in a
+	// `<label>` with `display: none` was unreachable by keyboard (WCAG 2.1.1).
+	let resubmitInput: HTMLInputElement | undefined = $state();
+	let resubmitTarget: string | null = null;
 
 	const hasMore = $derived(items.length < total);
 
@@ -141,6 +151,7 @@
 		if (opts.append) loadingMore = true;
 		else loading = true;
 		error = '';
+		if (!opts.append) loadError = '';
 		try {
 			const res = await listPortalInvoices({
 				page: nextPage,
@@ -158,7 +169,16 @@
 			// `isCurrentRequest`, not `canCommit`: a superseded load still failed,
 			// and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
-			error = err instanceof Error ? err.message : m('portal.invoices.loadFailed');
+			const msg = err instanceof Error ? err.message : m('portal.invoices.loadFailed');
+			if (opts.append) {
+				error = msg;
+			} else {
+				// Drop the previous filter's rows: they no longer answer the
+				// question the supplier just asked.
+				items = [];
+				total = 0;
+				loadError = msg;
+			}
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
 				loading = false;
@@ -191,10 +211,16 @@
 		}
 	}
 
-	async function handleResubmit(invoiceId: string, e: Event) {
+	function pickResubmitFile(invoiceId: string) {
+		resubmitTarget = invoiceId;
+		resubmitInput?.click();
+	}
+
+	async function handleResubmit(e: Event) {
 		const input = e.target as HTMLInputElement;
 		const file = input.files?.[0];
-		if (!file) return;
+		const invoiceId = resubmitTarget;
+		if (!file || !invoiceId) return;
 		resubmittingId = invoiceId;
 		error = '';
 		message = '';
@@ -207,6 +233,8 @@
 			error = err instanceof Error ? err.message : m('portal.invoices.resubmitFailed');
 		} finally {
 			resubmittingId = null;
+			resubmitTarget = null;
+			input.value = '';
 		}
 	}
 
@@ -263,10 +291,6 @@
 		a.download = filename;
 		a.click();
 		URL.revokeObjectURL(url);
-	}
-
-	function fmtAmount(amount: number | string, ccy: string): string {
-		return formatMoney(amount, { currency: ccy }, formatMoney(0, { currency: ccy }));
 	}
 
 	/** Re-download the source file THIS vendor submitted for `inv`, via the
@@ -332,17 +356,30 @@
 <div class="page">
 	<header>
 		<h1>{m('portal.invoices.title')}</h1>
-		<label class="upload-btn" class:uploading>
-			<input
-				type="file"
-				accept="application/pdf,image/*"
-				bind:this={uploadInput}
-				onchange={handleUpload}
-				disabled={uploading}
-			/>
+		<input
+			type="file"
+			accept="application/pdf,image/*"
+			bind:this={uploadInput}
+			onchange={handleUpload}
+			hidden
+		/>
+		<button
+			type="button"
+			class="upload-btn"
+			data-testid="portal-invoice-upload"
+			disabled={uploading}
+			onclick={() => uploadInput?.click()}
+		>
 			{uploading ? m('portal.invoices.submitting') : m('portal.invoices.submit')}
-		</label>
+		</button>
 	</header>
+	<input
+		type="file"
+		accept="application/pdf,image/*"
+		bind:this={resubmitInput}
+		onchange={handleResubmit}
+		hidden
+	/>
 
 	{#if error}<div class="error" role="alert">{error}</div>{/if}
 	{#if message}<div class="msg" role="status" aria-live="polite">{message}</div>{/if}
@@ -362,6 +399,8 @@
 
 	{#if loading && !items.length}
 		<div class="loading">{m('portal.common.loading')}</div>
+	{:else if loadError}
+		<LoadError message={loadError} onretry={refresh} testId="portal-invoices-load-error" />
 	{:else if !items.length}
 		{#if filtered}
 			<div class="empty">
@@ -426,7 +465,7 @@
 						<td>{formatDate(inv.submitted_at, m('portal.common.dash'))}</td>
 						<td>{formatDate(inv.invoice_date, m('portal.common.dash'))}</td>
 						<td>{formatDate(inv.due_date, m('portal.common.dash'))}</td>
-						<td class="num">{fmtAmount(inv.amount, inv.currency)}</td>
+						<td class="num"><Money amount={inv.amount} currency={inv.currency} mono /></td>
 						<td>
 							<span class="status s-{inv.status}">{m(portalInvoiceStatusLabelKey(inv.status))}</span>
 							{#if inv.waiting_on}
@@ -442,17 +481,16 @@
 										{inv.rejection_reason}
 									</div>
 								{/if}
-								<label class="resubmit-btn" class:busy={resubmittingId === inv.id}>
-									<input
-										type="file"
-										accept="application/pdf,image/*"
-										disabled={resubmittingId === inv.id}
-										onchange={(e) => handleResubmit(inv.id, e)}
-									/>
+								<button
+									type="button"
+									class="resubmit-btn"
+									disabled={resubmittingId !== null}
+									onclick={() => pickResubmitFile(inv.id)}
+								>
 									{resubmittingId === inv.id
 										? m('portal.invoices.resubmitting')
 										: m('portal.invoices.resubmit')}
-								</label>
+								</button>
 							{/if}
 						</td>
 						<td class="actions">
@@ -548,17 +586,16 @@
 		display: inline-block;
 		background: var(--accent-strong);
 		color: #fff;
+		border: none;
 		padding: 8px 14px;
 		border-radius: 4px;
 		cursor: pointer;
+		font: inherit;
 		font-size: 0.85rem;
 	}
-	.upload-btn.uploading {
+	.upload-btn:disabled {
 		opacity: 0.6;
 		cursor: default;
-	}
-	.upload-btn input {
-		display: none;
 	}
 	.link-btn {
 		background: none;
@@ -678,19 +715,18 @@
 		border-radius: 4px;
 		color: var(--accent);
 		background: transparent;
+		font: inherit;
+		font-size: 0.78rem;
 		cursor: pointer;
 	}
-	.resubmit-btn:hover {
+	.resubmit-btn:hover:not(:disabled) {
 		background: var(--accent-strong);
 		border-color: var(--accent-strong);
 		color: #fff;
 	}
-	.resubmit-btn.busy {
+	.resubmit-btn:disabled {
 		opacity: 0.6;
 		cursor: default;
-	}
-	.resubmit-btn input {
-		display: none;
 	}
 	.actions-col {
 		width: 1%;

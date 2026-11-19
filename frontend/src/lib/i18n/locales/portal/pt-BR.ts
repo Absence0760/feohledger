@@ -195,6 +195,9 @@ export const messages = {
 	'portal.discounts.tier': '{days}d → {percent}',
 	'portal.discounts.accept': 'Aceitar',
 	'portal.discounts.decline': 'Recusar',
+	'portal.discounts.declineConfirm': 'Confirmar recusa',
+	'portal.discounts.emptyFiltered': 'Nenhuma oferta corresponde a este filtro.',
+	'portal.discounts.clearFilter': 'Mostrar todas as ofertas',
 	'portal.discounts.dialog.title': 'Aceitar desconto por pagamento antecipado',
 	'portal.discounts.dialog.subtitle':
 		'Aceitar confirma que você tomará o desconto em troca de pagamento antecipado. Isso não movimenta nenhum dinheiro — seu cliente ainda processa o pagamento.',

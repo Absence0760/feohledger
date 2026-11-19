@@ -4,6 +4,20 @@
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import LoadError from '#lib/components/ui/LoadError.svelte';
+
+	// `change_type` is backend vocabulary (`bank_details`); the same map the
+	// portal home uses, so the banner never prints "bank details" in English
+	// inside a translated sentence.
+	const CHANGE_TYPE_KEY: Record<string, MessageKey> = {
+		bank_details: 'portal.home.changeType.bankDetails',
+		tax_id: 'portal.home.changeType.taxId',
+	};
+	function changeTypeLabel(changeType: string): string {
+		return m(CHANGE_TYPE_KEY[changeType] ?? 'portal.home.changeType.other');
+	}
 
 	let email = $state('');
 	let phone = $state('');
@@ -106,10 +120,10 @@
 	const pending = $derived(portalCompany.info?.pending_change ?? null);
 	const taxForm = $derived(portalCompany.taxForm);
 
-	const FORM_TYPE_LABEL: Record<string, string> = {
+	const FORM_TYPE_LABEL = $derived<Record<string, string>>({
 		w9: m('portal.company.taxForm.w9Label'),
 		w8: m('portal.company.taxForm.w8Label')
-	};
+	});
 
 	async function load() {
 		await portalCompany.fetchCompany();
@@ -240,233 +254,242 @@
 		{#if info}<p class="sub">{info.name}</p>{/if}
 	</header>
 
-	{#if pending}
-		<div class="banner">
-			{m('portal.company.pendingBanner', { changeType: pending.change_type.replace('_', ' ') })}
-		</div>
-	{/if}
+	<!-- Nothing editable renders until the record has loaded: a contact form
+	     shown blank after a failed read would save those blanks over the
+	     supplier's real email, phone and address. -->
+	{#if !info && portalCompany.error}
+		<LoadError message={portalCompany.error} onretry={load} testId="portal-company-load-error" />
+	{:else if !info}
+		<p class="note">{m('portal.common.loading')}</p>
+	{:else}
+		{#if pending}
+			<div class="banner">
+				{m('portal.company.pendingBanner', { changeType: changeTypeLabel(pending.change_type) })}
+			</div>
+		{/if}
 
-	<!-- Live-apply contact fields -->
-	<section class="card">
-		<h2>{m('portal.company.contact.title')}</h2>
-		<p class="note">{m('portal.company.contact.note')}</p>
-		{#if contactErr}<div class="error" role="alert">{contactErr}</div>{/if}
-		<div role="status">{#if contactMsg}<div class="message">{contactMsg}</div>{/if}</div>
-		<form onsubmit={saveContact}>
-			<label>
-				{m('portal.company.contact.email')}
-				<input type="email" bind:value={email} />
-			</label>
-			<label>
-				{m('portal.company.contact.phone')}
-				<input type="text" bind:value={phone} />
-			</label>
-			<label>
-				{m('portal.company.contact.address')}
-				<input type="text" bind:value={address} />
-			</label>
-			<button type="submit" class="btn-primary" disabled={contactSaving}>
-				{contactSaving ? m('portal.company.contact.saving') : m('portal.company.contact.save')}
-			</button>
-		</form>
-	</section>
-
-	<!-- Staged: bank details -->
-	<section class="card">
-		<h2>{m('portal.company.bank.title')}</h2>
-		<p class="note">
-			{m('portal.company.bank.note')}
-			{#if info?.has_bank_details}<span class="tag">{m('portal.company.bank.onFile')}</span>{/if}
-		</p>
-		{#if bankErr}<div class="error" role="alert">{bankErr}</div>{/if}
-		<form onsubmit={submitBankChange}>
-			<label>
-				{m('portal.company.bank.name')}
-				<input type="text" bind:value={bankName} />
-			</label>
-			<label>
-				{m('portal.company.bank.account')}
-				<input type="text" bind:value={accountNumber} autocomplete="off" />
-			</label>
-			<label>
-				{m('portal.company.bank.country')}
-				<input type="text" maxlength="2" bind:value={bankCountry} autocomplete="off" />
-			</label>
-			{#if bankIsUK}
+		<!-- Live-apply contact fields -->
+		<section class="card">
+			<h2>{m('portal.company.contact.title')}</h2>
+			<p class="note">{m('portal.company.contact.note')}</p>
+			{#if contactErr}<div class="error" role="alert">{contactErr}</div>{/if}
+			<div role="status">{#if contactMsg}<div class="message">{contactMsg}</div>{/if}</div>
+			<form onsubmit={saveContact}>
 				<label>
-					{m('portal.company.bank.sortCode')}
-					<input type="text" bind:value={sortCode} autocomplete="off" />
-				</label>
-			{:else}
-				<label>
-					{m('portal.company.bank.routing')}
-					<input type="text" bind:value={routingNumber} autocomplete="off" />
+					{m('portal.company.contact.email')}
+					<input type="email" bind:value={email} />
 				</label>
 				<label>
-					{m('portal.company.bank.wireRouting')}
-					<input type="text" bind:value={wireRoutingNumber} autocomplete="off" />
+					{m('portal.company.contact.phone')}
+					<input type="text" bind:value={phone} />
 				</label>
-				<p class="note">{m('portal.company.bank.wireRoutingHint')}</p>
-			{/if}
-			<button
-				type="submit"
-				class="btn-primary"
-				disabled={bankSaving || !!pending || !accountNumber}
-			>
-				{bankSaving ? m('portal.company.bank.submitting') : m('portal.company.bank.request')}
-			</button>
-		</form>
-	</section>
-
-	<!-- Staged: tax ID -->
-	<section class="card">
-		<h2>{m('portal.company.tax.title')}</h2>
-		<p class="note">
-			{m('portal.company.tax.note')}
-			{#if info?.tax_id_last4}<span class="tag">{m('portal.company.tax.ending', { last4: info.tax_id_last4 })}</span>{/if}
-		</p>
-		{#if taxErr}<div class="error" role="alert">{taxErr}</div>{/if}
-		<form onsubmit={submitTaxChange}>
-			<label>
-				{m('portal.company.tax.new')}
-				<input type="text" bind:value={taxId} autocomplete="off" />
-			</label>
-			<button type="submit" class="btn-primary" disabled={taxSaving || !!pending || !taxId}>
-				{taxSaving ? m('portal.company.tax.submitting') : m('portal.company.tax.request')}
-			</button>
-		</form>
-	</section>
-
-	<!-- Tax forms: W-9 (US) / W-8 (foreign) — uploaded live -->
-	<section class="card">
-		<h2>{m('portal.company.taxForm.title')}</h2>
-		<p class="note">
-			{m('portal.company.taxForm.note')}
-			{#if taxForm?.on_file}
-				<span class="tag">
-					{FORM_TYPE_LABEL[taxForm.form_type ?? ''] ?? m('portal.company.taxForm.onFile')}
-					{#if taxForm.received_date}{m('portal.company.taxForm.received', { date: taxForm.received_date })}{/if}
-				</span>
-			{/if}
-		</p>
-		{#if taxFormErr}<div class="error" role="alert">{taxFormErr}</div>{/if}
-		<div role="status">{#if taxFormMsg}<div class="message">{taxFormMsg}</div>{/if}</div>
-
-		{#if taxForm?.on_file}
-			<p class="note">
-				{m('portal.company.taxForm.onFileNote')}
-				<button
-					type="button"
-					class="btn-link"
-					onclick={downloadTaxForm}
-					disabled={downloadingForm}
-				>
-					{downloadingForm ? m('portal.company.taxForm.preparing') : m('portal.company.taxForm.download')}
+				<label>
+					{m('portal.company.contact.address')}
+					<input type="text" bind:value={address} />
+				</label>
+				<button type="submit" class="btn-primary" disabled={contactSaving}>
+					{contactSaving ? m('portal.company.contact.saving') : m('portal.company.contact.save')}
 				</button>
-			</p>
-		{/if}
-
-		<form onsubmit={submitTaxForm}>
-			<label>
-				{m('portal.company.taxForm.formType')}
-				<select bind:value={taxFormType}>
-					<option value="w9">{m('portal.company.taxForm.optionW9')}</option>
-					<option value="w8">{m('portal.company.taxForm.optionW8')}</option>
-				</select>
-			</label>
-			<label>
-				{m('portal.company.taxForm.signedForm')}
-				<input
-					type="file"
-					accept="application/pdf,image/png,image/jpeg,image/tiff"
-					onchange={onTaxFormFile}
-				/>
-			</label>
-			<button type="submit" class="btn-primary" disabled={taxFormSaving || !taxFormFile}>
-				{taxFormSaving ? m('portal.company.taxForm.uploading') : taxForm?.on_file ? m('portal.company.taxForm.replace') : m('portal.company.taxForm.upload')}
-			</button>
-		</form>
-	</section>
-
-	<!-- Security: two-factor authentication (TOTP) -->
-	<section class="card">
-		<h2>{m('portal.company.mfa.title')}</h2>
-		<p class="note">
-			{m('portal.company.mfa.note')}
-			{#if mfaEnabled}<span class="tag">{m('portal.company.mfa.on')}</span>{/if}
-		</p>
-		{#if mfaErr}<div class="error" role="alert">{mfaErr}</div>{/if}
-		<div role="status">{#if mfaMsg}<div class="message">{mfaMsg}</div>{/if}</div>
-
-		{#if mfaEnabled && !disableMode}
-			<button type="button" class="btn-danger" onclick={() => (disableMode = true)}>
-				{m('portal.company.mfa.turnOff')}
-			</button>
-		{:else if disableMode}
-			<form onsubmit={confirmDisable}>
-				<label>
-					{m('portal.company.mfa.enterCodeToDisable')}
-					<input
-						type="text"
-						inputmode="numeric"
-						autocomplete="one-time-code"
-						bind:value={disableCode}
-						maxlength="8"
-					/>
-				</label>
-				<div class="btn-row">
-					<button
-						type="button"
-						class="btn-cancel"
-						onclick={() => {
-							disableMode = false;
-							disableCode = '';
-							mfaErr = '';
-						}}>{m('portal.company.mfa.cancel')}</button
-					>
-					<button type="submit" class="btn-danger" disabled={mfaBusy || !disableCode}>
-						{mfaBusy ? m('portal.company.mfa.turningOff') : m('portal.company.mfa.turnOffBtn')}
-					</button>
-				</div>
 			</form>
-		{:else if mfaEnroll}
-			<p class="note">{m('portal.company.mfa.scanHint')}</p>
-			<img class="qr" src={mfaEnroll.qr_code_data_url} alt={m('portal.company.mfa.qrAlt')} />
+		</section>
+
+		<!-- Staged: bank details -->
+		<section class="card">
+			<h2>{m('portal.company.bank.title')}</h2>
 			<p class="note">
-				{m('portal.company.mfa.manualKey')} <code class="secret">{mfaEnroll.secret}</code>
+				{m('portal.company.bank.note')}
+				{#if info?.has_bank_details}<span class="tag">{m('portal.company.bank.onFile')}</span>{/if}
 			</p>
-			<form onsubmit={confirmEnroll}>
+			{#if bankErr}<div class="error" role="alert">{bankErr}</div>{/if}
+			<form onsubmit={submitBankChange}>
 				<label>
-					{m('portal.company.mfa.authCode')}
-					<input
-						type="text"
-						inputmode="numeric"
-						autocomplete="one-time-code"
-						bind:value={mfaCode}
-						maxlength="8"
-					/>
+					{m('portal.company.bank.name')}
+					<input type="text" bind:value={bankName} />
 				</label>
-				<div class="btn-row">
+				<label>
+					{m('portal.company.bank.account')}
+					<input type="text" bind:value={accountNumber} autocomplete="off" />
+				</label>
+				<label>
+					{m('portal.company.bank.country')}
+					<input type="text" maxlength="2" bind:value={bankCountry} autocomplete="off" />
+				</label>
+				{#if bankIsUK}
+					<label>
+						{m('portal.company.bank.sortCode')}
+						<input type="text" bind:value={sortCode} autocomplete="off" />
+					</label>
+				{:else}
+					<label>
+						{m('portal.company.bank.routing')}
+						<input type="text" bind:value={routingNumber} autocomplete="off" />
+					</label>
+					<label>
+						{m('portal.company.bank.wireRouting')}
+						<input type="text" bind:value={wireRoutingNumber} autocomplete="off" />
+					</label>
+					<p class="note">{m('portal.company.bank.wireRoutingHint')}</p>
+				{/if}
+				<button
+					type="submit"
+					class="btn-primary"
+					disabled={bankSaving || !!pending || !accountNumber}
+				>
+					{bankSaving ? m('portal.company.bank.submitting') : m('portal.company.bank.request')}
+				</button>
+			</form>
+		</section>
+
+		<!-- Staged: tax ID -->
+		<section class="card">
+			<h2>{m('portal.company.tax.title')}</h2>
+			<p class="note">
+				{m('portal.company.tax.note')}
+				{#if info?.tax_id_last4}<span class="tag">{m('portal.company.tax.ending', { last4: info.tax_id_last4 })}</span>{/if}
+			</p>
+			{#if taxErr}<div class="error" role="alert">{taxErr}</div>{/if}
+			<form onsubmit={submitTaxChange}>
+				<label>
+					{m('portal.company.tax.new')}
+					<input type="text" bind:value={taxId} autocomplete="off" />
+				</label>
+				<button type="submit" class="btn-primary" disabled={taxSaving || !!pending || !taxId}>
+					{taxSaving ? m('portal.company.tax.submitting') : m('portal.company.tax.request')}
+				</button>
+			</form>
+		</section>
+
+		<!-- Tax forms: W-9 (US) / W-8 (foreign) — uploaded live -->
+		<section class="card">
+			<h2>{m('portal.company.taxForm.title')}</h2>
+			<p class="note">
+				{m('portal.company.taxForm.note')}
+				{#if taxForm?.on_file}
+					<span class="tag">
+						{FORM_TYPE_LABEL[taxForm.form_type ?? ''] ?? m('portal.company.taxForm.onFile')}
+						{#if taxForm.received_date}{m('portal.company.taxForm.received', { date: formatDate(taxForm.received_date) })}{/if}
+					</span>
+				{/if}
+			</p>
+			{#if taxFormErr}<div class="error" role="alert">{taxFormErr}</div>{/if}
+			<div role="status">{#if taxFormMsg}<div class="message">{taxFormMsg}</div>{/if}</div>
+
+			{#if taxForm?.on_file}
+				<p class="note">
+					{m('portal.company.taxForm.onFileNote')}
 					<button
 						type="button"
-						class="btn-cancel"
-						onclick={() => {
-							mfaEnroll = null;
-							mfaCode = '';
-							mfaErr = '';
-						}}>{m('portal.company.mfa.cancel')}</button
+						class="btn-link"
+						onclick={downloadTaxForm}
+						disabled={downloadingForm}
 					>
-					<button type="submit" class="btn-primary" disabled={mfaBusy || !mfaCode}>
-						{mfaBusy ? m('portal.company.mfa.verifying') : m('portal.company.mfa.confirm')}
+						{downloadingForm ? m('portal.company.taxForm.preparing') : m('portal.company.taxForm.download')}
 					</button>
-				</div>
+				</p>
+			{/if}
+
+			<form onsubmit={submitTaxForm}>
+				<label>
+					{m('portal.company.taxForm.formType')}
+					<select bind:value={taxFormType}>
+						<option value="w9">{m('portal.company.taxForm.optionW9')}</option>
+						<option value="w8">{m('portal.company.taxForm.optionW8')}</option>
+					</select>
+				</label>
+				<label>
+					{m('portal.company.taxForm.signedForm')}
+					<input
+						type="file"
+						accept="application/pdf,image/png,image/jpeg,image/tiff"
+						onchange={onTaxFormFile}
+					/>
+				</label>
+				<button type="submit" class="btn-primary" disabled={taxFormSaving || !taxFormFile}>
+					{taxFormSaving ? m('portal.company.taxForm.uploading') : taxForm?.on_file ? m('portal.company.taxForm.replace') : m('portal.company.taxForm.upload')}
+				</button>
 			</form>
-		{:else}
-			<button type="button" class="btn-primary" onclick={startEnroll} disabled={mfaBusy}>
-				{mfaBusy ? m('portal.company.mfa.starting') : m('portal.company.mfa.setUp')}
-			</button>
-		{/if}
-	</section>
+		</section>
+
+		<!-- Security: two-factor authentication (TOTP) -->
+		<section class="card">
+			<h2>{m('portal.company.mfa.title')}</h2>
+			<p class="note">
+				{m('portal.company.mfa.note')}
+				{#if mfaEnabled}<span class="tag">{m('portal.company.mfa.on')}</span>{/if}
+			</p>
+			{#if mfaErr}<div class="error" role="alert">{mfaErr}</div>{/if}
+			<div role="status">{#if mfaMsg}<div class="message">{mfaMsg}</div>{/if}</div>
+
+			{#if mfaEnabled && !disableMode}
+				<button type="button" class="btn-danger" onclick={() => (disableMode = true)}>
+					{m('portal.company.mfa.turnOff')}
+				</button>
+			{:else if disableMode}
+				<form onsubmit={confirmDisable}>
+					<label>
+						{m('portal.company.mfa.enterCodeToDisable')}
+						<input
+							type="text"
+							inputmode="numeric"
+							autocomplete="one-time-code"
+							bind:value={disableCode}
+							maxlength="8"
+						/>
+					</label>
+					<div class="btn-row">
+						<button
+							type="button"
+							class="btn-cancel"
+							onclick={() => {
+								disableMode = false;
+								disableCode = '';
+								mfaErr = '';
+							}}>{m('portal.company.mfa.cancel')}</button
+						>
+						<button type="submit" class="btn-danger" disabled={mfaBusy || !disableCode}>
+							{mfaBusy ? m('portal.company.mfa.turningOff') : m('portal.company.mfa.turnOffBtn')}
+						</button>
+					</div>
+				</form>
+			{:else if mfaEnroll}
+				<p class="note">{m('portal.company.mfa.scanHint')}</p>
+				<img class="qr" src={mfaEnroll.qr_code_data_url} alt={m('portal.company.mfa.qrAlt')} />
+				<p class="note">
+					{m('portal.company.mfa.manualKey')} <code class="secret">{mfaEnroll.secret}</code>
+				</p>
+				<form onsubmit={confirmEnroll}>
+					<label>
+						{m('portal.company.mfa.authCode')}
+						<input
+							type="text"
+							inputmode="numeric"
+							autocomplete="one-time-code"
+							bind:value={mfaCode}
+							maxlength="8"
+						/>
+					</label>
+					<div class="btn-row">
+						<button
+							type="button"
+							class="btn-cancel"
+							onclick={() => {
+								mfaEnroll = null;
+								mfaCode = '';
+								mfaErr = '';
+							}}>{m('portal.company.mfa.cancel')}</button
+						>
+						<button type="submit" class="btn-primary" disabled={mfaBusy || !mfaCode}>
+							{mfaBusy ? m('portal.company.mfa.verifying') : m('portal.company.mfa.confirm')}
+						</button>
+					</div>
+				</form>
+			{:else}
+				<button type="button" class="btn-primary" onclick={startEnroll} disabled={mfaBusy}>
+					{mfaBusy ? m('portal.company.mfa.starting') : m('portal.company.mfa.setUp')}
+				</button>
+			{/if}
+		</section>
+	{/if}
 </div>
 
 <style>
