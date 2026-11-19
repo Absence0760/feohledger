@@ -3839,7 +3839,6 @@ export const en = {
 	'workflows.builder.toast.deactivated': 'Workflow deactivated',
 	'workflows.builder.loadFailed': 'Couldn’t load this workflow.',
 	'workflows.builder.notFound': 'This workflow doesn’t exist or was deleted.',
-	'workflows.builder.toast.notFound': 'Workflow not found',
 	'workflows.builder.toast.saveFailed': 'Failed to save',
 	'workflows.builder.toast.saved': 'Workflow saved',
 	'workflows.builder.toast.updateFailed': 'Failed to update',

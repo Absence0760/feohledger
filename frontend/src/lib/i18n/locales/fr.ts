@@ -3667,7 +3667,6 @@ export const messages = {
 	'workflows.builder.toast.deactivated': 'Flux de travail désactivé',
 	'workflows.builder.loadFailed': 'Impossible de charger ce flux de travail.',
 	'workflows.builder.notFound': 'Ce flux de travail n’existe pas ou a été supprimé.',
-	'workflows.builder.toast.notFound': 'Flux de travail introuvable',
 	'workflows.builder.toast.saveFailed': 'Échec de l\'enregistrement',
 	'workflows.builder.toast.saved': 'Flux de travail enregistré',
 	'workflows.builder.toast.updateFailed': 'Échec de la mise à jour',

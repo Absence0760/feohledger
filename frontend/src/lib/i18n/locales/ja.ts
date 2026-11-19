@@ -3597,7 +3597,6 @@ export const messages = {
 	'workflows.builder.toast.deactivated': 'ワークフローを無効化しました',
 	'workflows.builder.loadFailed': 'このワークフローを読み込めませんでした。',
 	'workflows.builder.notFound': 'このワークフローは存在しないか、削除されました。',
-	'workflows.builder.toast.notFound': 'ワークフローが見つかりません',
 	'workflows.builder.toast.saveFailed': '保存に失敗しました',
 	'workflows.builder.toast.saved': 'ワークフローを保存しました',
 	'workflows.builder.toast.updateFailed': '更新に失敗しました',

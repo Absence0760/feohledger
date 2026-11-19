@@ -3658,7 +3658,6 @@ export const messages = {
 	'workflows.builder.toast.deactivated': 'Flujo de trabajo desactivado',
 	'workflows.builder.loadFailed': 'No se pudo cargar este flujo de trabajo.',
 	'workflows.builder.notFound': 'Este flujo de trabajo no existe o se eliminó.',
-	'workflows.builder.toast.notFound': 'Flujo de trabajo no encontrado',
 	'workflows.builder.toast.saveFailed': 'Error al guardar',
 	'workflows.builder.toast.saved': 'Flujo de trabajo guardado',
 	'workflows.builder.toast.updateFailed': 'Error al actualizar',

@@ -3666,7 +3666,6 @@ export const messages = {
 	'workflows.builder.toast.deactivated': 'Workflow deaktiviert',
 	'workflows.builder.loadFailed': 'Dieser Workflow konnte nicht geladen werden.',
 	'workflows.builder.notFound': 'Dieser Workflow existiert nicht oder wurde gelöscht.',
-	'workflows.builder.toast.notFound': 'Workflow nicht gefunden',
 	'workflows.builder.toast.saveFailed': 'Speichern fehlgeschlagen',
 	'workflows.builder.toast.saved': 'Workflow gespeichert',
 	'workflows.builder.toast.updateFailed': 'Aktualisierung fehlgeschlagen',
