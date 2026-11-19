@@ -45,6 +45,7 @@ from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.models.credit_memo import CreditMemo
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice_status import PAYABLE_STATUSES
 from app.models.organization import Organization
 from app.models.payment import (
     LIVE_PAYMENT_TERMINAL_STATUSES,
@@ -198,11 +199,10 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 # and must never have money scheduled against them. This is the single source of
 # truth shared by the queue, the run builder, and the standalone payment record,
 # so a payment can't be booked against an unapproved invoice on any path.
-PAYABLE_INVOICE_STATUSES = (
-    InvoiceStatus.approved.value,
-    InvoiceStatus.posted_in_erp.value,
-    InvoiceStatus.payment_scheduled.value,
-)
+#
+# The set itself is `models/invoice_status.PAYABLE_STATUSES`; this is it as
+# strings, for the `.in_()` filters and the `InvoiceStatus(value)` lookups.
+PAYABLE_INVOICE_STATUSES = tuple(state.value for state in PAYABLE_STATUSES)
 
 # Of those, the ones that still need the `→ payment_scheduled` transition once a
 # payment settles. DERIVED from the state machine rather than restated, so it

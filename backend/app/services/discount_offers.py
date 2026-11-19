@@ -392,22 +392,20 @@ def invoice_awaits_payment(status) -> bool:
     discount on it can still be taken.
 
     Derived, not listed: a status awaits payment when the payment queue's own
-    rule (``api/payments.PAYABLE_INVOICE_STATUSES``) is reachable from it
+    rule (``models/invoice_status.PAYABLE_STATUSES``) is reachable from it
     through ``workflow_engine.VALID_TRANSITIONS`` without passing through a
-    settled status (``paid`` / ``done``). The walk has to stop at those two
+    settled status (``SETTLED_STATUSES``: ``paid`` / ``done``). The walk has to stop at those two
     because the void back-edge (``paid → approved``) would otherwise make a
     paid invoice look payable. So an unapproved invoice still awaits payment
     (approval is ahead of it), while one already ``paid`` or ``done`` does not —
     accepting a discount there records a deduction no payment can ever take.
     """
-    # Lazy: `api.payments` is a large router module, and this one is imported
-    # by modules it (transitively) loads.
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
-    from app.models.invoice import InvoiceStatus
+    # Lazy: the workflow engine imports modules that load this one.
+    from app.models.invoice_status import PAYABLE_STATUSES, SETTLED_STATUSES, InvoiceStatus
     from app.services.workflow_engine import VALID_TRANSITIONS
 
-    settled = {InvoiceStatus.paid, InvoiceStatus.done}
-    payable = {InvoiceStatus(s) for s in PAYABLE_INVOICE_STATUSES}
+    settled = frozenset(SETTLED_STATUSES)
+    payable = frozenset(PAYABLE_STATUSES)
     start = InvoiceStatus(status)
     seen: set = set()
     frontier = [start]
