@@ -10,7 +10,9 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
-	import { formatDate } from '#lib/utils/time.ts';
+	import { formatDate, timeAgo } from '#lib/utils/time.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
 
 	// A message is one of the two surface shapes. Reads are guarded so the
 	// component works against either: AP messages carry author_user_id +
@@ -80,32 +82,32 @@
 		!isAp
 			? []
 			: members
-					.filter((m) => m.is_active && m.id !== currentUserId)
-					.filter((m) => !selectedMentions.some((s) => s.id === m.id))
+					.filter((mention) => mention.is_active && mention.id !== currentUserId)
+					.filter((mention) => !selectedMentions.some((s) => s.id === mention.id))
 					// Name only. The source carries no email — matching on one
 					// would mean fetching one, and an address is not something a
 					// chat composer needs to hold.
-					.filter((m) => {
+					.filter((mention) => {
 						const q = mentionQuery.trim().toLowerCase();
-						return !q || m.full_name.toLowerCase().includes(q);
+						return !q || mention.full_name.toLowerCase().includes(q);
 					}),
 	);
 
 	// Resolve a mentioned id to a display name for the @mention highlight.
 	let memberById = $derived.by(() => {
 		const map: Record<string, string> = {};
-		for (const m of members) map[m.id] = m.full_name;
+		for (const mention of members) map[mention.id] = mention.full_name;
 		return map;
 	});
 
-	function addMention(m: ChatMentionCandidate) {
-		selectedMentions = [...selectedMentions, m];
+	function addMention(mention: ChatMentionCandidate) {
+		selectedMentions = [...selectedMentions, mention];
 		mentionQuery = '';
 		mentionOpen = false;
 	}
 
 	function removeMention(id: string) {
-		selectedMentions = selectedMentions.filter((m) => m.id !== id);
+		selectedMentions = selectedMentions.filter((mention) => mention.id !== id);
 	}
 
 	function applyTemplate(tpl: ChatTemplate) {
@@ -129,13 +131,13 @@
 		if (!canSend) return;
 		sending = true;
 		try {
-			const mentionIds = isAp ? selectedMentions.map((m) => m.id) : [];
+			const mentionIds = isAp ? selectedMentions.map((mention) => mention.id) : [];
 			await onsend(body.trim(), mentionIds, file ?? undefined);
 			body = '';
 			selectedMentions = [];
 			clearFile();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Could not send message', 'error');
+			toast(err instanceof Error ? err.message : m('supplierChat.error.send'), 'error');
 		} finally {
 			sending = false;
 		}
@@ -147,7 +149,7 @@
 		try {
 			await onresolve();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Could not resolve thread', 'error');
+			toast(err instanceof Error ? err.message : m('supplierChat.error.resolve'), 'error');
 		} finally {
 			busyStatus = false;
 		}
@@ -159,7 +161,7 @@
 		try {
 			await onreopen();
 		} catch (err) {
-			toast(err instanceof Error ? err.message : 'Could not reopen thread', 'error');
+			toast(err instanceof Error ? err.message : m('supplierChat.error.reopen'), 'error');
 		} finally {
 			busyStatus = false;
 		}
@@ -169,20 +171,37 @@
 		return msg.author_role === ownRole;
 	}
 
+	// The thread state's label. Keyed on the wire value; one the build does not
+	// know renders as-is rather than vanishing (the pill's `data-status` still
+	// carries the raw value for the e2e and for styling).
+	const STATUS_LABEL_KEYS: Record<string, MessageKey> = {
+		open: 'supplierChat.status.open',
+		resolved: 'supplierChat.status.resolved',
+	};
+	let statusLabel = $derived(STATUS_LABEL_KEYS[status] ? m(STATUS_LABEL_KEYS[status]) : status);
+
+	const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+	/** Relative within the week ("5 min. ago" / "vor 5 Min."), a localized
+	 *  date after it — both through the shared locale-aware formatters, so the
+	 *  language picker moves them with the rest of the page. */
 	function relativeTime(iso: string): string {
 		if (!iso) return '';
 		const then = new Date(iso).getTime();
 		if (Number.isNaN(then)) return '';
-		const diff = Date.now() - then;
-		const sec = Math.round(diff / 1000);
-		if (sec < 60) return 'just now';
-		const min = Math.round(sec / 60);
-		if (min < 60) return `${min}m ago`;
-		const hr = Math.round(min / 60);
-		if (hr < 24) return `${hr}h ago`;
-		const day = Math.round(hr / 24);
-		if (day < 7) return `${day}d ago`;
-		return formatDate(iso, '', { year: 'numeric', month: 'numeric', day: 'numeric' });
+		if (Date.now() - then < WEEK_MS) return timeAgo(iso, '');
+		return formatDate(iso, '');
+	}
+
+	/** The exact instant, for the time's `title` / `datetime`. */
+	function exactTime(iso: string): string {
+		return formatDate(iso, '', {
+			year: 'numeric',
+			month: 'short',
+			day: 'numeric',
+			hour: 'numeric',
+			minute: '2-digit',
+		});
 	}
 
 	function mentionIdsOf(msg: AnyMessage): string[] {
@@ -203,11 +222,11 @@
 		const re = new RegExp(`(@(?:${escaped.join('|')}))`, 'g');
 		const out: Segment[] = [];
 		let last = 0;
-		let m: RegExpExecArray | null;
-		while ((m = re.exec(msg.body)) !== null) {
-			if (m.index > last) out.push({ text: msg.body.slice(last, m.index), mention: false });
-			out.push({ text: m[0], mention: true });
-			last = m.index + m[0].length;
+		let match: RegExpExecArray | null;
+		while ((match = re.exec(msg.body)) !== null) {
+			if (match.index > last) out.push({ text: msg.body.slice(last, match.index), mention: false });
+			out.push({ text: match[0], mention: true });
+			last = match.index + match[0].length;
 		}
 		if (last < msg.body.length) out.push({ text: msg.body.slice(last), mention: false });
 		return out.length ? out : [{ text: msg.body, mention: false }];
@@ -218,16 +237,18 @@
 			try {
 				await ondownload(fileUrl, filename);
 			} catch (err) {
-				toast(err instanceof Error ? err.message : 'Download failed', 'error');
+				toast(err instanceof Error ? err.message : m('supplierChat.error.download'), 'error');
 			}
 		}
 	}
 </script>
 
-<section class="chat" data-testid="supplier-chat" aria-label="Supplier chat">
+<section class="chat" data-testid="supplier-chat" aria-label={m('supplierChat.region')}>
 	<div class="chat-head">
-		<span class="chat-title">Supplier Chat</span>
-		<span class="chat-status-pill {status}" data-testid="chat-status">{status}</span>
+		<span class="chat-title">{m('supplierChat.title')}</span>
+		<span class="chat-status-pill {status}" data-testid="chat-status" data-status={status}
+			>{statusLabel}</span
+		>
 		{#if isAp}
 			<div class="chat-status-actions">
 				{#if status === 'open'}
@@ -236,18 +257,18 @@
 							variant="success"
 							disabled={busyStatus || !thread?.messages?.length}
 							onclick={resolve}
-							ariaLabel="Resolve chat thread"
+							ariaLabel={m('supplierChat.resolveAria')}
 						>
-							{busyStatus ? 'Resolving…' : 'Resolve'}
+							{busyStatus ? m('supplierChat.resolving') : m('supplierChat.resolve')}
 						</RowAction>
 					{/if}
 				{:else if onreopen}
 					<RowAction
 						disabled={busyStatus}
 						onclick={reopen}
-						ariaLabel="Reopen chat thread"
+						ariaLabel={m('supplierChat.reopenAria')}
 					>
-						{busyStatus ? 'Reopening…' : 'Reopen'}
+						{busyStatus ? m('supplierChat.reopening') : m('supplierChat.reopen')}
 					</RowAction>
 				{/if}
 			</div>
@@ -262,9 +283,9 @@
 				<p class="chat-empty" role="alert" data-testid="chat-load-error">{error}</p>
 			{/if}
 		{:else if loading && messages.length === 0}
-			<p class="chat-empty">Loading…</p>
+			<p class="chat-empty">{m('common.loading')}</p>
 		{:else if messages.length === 0}
-			<p class="chat-empty">No messages yet. Start the conversation below.</p>
+			<p class="chat-empty">{m('supplierChat.empty')}</p>
 		{:else}
 			{#each messages as msg (msg.id)}
 				<div
@@ -276,8 +297,10 @@
 				>
 					<div class="chat-bubble">
 						<div class="chat-meta">
-							<span class="chat-author">{msg.author_name ?? 'Unknown'}</span>
-							<span class="chat-time">{relativeTime(msg.created_at)}</span>
+							<span class="chat-author">{msg.author_name ?? m('supplierChat.unknownAuthor')}</span>
+							<time class="chat-time" datetime={msg.created_at} title={exactTime(msg.created_at)}
+								>{relativeTime(msg.created_at)}</time
+							>
 						</div>
 						<!-- Plain text only — never {@html}. @mention tokens are
 						     highlighted via segmented text spans (XSS-safe). -->
@@ -308,12 +331,12 @@
 		     conversation the reader cannot see is not a flow to offer. Retry
 		     first. -->
 	{:else if isAp && status === 'resolved'}
-		<p class="chat-resolved-note">This thread is resolved. Reopen it to post a new message.</p>
+		<p class="chat-resolved-note">{m('supplierChat.resolvedNote')}</p>
 	{:else}
 		<div class="chat-composer">
 			{#if isAp && templates.length > 0}
 				<div class="chat-templates">
-					<span class="chat-templates-label">Templates:</span>
+					<span class="chat-templates-label">{m('supplierChat.templates')}</span>
 					{#each templates as tpl}
 						<button
 							type="button"
@@ -329,14 +352,14 @@
 
 			{#if isAp && selectedMentions.length > 0}
 				<div class="chat-mentions-selected">
-					{#each selectedMentions as m (m.id)}
+					{#each selectedMentions as mention (mention.id)}
 						<span class="chat-mention-tag">
-							@{m.full_name}
+							@{mention.full_name}
 							<button
 								type="button"
 								class="chat-mention-remove"
-								aria-label={`Remove mention ${m.full_name}`}
-								onclick={() => removeMention(m.id)}>&times;</button
+								aria-label={m('supplierChat.removeMention', { name: mention.full_name })}
+								onclick={() => removeMention(mention.id)}>&times;</button
 							>
 						</span>
 					{/each}
@@ -345,8 +368,8 @@
 
 			<textarea
 				class="chat-input"
-				placeholder="Write a message…"
-				aria-label="Write a message"
+				placeholder={m('supplierChat.inputPlaceholder')}
+				aria-label={m('supplierChat.inputLabel')}
 				rows="2"
 				bind:value={body}
 				data-testid="chat-input"
@@ -358,8 +381,8 @@
 						<input
 							type="text"
 							class="chat-mention-input"
-							placeholder="@mention…"
-							aria-label="Mention a teammate"
+							placeholder={m('supplierChat.mentionPlaceholder')}
+							aria-label={m('supplierChat.mentionLabel')}
 							bind:value={mentionQuery}
 							onfocus={() => (mentionOpen = true)}
 							oninput={() => (mentionOpen = true)}
@@ -368,14 +391,14 @@
 						/>
 						{#if mentionOpen && mentionCandidates.length > 0}
 							<ul class="chat-mention-list" data-testid="chat-mention-list">
-								{#each mentionCandidates.slice(0, 6) as m (m.id)}
+								{#each mentionCandidates.slice(0, 6) as mention (mention.id)}
 									<li>
 										<button
 											type="button"
 											class="chat-mention-option"
-											onclick={() => addMention(m)}
+											onclick={() => addMention(mention)}
 										>
-											{m.full_name}
+											{mention.full_name}
 										</button>
 									</li>
 								{/each}
@@ -391,12 +414,12 @@
 						onchange={onFileChange}
 						data-testid="chat-file"
 					/>
-					{file ? 'Change file' : 'Attach'}
+					{file ? m('supplierChat.changeFile') : m('supplierChat.attach')}
 				</label>
 				{#if file}
 					<span class="chat-file-name">
 						{file.name}
-						<button type="button" class="chat-file-clear" aria-label="Remove attachment" onclick={clearFile}>&times;</button>
+						<button type="button" class="chat-file-clear" aria-label={m('supplierChat.removeAttachment')} onclick={clearFile}>&times;</button>
 					</span>
 				{/if}
 
@@ -407,7 +430,7 @@
 					onclick={send}
 					data-testid="chat-send"
 				>
-					{sending ? 'Sending…' : 'Send'}
+					{sending ? m('supplierChat.sending') : m('supplierChat.send')}
 				</button>
 			</div>
 		</div>
