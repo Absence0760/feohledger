@@ -593,7 +593,7 @@ async def test_billing_rejections_include_a_stale_timestamp_and_a_replay_applies
     monkeypatch.setattr(settings, "billing_provider", "stripe_billing")
     monkeypatch.setattr(settings, "billing_stripe_webhook_secret", _WEBHOOK_SECRET)
     monkeypatch.setattr(settings, "billing_stripe_api_key", "sk_test")
-    apply = _AsyncRecorder()
+    apply = _AsyncRecorder(SimpleNamespace(applied=True, reason=None))
     monkeypatch.setattr(billing_webhook, "apply_billing_event", apply)
     url = "/api/billing/webhook/stripe_billing"
     body = json.dumps(
