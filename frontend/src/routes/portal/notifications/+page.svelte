@@ -144,17 +144,6 @@
 	}
 	.btn-primary {
 		align-self: flex-start;
-		padding: 8px 16px;
-		border: none;
-		border-radius: 4px;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		cursor: pointer;
-	}
-	.btn-primary:disabled {
-		opacity: 0.55;
-		cursor: default;
 	}
 	.error {
 		background: color-mix(in srgb, var(--danger) 10%, transparent);

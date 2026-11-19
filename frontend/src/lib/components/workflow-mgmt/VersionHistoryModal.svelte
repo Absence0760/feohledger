@@ -132,7 +132,7 @@
 						{/each}
 					</select>
 				</label>
-				<button class="vh-diff-btn" disabled={diffing || !fromId || !toId} onclick={runDiff}>
+				<button class="btn-primary" disabled={diffing || !fromId || !toId} onclick={runDiff}>
 					{diffing ? m('workflows.mgmt.ver.comparing') : m('workflows.mgmt.ver.compare')}
 				</button>
 			</div>
@@ -230,23 +230,6 @@
 		border-radius: 6px;
 		background-color: var(--surface);
 		font-size: 0.82rem;
-	}
-
-	.vh-diff-btn {
-		padding: 7px 16px;
-		border-radius: 6px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.vh-diff-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	.vh-diff {
@@ -403,14 +386,4 @@
 		font-family: inherit;
 	}
 
-	.btn-cancel {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
 </style>

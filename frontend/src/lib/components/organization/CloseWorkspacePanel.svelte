@@ -202,7 +202,7 @@
 			<div class="form-actions">
 				<button
 					type="submit"
-					class="btn-close-workspace"
+					class="btn-danger armed"
 					data-testid="close-workspace-submit"
 					disabled={!canSubmit}
 				>
@@ -306,25 +306,5 @@
 		margin: 0;
 		color: var(--danger);
 		font-size: 0.85rem;
-	}
-
-	/* --danger-strong, not --danger: a fill carrying white text (5.37:1 dark,
-	   see app.css). The one destructive primary on this page. */
-	.btn-close-workspace {
-		padding: 9px 18px;
-		border-radius: var(--radius-sm);
-		border: none;
-		background: var(--danger-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-		min-height: 24px;
-	}
-
-	.btn-close-workspace:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 </style>

@@ -126,9 +126,6 @@
 		font-size: 0.93rem;
 		animation: account-load-in 0.2s ease-out 0.4s 1 both;
 	}
-	.btn-cancel[aria-disabled='true'] {
-		cursor: progress;
-	}
 	@keyframes account-load-in {
 		from {
 			opacity: 0;

@@ -1909,7 +1909,7 @@
 						{#if !currentFileUrl}
 							<button
 								type="button"
-								class="btn-file-action"
+								class="btn-secondary"
 								disabled={uploadingFile}
 								onclick={() => fileInput?.click()}
 							>
@@ -1918,7 +1918,7 @@
 						{:else}
 							<button
 								type="button"
-								class="btn-file-action"
+								class="btn-secondary"
 								disabled={uploadingFile}
 								onclick={() => fileInput?.click()}
 							>
@@ -2200,7 +2200,7 @@
 						<div class="line-items-header">
 							<span class="line-items-title">{m('invoices.modal.lineItems.title')}</span>
 							{#if canEditLines}
-								<button type="button" class="btn-add-line" onclick={addLineItem}>{m('invoices.modal.lineItems.addLine')}</button>
+								<button type="button" class="btn-secondary" onclick={addLineItem}>{m('invoices.modal.lineItems.addLine')}</button>
 							{/if}
 						</div>
 						{#if lineItems.length > 0}
@@ -2262,7 +2262,7 @@
 						{/if}
 						{#if lineItemsDirty && canEditLines}
 							<div class="line-items-actions">
-								<button type="button" class="btn-save-lines" disabled={savingLines} onclick={saveLineItems}>
+								<button type="button" class="btn-primary" disabled={savingLines} onclick={saveLineItems}>
 									{savingLines ? m('invoices.modal.lineItems.saving') : m('invoices.modal.lineItems.save')}
 								</button>
 							</div>
@@ -2299,7 +2299,7 @@
 						{#if contractId}
 							<span class="contract-linked mono">{linkedContract?.contract_number ?? m('invoices.modal.contract.linked')}</span>
 							{#if canManageInvoice}
-								<button type="button" class="btn-contract-unlink" disabled={linkingContract} onclick={unlinkContract}>
+								<button type="button" class="btn-danger" disabled={linkingContract} onclick={unlinkContract}>
 									{linkingContract ? '…' : m('invoices.modal.contract.unlink')}
 								</button>
 							{/if}
@@ -2312,7 +2312,7 @@
 									<option value={c.id}>{c.contract_number}{c.vendor_name ? ` — ${c.vendor_name}` : ''}</option>
 								{/each}
 							</select>
-							<button type="button" class="btn-contract-link" disabled={linkingContract || !pickContractId} onclick={linkContract}>
+							<button type="button" class="btn-secondary" disabled={linkingContract || !pickContractId} onclick={linkContract}>
 								{linkingContract ? '…' : m('invoices.modal.contract.link')}
 							</button>
 						{/if}
@@ -2533,7 +2533,7 @@
 							{#if retryOffered}
 								<button
 									type="button"
-									class="btn-retry-erp"
+									class="btn-secondary retry-erp"
 									data-testid="retry-erp"
 									disabled={retryingErp || !isAllowed(retryVerdict)}
 									aria-describedby={retryRefusal ? 'retry-erp-refusal' : undefined}
@@ -2764,7 +2764,7 @@
 						<div class="export-wrapper">
 							<button
 								type="button"
-								class="btn-export"
+								class="btn-secondary"
 								data-testid="einvoice-menu-toggle"
 								aria-haspopup="true"
 								aria-expanded={showEinvoiceMenu}
@@ -2896,7 +2896,7 @@
 										<div class="reject-actions">
 											<button
 												type="button"
-												class="btn-cancel-sm"
+												class="btn-cancel"
 												onclick={() => {
 													showPeppolForm = false;
 													peppolError = null;
@@ -2904,7 +2904,7 @@
 											>
 											<button
 												type="button"
-												class="btn-peppol-confirm"
+												class="btn-primary"
 												data-testid="peppol-confirm"
 												disabled={peppolSending ||
 													!peppolReceiverScheme.trim() ||
@@ -2920,7 +2920,7 @@
 								{:else}
 									<button
 										type="button"
-										class="btn-export"
+										class="btn-secondary"
 										data-testid="peppol-send"
 										onclick={() => {
 											showPeppolForm = true;
@@ -2962,8 +2962,8 @@
 										rows="2"
 									></textarea>
 									<div class="reject-actions">
-										<button type="button" class="btn-cancel-sm" onclick={() => { showRejectForm = false; rejectReason = ''; }}>{m('common.cancel')}</button>
-										<button type="button" class="btn-reject" disabled={reviewing || !rejectReason.trim()} onclick={handleReject}>
+										<button type="button" class="btn-cancel" onclick={() => { showRejectForm = false; rejectReason = ''; }}>{m('common.cancel')}</button>
+										<button type="button" class="btn-danger armed" disabled={reviewing || !rejectReason.trim()} onclick={handleReject}>
 											{reviewing ? m('invoices.modal.review.rejecting') : m('invoices.modal.review.confirmReject')}
 										</button>
 									</div>
@@ -2973,7 +2973,7 @@
 									{#if isOffered(verdicts?.approve)}
 										<button
 											type="button"
-											class="btn-approve"
+											class="btn-primary review-choice"
 											disabled={reviewing || !isAllowed(verdicts?.approve)}
 											aria-describedby={approveRefusal ? 'approve-refusal' : undefined}
 											onclick={handleApprove}
@@ -2985,7 +2985,7 @@
 									{#if isOffered(verdicts?.reject)}
 										<button
 											type="button"
-											class="btn-reject-outline"
+											class="btn-danger review-choice"
 											disabled={reviewing || !isAllowed(verdicts?.reject)}
 											onclick={() => (showRejectForm = true)}
 										>
@@ -3013,7 +3013,7 @@
 						<div class="footer-right">
 							<button type="button" class="btn-cancel" onclick={onclose}>{m('common.cancel')}</button>
 							{#if canExtract || extracting}
-								<button type="button" class="btn-extract" disabled={extracting} onclick={handleExtract}>
+								<button type="button" class="btn-secondary" disabled={extracting} onclick={handleExtract}>
 									{#if extracting}
 										<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke-dasharray="31.4" stroke-dashoffset="10"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite"/></circle></svg>
 										{extractionStatus || m('invoices.modal.extracting')}
@@ -3024,12 +3024,18 @@
 								</button>
 							{/if}
 							{#if canWrite && isExtracting && !extracting}
-								<button type="button" class="btn-reset" disabled={resettingExtraction} onclick={handleResetExtraction}>
+								<button type="button" class="btn-secondary" disabled={resettingExtraction} onclick={handleResetExtraction}>
 									{resettingExtraction ? m('invoices.modal.resetting') : m('invoices.modal.reset')}
 								</button>
 							{/if}
 							{#if canWrite && !isDone}
-								<button type="submit" class="btn-save" disabled={saving}>
+								<!-- `.btn-save` / `.btn-submit` are e2e hooks with no CSS. Submit is the
+								     footer's lead action when offered, so Save steps back to secondary. -->
+								<button
+									type="submit"
+									class="btn-save {canSubmit || resubmitOffered ? 'btn-secondary' : 'btn-primary'}"
+									disabled={saving}
+								>
 									{saving ? m('common.saving') : m('common.save')}
 								</button>
 							{/if}
@@ -3048,7 +3054,7 @@
 								{/if}
 								<button
 									type="button"
-									class="btn-submit"
+									class="btn-primary btn-submit"
 									disabled={submitting || awaitingApprover || !isAllowed(completeVerdict)}
 									aria-describedby={submitRefusal
 										? 'submit-refusal'
@@ -3077,7 +3083,7 @@
 							{#if resubmitOffered}
 								<button
 									type="button"
-									class="btn-submit"
+									class="btn-primary btn-submit"
 									data-testid="resubmit-for-review"
 									disabled={resubmitting || saving || !isAllowed(resubmitVerdict)}
 									aria-describedby={resubmitRefusal ? 'resubmit-refusal' : undefined}
@@ -3282,27 +3288,6 @@
 		background: var(--surface);
 	}
 
-	.btn-file-action {
-		padding: 5px 12px;
-		border-radius: 5px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-file-action:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
-	.btn-file-action:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
 	/* --- Form pane --- */
 
 	/* The pane itself never scrolls: .form-scroll does, and .form-actions sits
@@ -3439,28 +3424,6 @@
 		gap: 8px;
 	}
 
-	.btn-cancel,
-	.btn-save,
-	.btn-submit {
-		padding: 8px 14px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		border: 1px solid var(--border);
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.btn-cancel {
-		background: var(--surface);
-		color: var(--text-muted);
-	}
-
-	.btn-cancel:hover {
-		background: var(--bg);
-	}
-
 	/* --- Line items --- */
 
 	.line-items-section {
@@ -3480,22 +3443,6 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--text-muted);
-	}
-
-	.btn-add-line {
-		padding: 3px 10px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.75rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-add-line:hover {
-		border-color: var(--accent);
-		color: var(--accent);
 	}
 
 	.line-items-scroll {
@@ -3699,31 +3646,6 @@
 		font-size: 0.85rem;
 		max-width: 280px;
 	}
-	.btn-contract-link,
-	.btn-contract-unlink {
-		padding: 5px 12px;
-		border-radius: 5px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-contract-link:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-contract-unlink:hover:not(:disabled) {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
-	.btn-contract-link:disabled,
-	.btn-contract-unlink:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
 	.line-items-actions {
 		display: flex;
 		justify-content: flex-start;
@@ -3797,27 +3719,6 @@
 		line-height: 1.45;
 	}
 
-	.btn-save-lines {
-		padding: 5px 14px;
-		border-radius: 4px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.8rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-save-lines:hover:not(:disabled) {
-		opacity: 0.85;
-	}
-
-	.btn-save-lines:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
 	.confidence-dot {
 		display: inline-block;
 		width: 7px;
@@ -3859,84 +3760,6 @@
 
 	.confidence-dot:hover::after {
 		display: block;
-	}
-
-	.btn-reset {
-		padding: 8px 14px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		border: 1px solid var(--warning);
-		font-family: inherit;
-		white-space: nowrap;
-		background: var(--surface);
-		color: var(--warning);
-	}
-
-	.btn-reset:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--warning) 10%, transparent);
-	}
-
-	.btn-reset:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.btn-extract {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 8px 14px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		border: 1px solid var(--border);
-		font-family: inherit;
-		white-space: nowrap;
-		background: var(--surface);
-		color: var(--text-muted);
-	}
-
-	.btn-extract:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
-	.btn-extract:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.btn-save {
-		background: var(--accent-strong);
-		color: #fff;
-		border-color: var(--accent-strong);
-	}
-
-	.btn-save:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-save:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.btn-submit {
-		background: var(--success-strong);
-		color: #fff;
-		border-color: var(--success-strong);
-	}
-
-	.btn-submit:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-submit:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	.approver-select {
@@ -4043,23 +3866,6 @@
 		font-family: inherit;
 	}
 
-	.btn-peppol-confirm {
-		padding: 6px 14px;
-		border: none;
-		border-radius: 4px;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.8rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-peppol-confirm:disabled {
-		opacity: 0.55;
-		cursor: not-allowed;
-	}
-
 	.peppol-result {
 		margin: 0;
 		font-size: 0.8rem;
@@ -4082,31 +3888,6 @@
 
 	.export-wrapper {
 		position: relative;
-	}
-
-	.btn-export {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 8px 14px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-family: inherit;
-	}
-
-	.btn-export:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
-	.btn-export:disabled {
-		opacity: 0.55;
-		cursor: not-allowed;
 	}
 
 	.export-menu {
@@ -4711,31 +4492,6 @@
 		font-family: inherit;
 	}
 
-	.btn-retry-erp {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		margin-top: 10px;
-		padding: 6px 14px;
-		border-radius: 4px;
-		border: 1px solid var(--accent);
-		background: var(--surface);
-		color: var(--accent);
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-retry-erp:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--accent) 8%, transparent);
-	}
-
-	.btn-retry-erp:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
 	/* --- Review section --- */
 
 	.review-section {
@@ -4782,56 +4538,14 @@
 		gap: 8px;
 	}
 
-	.btn-approve {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 8px 18px;
-		border-radius: 4px;
-		border: none;
-		background: var(--success-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
+	/* Placement only: the shared buttons paint themselves. Approve and Reject
+	   split the review row; Retry sits under the ERP error it answers. */
+	.review-choice {
 		flex: 1;
-		justify-content: center;
 	}
 
-	.btn-approve:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-approve:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.btn-reject-outline {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 8px 18px;
-		border-radius: 4px;
-		border: 1px solid var(--danger);
-		background: var(--surface);
-		color: var(--danger);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		flex: 1;
-		justify-content: center;
-	}
-
-	.btn-reject-outline:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--danger) 10%, transparent);
-	}
-
-	.btn-reject-outline:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
+	.retry-erp {
+		margin-top: 10px;
 	}
 
 	.reject-form {
@@ -4863,42 +4577,6 @@
 		display: flex;
 		gap: 8px;
 		justify-content: flex-end;
-	}
-
-	.btn-cancel-sm {
-		padding: 6px 12px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.82rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-cancel-sm:hover {
-		background: var(--bg);
-	}
-
-	.btn-reject {
-		padding: 6px 14px;
-		border-radius: 4px;
-		border: none;
-		background: var(--danger-strong);
-		color: #fff;
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-reject:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-reject:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	.review-assigned-hint {
