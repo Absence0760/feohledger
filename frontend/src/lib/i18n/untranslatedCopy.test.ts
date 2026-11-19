@@ -68,6 +68,7 @@ const TRANSLATED = [
 	'/src/lib/components/reports/ResultTable.svelte',
 	'/src/lib/components/reports/SaveReportModal.svelte',
 	'/src/lib/components/ui/BulkBar.svelte',
+	'/src/lib/components/ui/DiscountTierBar.svelte',
 	'/src/lib/components/ui/InvoicePicker.svelte',
 	'/src/lib/components/ui/PlanUpgradeNotice.svelte',
 	'/src/lib/components/ui/VendorPicker.svelte',

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
-import { formatPercent, pointsToRatioString } from './percent';
+import { formatPercent, formatRatioPercent, pointsToRatioString } from './percent';
 
 afterEach(() => {
 	setActiveFormatLocale(undefined);
@@ -66,5 +66,37 @@ describe('formatPercent', () => {
 		expect(formatPercent(undefined, { fallback: 'n/a' })).toBe('n/a');
 		expect(formatPercent('n/a')).toBe('—');
 		expect(formatPercent(NaN)).toBe('—');
+	});
+});
+
+describe('formatRatioPercent', () => {
+	it('reads its input as a 0–1 ratio', () => {
+		setActiveFormatLocale('en-US');
+		expect(formatRatioPercent(0.875)).toBe('87.5%');
+		expect(formatRatioPercent(1)).toBe('100%');
+		expect(formatRatioPercent('0.02')).toBe('2%');
+		expect(formatRatioPercent(0.92, { maximumFractionDigits: 0 })).toBe('92%');
+	});
+
+	it('agrees with formatPercent on the same quantity', () => {
+		setActiveFormatLocale('fr-FR');
+		expect(formatRatioPercent(0.125)).toBe(formatPercent(12.5));
+	});
+
+	it('never rounds a float product — the ratio reaches Intl untouched', () => {
+		setActiveFormatLocale('en-US');
+		// 0.0115 * 100 is 1.1500000000000001 in floating point; the ratio
+		// itself is exactly 1.15%.
+		expect(formatRatioPercent(0.0115, { minimumFractionDigits: 2, maximumFractionDigits: 2 })).toBe(
+			'1.15%'
+		);
+	});
+
+	it('renders the fallback for unreadable input', () => {
+		setActiveFormatLocale('en-US');
+		expect(formatRatioPercent(null)).toBe('—');
+		expect(formatRatioPercent(Number.NaN)).toBe('—');
+		expect(formatRatioPercent('abc')).toBe('—');
+		expect(formatRatioPercent('', { fallback: 'n/a' })).toBe('n/a');
 	});
 });

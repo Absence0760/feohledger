@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatPercent, formatRatioPercent } from '#lib/utils/percent.ts';
 	import Money from '#lib/components/ui/Money.svelte';
 	import StatusBadge from '#lib/components/ui/StatusBadge.svelte';
 	import SpendBarChart from '#lib/components/assistant/SpendBarChart.svelte';
@@ -76,7 +77,7 @@
 					label: v.vendor_name,
 					value: numOf(v.amount),
 					amountLabel: formatMoney(v.amount, { currency: spend!.currency, whole: true }),
-					sub: `${numOf(v.share_pct).toFixed(1)}%`
+					sub: formatPercent(v.share_pct, { minimumFractionDigits: 1 })
 				}))
 			: []
 	);
@@ -182,7 +183,7 @@
 					<div class="match-card">
 						<div class="match-head">
 							<span class="match-vendor">{match.vendor_name ?? m('assistant.tool.unknownVendor')}</span>
-							<span class="match-sim">{m('assistant.tool.percentMatch', { percent: (match.similarity * 100).toFixed(0) })}</span>
+							<span class="match-sim">{m('assistant.tool.percentMatch', { percent: formatRatioPercent(match.similarity, { maximumFractionDigits: 0 }) })}</span>
 						</div>
 						<p class="match-snippet">{match.snippet}</p>
 					</div>
