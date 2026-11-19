@@ -4,6 +4,7 @@ import { enPortal } from './locales/portal/en';
 import { enSettings } from './locales/settings/en';
 import { enMarketing } from './locales/marketing/en';
 import { enRefusal } from './locales/refusal/en';
+import { enAudit } from './locales/audit/en';
 import { CATALOGUE_LOADERS, SLICE_LOADERS, SLICE_NAMES } from './catalogues';
 import type { Locale } from './locale';
 import type { MessageKey, SliceMessages, SliceName } from './messages';
@@ -21,6 +22,7 @@ export const EN_SLICES: { [S in SliceName]: SliceMessages[S] } = {
 	portal: enPortal,
 	marketing: enMarketing,
 	refusal: enRefusal,
+	audit: enAudit,
 };
 
 /** Every English string, by any key `m()` accepts. */

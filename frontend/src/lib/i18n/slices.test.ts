@@ -339,6 +339,7 @@ describe('catalogue slice scan', () => {
 			expect.arrayContaining(['/src/routes/organization', '/src/routes/admin', '/src/routes/billing', '/src/routes/help'])
 		);
 		expect(LOADING_DIRS.get('portal')).toEqual(['/src/routes/portal']);
+		expect(LOADING_DIRS.get('audit')).toEqual(['/src/routes/audit']);
 		expect(OWNERS.get('help')).toEqual(['/src/lib/components/help/HelpTip.svelte']);
 	});
 

@@ -47,8 +47,12 @@ export const CATALOGUE_LOADERS: Record<Locale, () => Promise<Messages>> = {
 //              and shows the server's English sentence instead. A `refusal.*`
 //              key a page renders through `m()` directly stays in the main
 //              catalogue (`refusal.expenseReportForeignLine`).
+//   audit    — the /audit console's action labels (`audit.action.*`, one per
+//              AuditLog.action token, and `audit.actionPattern.*`). Loaded by
+//              /audit's `+layout.ts`. The console's own chrome (`audit.col.*`,
+//              `audit.verify.*`, …) stays in the main catalogue.
 //
-// A route-scoped slice (settings, portal) is lazy in EVERY locale, English
+// A route-scoped slice (settings, portal, marketing, audit) is lazy in EVERY locale, English
 // included: the route's `+layout.ts` awaits it before rendering, so nothing
 // ever reads it unloaded, and keeping English out of the entry chunk is half
 // of what the split buys. The help slice keeps a static English copy
@@ -90,13 +94,22 @@ export const SLICE_LOADERS: { [S in SliceName]: Record<Locale, () => Promise<Sli
 		es: () => import('./locales/marketing/es').then((m) => m.messages),
 		'pt-BR': () => import('./locales/marketing/pt-BR').then((m) => m.messages),
 		ja: () => import('./locales/marketing/ja').then((m) => m.messages),
-	},	refusal: {
+	},
+	refusal: {
 		en: () => import('./locales/refusal/en').then((m) => m.enRefusal),
 		de: () => import('./locales/refusal/de').then((m) => m.messages),
 		fr: () => import('./locales/refusal/fr').then((m) => m.messages),
 		es: () => import('./locales/refusal/es').then((m) => m.messages),
 		'pt-BR': () => import('./locales/refusal/pt-BR').then((m) => m.messages),
 		ja: () => import('./locales/refusal/ja').then((m) => m.messages),
+	},
+	audit: {
+		en: () => import('./locales/audit/en').then((m) => m.enAudit),
+		de: () => import('./locales/audit/de').then((m) => m.messages),
+		fr: () => import('./locales/audit/fr').then((m) => m.messages),
+		es: () => import('./locales/audit/es').then((m) => m.messages),
+		'pt-BR': () => import('./locales/audit/pt-BR').then((m) => m.messages),
+		ja: () => import('./locales/audit/ja').then((m) => m.messages),
 	},
 };
 
@@ -114,6 +127,7 @@ export const SLICE_PREFIXES: Record<SliceName, readonly string[]> = {
 	portal: ['portal.'],
 	marketing: ['marketing.'],
 	refusal: ['refusal.'],
+	audit: ['audit.action.', 'audit.actionPattern.'],
 };
 
 /** The static English copy a slice shows until its chunk lands — help only (see above). */
