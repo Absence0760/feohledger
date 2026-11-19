@@ -139,4 +139,38 @@ test.describe('/vendors bulk operations (acme admin)', () => {
 
 		await expect(page.locator('.bulk-count')).toContainText('25 selected');
 	});
+
+	// Bulk Reject stops payments and revokes live cards for every selected
+	// vendor, so it is the armed two-click the row Reject already is: the first
+	// click only arms, and nothing is posted until the confirm.
+	test('bulk reject arms on the first click and commits on the confirm', async ({ page }) => {
+		seedVendors(2, 'unverified');
+
+		await page.goto('/vendors');
+		await page.getByPlaceholder('Search vendors...').fill(MARKER);
+		await page.waitForResponse(
+			(r) => r.url().includes('/api/vendors?') && r.url().includes('search=')
+		);
+		await expect(page.locator('table tbody tr')).toHaveCount(2);
+		await page.locator('th.checkbox-col input[type="checkbox"]').check();
+
+		let posted = 0;
+		page.on('request', (r) => {
+			if (r.url().includes('/api/vendors/bulk/status') && r.method() === 'POST') posted += 1;
+		});
+
+		const toolbar = page.getByRole('toolbar', { name: 'Bulk actions' });
+		await toolbar.getByRole('button', { name: 'Reject', exact: true }).click();
+		await expect(toolbar.getByRole('button', { name: 'Confirm reject' })).toBeVisible();
+		expect(posted).toBe(0);
+
+		const rejectResponse = page.waitForResponse(
+			(r) => r.url().includes('/api/vendors/bulk/status') && r.request().method() === 'POST'
+		);
+		await toolbar.getByRole('button', { name: 'Confirm reject' }).click();
+		const resp = await rejectResponse;
+		expect(resp.status()).toBe(200);
+		expect(((await resp.json()) as { updated: number }).updated).toBe(2);
+		expect(posted).toBe(1);
+	});
 });

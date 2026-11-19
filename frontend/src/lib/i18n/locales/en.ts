@@ -1188,6 +1188,8 @@ export const en = {
 	'vendors.onboarding.description': "Add a supplier to start receiving and matching their invoices — or import a CSV.",
 	'vendors.onboarding.descriptionErp': 'Add a supplier to start receiving and matching their invoices — or sync from your ERP / import a CSV.',
 	'vendors.selectAllAria': 'Select all vendors on this page',
+	'vendors.selectRowAria': 'Select {vendor}',
+	'vendors.row.openAria': 'Open vendor {vendor}',
 	'vendors.row.verify': 'Verify',
 	'vendors.row.reject': 'Reject',
 	'vendors.row.confirmReject': 'Confirm reject',
