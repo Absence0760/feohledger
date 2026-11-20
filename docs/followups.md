@@ -1373,18 +1373,24 @@ scope (§260) — do not fold them into any of these.
       restating (each a status list and/or role / permission / self check):
       intake approve / reject / convert; requisition
       submit / convert / cancel; discount-offer accept / decline; experiment
-      start; adaptive-suggestion dismiss. **Mobile** restates the same rules and
-      reads none of the verdicts yet: `payment_queue_screen._canApproveRun`
-      (`isCfo` + status, no maker-checker), `invoice_detail_screen`'s approve
-      (`canApproveInvoice` only), and the vendor verify / reject and exception
-      resolve actions (status + role). The list verdicts ride the same list
-      reads, and the invoice one is `GET /api/invoices/{id}/review-actions`.
+      start; adaptive-suggestion dismiss. **Mobile** reads the verdicts for the
+      invoice detail's approve / reject / recall and the approvals swipe
+      (`GET /api/invoices/{id}/review-actions`), the payment queue's record
+      outside, and the Runs tab's "Approve as CFO" (the run detail's
+      `actions.approve`, read per pending run because the runs list carries
+      only `actions.sync_erp`; maker-checker now shows disabled with its
+      reason). Still restating on mobile: the run menu's Execute / Cancel
+      (`canManagePayments` + `isDraft`, and a client-side CFO pre-flight —
+      `actions.execute` / `.cancel` on the same detail read), vendor verify /
+      reject (`canManageVendors` + `isUnverified` — the list's
+      `status_actions.{verify,reject}`), and exception resolve (status + role
+      — the list's `decision_refusals`).
       **Durable fix:** the same shape as the
       converted ones — a gate function the endpoint raises from, a `*_refusal`
       verdict on the row built from it, a parity test per role × row state, and
       the page reading `#lib/api/actionVerdicts.ts`
       (`frontend/docs/ui-patterns.md` § Whether to offer an action). Mobile's
-      approve actions first (they touch money).
+      run Execute next (it moves money).
       **Trigger:** the next change to any of those controls, or a report of a
       button that 403s / 409s.
 

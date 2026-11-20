@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/ambient_localizations.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
@@ -56,6 +57,7 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
 
   List<PaymentQueueItem> _queue = [];
   List<PaymentRun> _runs = [];
+  Map<String, ActionVerdict> _runApprove = const {};
   PaymentSummary? _summary;
   bool _loading = false;
   bool _runsLoading = false;
@@ -127,6 +129,35 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
       item.requiredMethod ?? _selection[item.id] ?? PaymentMethod.ach;
 
   int get selectedCount => _selection.length;
+  /// The caller's verdict on `POST /runs/{id}/approve` for each run that has
+  /// a CFO step ([PaymentRun.canTakeCfoApproval]), from the run detail's
+  /// `actions.approve`. The run list carries no such verdict, so it is read
+  /// per pending run — few: only over-threshold drafts not yet signed off. A
+  /// failed read leaves that run [ActionVerdict.unanswered], which offers
+  /// nothing (fail closed).
+  Future<Map<String, ActionVerdict>> _loadApproveVerdicts(
+    List<PaymentRun> runs,
+  ) async {
+    final pending = runs.where((r) => r.canTakeCfoApproval).toList();
+    final verdicts = await Future.wait(
+      pending.map((r) async {
+        try {
+          return (await PaymentApi.runDetail(r.id)).approve;
+        } catch (_) {
+          return ActionVerdict.unanswered;
+        }
+      }),
+    );
+    return {
+      for (var i = 0; i < pending.length; i++) pending[i].id: verdicts[i],
+    };
+  }
+
+  /// The caller's verdict on signing [runId] off as CFO —
+  /// [ActionVerdict.unanswered] for a run with no CFO step or none read.
+  ActionVerdict runApproveVerdict(String runId) =>
+      _runApprove[runId] ?? ActionVerdict.unanswered;
+
   bool get hasSelection => _selection.isNotEmpty;
 
   /// Drop all in-memory state. Called on logout / forced logout through
@@ -136,6 +167,7 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
   void reset() {
     _queue = [];
     _runs = [];
+    _runApprove = const {};
     _summary = null;
     _loading = false;
     _runsLoading = false;
@@ -301,7 +333,10 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
     try {
       final runs = await PaymentApi.runs();
       if (!_runsSeq.isCurrent(token)) return;
+      final approve = await _loadApproveVerdicts(runs);
+      if (!_runsSeq.isCurrent(token)) return;
       _runs = runs;
+      _runApprove = approve;
     } catch (e) {
       if (!_runsSeq.isCurrent(token)) return;
       _runsLoadError = e;

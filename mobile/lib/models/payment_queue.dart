@@ -467,10 +467,11 @@ class PaymentRun {
   /// execute will be refused until someone does.
   bool get awaitsCfoApproval => requiresCfoApproval && !cfoApproved;
 
-  /// Whether a sign-off is something this run can take now: a draft still
-  /// waiting on one. Mirrors the state guards on
-  /// `POST /api/payments/runs/{id}/approve` (draft, requires it, not yet
-  /// given); WHO may sign is the caller's role, checked beside this.
+  /// Whether the run HAS a CFO step to render a control for: a draft still
+  /// waiting on one (the web run dialog's `pendingCfo`). It only narrows which
+  /// runs the Runs tab asks about; whether THIS reader may sign is the run
+  /// detail's `actions.approve` verdict ([PaymentRunRecordDetail.approve]),
+  /// never a role or maker-checker check here.
   bool get canTakeCfoApproval => isDraft && awaitsCfoApproval;
 
   /// The two stored statuses a run can hold an open record-as-paid decision
@@ -516,25 +517,40 @@ const kExternalPaymentMethods = <String>[
   'card',
 ];
 
-/// A run's detail, as far as recording it outside FeohLedger needs:
-/// `GET /api/payments/runs/{id}`. [recordOutside] is the CALLER's verdict on
-/// `POST /runs/{id}/record-outside` (`run_action_refusals`, from the gate the
-/// endpoint raises from — issue #575), so the sheet offers the control from it
-/// and never restates maker-checker, CFO sign-off or the run's status.
+/// A run's detail, as far as the app's run decisions need:
+/// `GET /api/payments/runs/{id}`. Each verdict is the CALLER's, from
+/// `run_action_refusals` — the gate the endpoint raises from (issue #575) — so
+/// a control is offered from it and the app never restates maker-checker, the
+/// CFO role, CFO sign-off or the run's status:
+///
+/// * [recordOutside] — `POST /runs/{id}/record-outside`, read by the record
+///   sheet;
+/// * [approve] — `POST /runs/{id}/approve` (`payment_controls.
+///   run_approve_refusal` after `require_roles(ROLE_CFO)`), read by the Runs
+///   tab's "Approve as CFO".
 class PaymentRunRecordDetail {
   final PaymentRun run;
   final ActionVerdict recordOutside;
+  final ActionVerdict approve;
 
-  const PaymentRunRecordDetail({required this.run, required this.recordOutside});
+  const PaymentRunRecordDetail({
+    required this.run,
+    required this.recordOutside,
+    this.approve = ActionVerdict.unanswered,
+  });
 
   factory PaymentRunRecordDetail.fromJson(Map<String, dynamic> json) {
     final actions = json['actions'];
+    final verdicts =
+        actions is Map ? Map<String, dynamic>.from(actions) : null;
     return PaymentRunRecordDetail(
       run: PaymentRun.fromJson(json),
-      recordOutside: actions is Map
-          ? ActionVerdict.fromVerdicts(
-              Map<String, dynamic>.from(actions), 'record_outside')
-          : ActionVerdict.unanswered,
+      recordOutside: verdicts == null
+          ? ActionVerdict.unanswered
+          : ActionVerdict.fromVerdicts(verdicts, 'record_outside'),
+      approve: verdicts == null
+          ? ActionVerdict.unanswered
+          : ActionVerdict.fromVerdicts(verdicts, 'approve'),
     );
   }
 }

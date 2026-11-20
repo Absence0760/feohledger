@@ -722,13 +722,9 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     final l = AppLocalizations.of(context);
     final store = PaymentQueueStore.instance;
     final manageDraft = _canManage && run.isExecutable;
+    final approve = _approveItem(l, run);
     final items = <PopupMenuEntry<String>>[
-      // CFO sign-off. Offered only to the one role the backend accepts
-      // (`require_roles(ROLE_CFO)`) and only while the run is actually waiting
-      // on it — otherwise the person reading "needs CFO approval" is the
-      // person who can't act on it, which is exactly the gap this closes.
-      if (manageDraft && _canApproveRun(run))
-        PopupMenuItem(value: 'approve', child: Text(l.payRunActionApprove)),
+      ?approve,
       // Execute only where FeohLedger SENDS payments — the server's execution
       // mode, failing closed while it is unknown. On a record-only tenant the
       // endpoint answers `payments_record_only`, so the control could only
@@ -756,11 +752,43 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     );
   }
 
-  /// Whether the signed-in user can sign this run off: the backend's
-  /// `require_roles(ROLE_CFO)` on `POST /api/payments/runs/{id}/approve`
-  /// (the role) and its state guards ([PaymentRun.canTakeCfoApproval]).
-  bool _canApproveRun(PaymentRun run) =>
-      AuthStore.instance.canApprovePaymentRun && run.canTakeCfoApproval;
+  /// CFO sign-off, from the server's verdict ([PaymentQueueStore.
+  /// runApproveVerdict] — the run detail's `actions.approve`), never a role or
+  /// maker-checker check here. [PaymentRun.canTakeCfoApproval] decides only
+  /// whether the run HAS a CFO step to render a control for (the web run
+  /// dialog's `pendingCfo`). A role refusal (`role_not_permitted`: anyone not
+  /// a CFO, admins included) hides it; any other refusal — the CFO who
+  /// created the run (maker-checker) — renders it disabled with the reason,
+  /// as the web does, instead of an Approve that can only 403.
+  PopupMenuEntry<String>? _approveItem(AppLocalizations l, PaymentRun run) {
+    if (!run.canTakeCfoApproval) return null;
+    final verdict = PaymentQueueStore.instance.runApproveVerdict(run.id);
+    if (!verdict.isOffered()) return null;
+    if (verdict.allowed) {
+      return PopupMenuItem(value: 'approve', child: Text(l.payRunActionApprove));
+    }
+    final reason = localizeCodedRefusal(l, verdict.refusal) ??
+        (verdict.refusal?['message'] as String? ?? '');
+    return PopupMenuItem(
+      value: 'approve',
+      enabled: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(l.payRunActionApprove),
+          if (reason.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                reason,
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _runMenuAction(PaymentRun run, String action) async {
     final l = AppLocalizations.of(context);

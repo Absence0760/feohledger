@@ -85,15 +85,11 @@ class AuthStore extends ChangeNotifier {
   // (same as viewing payments). CFO sign-off on over-threshold runs is a
   // separate server-side gate surfaced via `requires_cfo_approval`.
   bool get canManagePayments => isAdmin || isManager || isCfo;
-  // CFO sign-off on an over-threshold payment run — mirrors the backend
-  // `require_roles(ROLE_CFO)` on POST /api/payments/runs/{id}/approve. This is
-  // deliberately the STRICT cfo role, not `canManagePayments` and not "admin
-  // counts as CFO": `require_roles` does not special-case admin, so an admin
-  // without the cfo role would see the control and get a 403 on every tap —
-  // and widening the backend isn't the fix, because a sign-off an admin can
-  // grant themselves is not a sign-off. Mirrors the web app's
-  // `auth.hasRole('cfo')` on the same button.
-  bool get canApprovePaymentRun => isCfo;
+  // CFO sign-off on an over-threshold payment run has no getter here: the
+  // Runs tab offers it from the run detail's `actions.approve` verdict, which
+  // carries the strict cfo role AND maker-checker (the CFO who created the
+  // run is refused) — a role check alone offered that CFO an Approve that
+  // could only 403.
   // Recording a payment made outside FeohLedger — `POST
   // /api/payments/record-outside` is require_permission(PERM_PAYMENT_RECORD_
   // EXTERNAL), held by admin / ap_manager / cfo by default and grantable to a
