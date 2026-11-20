@@ -666,6 +666,13 @@
 							blocked={it.payments_blocked}
 							adverseMedia={it.adverse_media}
 						/>
+						{#if it.adjudication}
+							<Badge tone="accent" variant="adjudicated">
+								<span data-testid="screening-row-adjudicated">
+									{m('vendors.screening.queue.adjudication.badge')}
+								</span>
+							</Badge>
+						{/if}
 					</td>
 					<td class="muted">{it.latest_matched_list ?? '—'}</td>
 					<td class="muted">{it.latest_provider ?? '—'}</td>
@@ -817,14 +824,22 @@
 							<span>{m('vendors.screening.queue.adjudication.revokeReasonLabel')}</span>
 							<textarea
 								rows="2"
+								minlength="3"
 								maxlength="2000"
+								aria-describedby="adjudication-revoke-hint"
 								bind:value={adjudicationReason}
 								disabled={!isAllowed(selected.revoke_adjudication_refusal)}
 							></textarea>
 						</label>
+						<p class="muted" id="adjudication-revoke-hint">
+							{m('vendors.screening.queue.adjudication.reasonHint')}
+						</p>
 						<button
 							class="btn-secondary"
 							data-testid="screening-adjudication-revoke"
+							aria-describedby={isAllowed(selected.revoke_adjudication_refusal)
+								? undefined
+								: 'adjudication-revoke-refusal'}
 							onclick={() => submitAdjudication('revoke')}
 							disabled={!isAllowed(selected.revoke_adjudication_refusal) ||
 								selectedBusy !== null ||
@@ -835,7 +850,13 @@
 								: m('vendors.screening.queue.adjudication.revoke')}
 						</button>
 						{#if !isAllowed(selected.revoke_adjudication_refusal)}
-							<p class="muted">{refusalText(selected.revoke_adjudication_refusal ?? null, m)}</p>
+							<p
+								class="muted"
+								id="adjudication-revoke-refusal"
+								data-testid="screening-adjudication-revoke-refusal"
+							>
+								{refusalText(selected.revoke_adjudication_refusal ?? null, m)}
+							</p>
 						{/if}
 					{/if}
 				{:else}
@@ -846,13 +867,22 @@
 							rows="2"
 							maxlength="2000"
 							placeholder={m('vendors.screening.queue.adjudication.reasonPlaceholder')}
+							minlength="3"
+							aria-describedby="adjudication-reason-hint"
+							data-testid="screening-adjudication-reason"
 							bind:value={adjudicationReason}
 							disabled={!isAllowed(selected.adjudicate_refusal)}
 						></textarea>
 					</label>
+					<p class="muted" id="adjudication-reason-hint">
+						{m('vendors.screening.queue.adjudication.reasonHint')}
+					</p>
 					<button
 						class="btn-primary"
 						data-testid="screening-adjudication-submit"
+						aria-describedby={isAllowed(selected.adjudicate_refusal)
+							? undefined
+							: 'adjudication-refusal'}
 						onclick={() => submitAdjudication('adjudicate')}
 						disabled={!isAllowed(selected.adjudicate_refusal) ||
 							selectedBusy !== null ||
@@ -863,7 +893,7 @@
 							: m('vendors.screening.queue.adjudication.adjudicate')}
 					</button>
 					{#if !isAllowed(selected.adjudicate_refusal)}
-						<p class="muted" data-testid="screening-adjudication-refusal">
+						<p class="muted" id="adjudication-refusal" data-testid="screening-adjudication-refusal">
 							{refusalText(selected.adjudicate_refusal ?? null, m)}
 						</p>
 					{/if}

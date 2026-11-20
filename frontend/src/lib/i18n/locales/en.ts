@@ -1491,6 +1491,8 @@ export const en = {
 	'vendors.screening.queue.adjudication.cleared': 'Adjudicated as a false positive on {date}',
 	'vendors.screening.queue.adjudication.adjudicated': 'Screen result adjudicated as a false positive.',
 	'vendors.screening.queue.adjudication.revoked': 'Adjudication revoked. The screen result holds the vendor again.',
+	'vendors.screening.queue.adjudication.reasonHint': 'At least 3 characters.',
+	'vendors.screening.queue.adjudication.badge': 'Adjudicated',
 	'vendors.screening.queue.adjudication.failed': 'Could not save the adjudication.',
 	'vendors.screening.queue.action.confirmUnblock': 'Confirm unblock',
 	'vendors.screening.queue.action.working': 'Working…',

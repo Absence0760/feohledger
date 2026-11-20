@@ -1371,6 +1371,8 @@ export const messages = {
 	'vendors.screening.queue.adjudication.cleared': 'Am {date} als Fehlalarm beurteilt',
 	'vendors.screening.queue.adjudication.adjudicated': 'Prüfergebnis als Fehlalarm beurteilt.',
 	'vendors.screening.queue.adjudication.revoked': 'Beurteilung widerrufen. Das Prüfergebnis sperrt den Lieferanten wieder.',
+	'vendors.screening.queue.adjudication.reasonHint': 'Mindestens 3 Zeichen.',
+	'vendors.screening.queue.adjudication.badge': 'Beurteilt',
 	'vendors.screening.queue.adjudication.failed': 'Die Beurteilung konnte nicht gespeichert werden.',
 	'vendors.screening.queue.action.confirmUnblock': 'Freigabe bestätigen',
 	'vendors.screening.queue.action.working': 'Wird ausgeführt…',

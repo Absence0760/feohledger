@@ -1351,6 +1351,8 @@ export const messages = {
 	'vendors.screening.queue.adjudication.cleared': '{date} に誤検知と判定済み',
 	'vendors.screening.queue.adjudication.adjudicated': 'スクリーニング結果を誤検知と判定しました。',
 	'vendors.screening.queue.adjudication.revoked': '判定を取り消しました。スクリーニング結果により仕入先は再び保留されます。',
+	'vendors.screening.queue.adjudication.reasonHint': '3文字以上で入力してください。',
+	'vendors.screening.queue.adjudication.badge': '判定済み',
 	'vendors.screening.queue.adjudication.failed': '判定を保存できませんでした。',
 	'vendors.screening.queue.action.confirmUnblock': 'ブロック解除を確定',
 	'vendors.screening.queue.action.working': '処理中…',

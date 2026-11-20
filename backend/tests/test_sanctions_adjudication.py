@@ -760,3 +760,40 @@ async def test_the_run_gate_keeps_a_sticky_block_on_an_adjudicated_match(realdb)
     inv_id = await _invoice_for(mk, info.org_id, vendor_id)
     assert (await _adjudicate(realdb, vendor_id)).status_code == 201
     assert await _run_gate_hold(mk, inv_id) == "payments_blocked"
+
+
+# ---------------------------------------------------------------------------
+# A material edit uncovers the vendor before the re-screen, so a failed
+# re-screen leaves the hold standing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_edit_whose_rescreen_fails_leaves_the_hold_standing(realdb):
+    from unittest.mock import AsyncMock, patch
+
+    from app.services import vendor_screening as vendor_screening_module
+
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id = await _create_vendor(realdb, "Adverse Media Test Co")
+    inv_id = await _invoice_for(mk, info.org_id, vendor_id)
+    assert (await _adjudicate(realdb, vendor_id)).status_code == 201
+    assert await _erp_hold(mk, inv_id) is None
+
+    with patch.object(
+        vendor_screening_module,
+        "screen_vendor_record",
+        AsyncMock(side_effect=RuntimeError("provider down")),
+    ):
+        async with realdb.client(key=TENANT, role="ap_manager") as c:
+            res = await c.patch(f"/api/vendors/{vendor_id}", json={"tax_id": "98-7654321"})
+    assert res.status_code == 200, res.text
+
+    async with mk() as s:
+        vendor = await s.get(Vendor, vendor_id)
+        assert vendor.screening_adjudication_id is None
+        assert vendor.screening_status == "review"
+    assert await _erp_hold(mk, inv_id) == "sanctions_review"
+    changes = await _audit(mk, vendor_id, CLEARANCE_CHANGED_ACTION)
+    assert any(c.details.get("trigger") == "material_edit" for c in changes)
