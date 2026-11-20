@@ -110,6 +110,7 @@ mobile/
 │       ├── contract_list_tile.dart    # Contract row with number/title, vendor, value, status
 │       ├── contract_status_badge.dart # Colored contract status chip (draft/active/expired/terminated/cancelled)
 │       ├── status_badge.dart    # Colored invoice status chip
+│       ├── status_pill.dart     # `StatusPill(label, tone, semanticsLabel)` — the one status chip every badge above renders; a fixed `StatusTone` set, each with an opaque background and a text colour computed to ≥4.5:1 (`test/widgets/status_pill_test.dart`)
 │       ├── exception_status_badge.dart # Colored exception status chip (open/escalated/resolved/dismissed)
 │       ├── exception_list_tile.dart    # Exception row with type, invoice, severity, status
 │       ├── notification_list_tile.dart # Notification row — unread dot, title, body, event label + relative time; one merged Semantics label

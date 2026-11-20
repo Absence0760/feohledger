@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
+import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/vendor.dart';
 import 'package:feohledger_mobile/widgets/vendor_status_badge.dart';
 
@@ -11,22 +13,23 @@ class VendorListTile extends StatelessWidget {
 
   // One sensible screen-reader announcement for the whole row instead of
   // walking each disjoint span (WCAG 1.3.1 / 4.1.2).
-  String get _semanticLabel {
+  String _semanticLabel(AppLocalizations l) {
     final parts = <String>[
       vendor.name,
-      if (vendor.code != null && vendor.code!.isNotEmpty) 'code ${vendor.code}',
-      vendor.status.label,
-      '${vendor.invoiceCount} '
-          '${vendor.invoiceCount == 1 ? 'invoice' : 'invoices'}',
-      'source ${vendor.sourceLabel}',
+      if (vendor.code != null && vendor.code!.isNotEmpty)
+        l.listRowVendorCode(vendor.code!),
+      vendorStatusLabel(l, vendor.status),
+      l.listRowInvoiceCount(vendor.invoiceCount),
+      l.listRowVendorSource(vendorSourceLabel(l, vendor.source)),
     ];
     return parts.join(', ');
   }
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Semantics(
-      label: _semanticLabel,
+      label: _semanticLabel(l),
       button: onTap != null,
       excludeSemantics: true,
       child: ListTile(
@@ -57,14 +60,14 @@ class VendorListTile extends StatelessWidget {
               ],
               Flexible(
                 child: Text(
-                  vendor.email ?? vendor.sourceLabel,
+                  vendor.email ?? vendorSourceLabel(l, vendor.source),
                   style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               const Spacer(),
               Text(
-                '${vendor.invoiceCount} inv',
+                l.listRowInvoiceCountShort(vendor.invoiceCount),
                 style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
               ),
             ],

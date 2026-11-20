@@ -298,7 +298,10 @@ Follow these conventions on every new screen/widget:
   approvals swipe-approve.
 - **Colour contrast ≥4.5:1.** Status/payment badges render the text in a
   *darkened* variant (`.shade700`/`.shade800`/`.shade900`) of the accent over
-  the 0.15-alpha tint — the full-saturation hue fails AA. Muted text uses
+  the 0.15-alpha tint — the full-saturation hue fails AA. A new status chip
+  is a `StatusPill` (`lib/widgets/status_pill.dart`) with one of its fixed
+  `StatusTone`s, never another hand-built pill: each tone's pair is computed
+  in `test/widgets/status_pill_test.dart`. Muted text uses
   `Theme.of(context).colorScheme.onSurfaceVariant` (it tracks light / dark;
   a fixed grey does not), never `grey.shade500`/`shade600`. Compute any
   hand-picked pair: the amber stale banner's `amber.shade900` on

@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
@@ -130,7 +131,7 @@ class ErpStatusPanel extends StatelessWidget {
     }
     if (rows.isEmpty && reference == null) {
       // ERP-bound status but no audit detail yet (e.g. sending in flight).
-      addRow(l.erpStatusStatus, invoice.status.label);
+      addRow(l.erpStatusStatus, invoiceStatusLabel(l, invoice.status));
     }
 
     final header = Row(

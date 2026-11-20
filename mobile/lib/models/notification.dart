@@ -38,6 +38,7 @@ class AppNotification {
   bool get linksToInvoice => entityType == 'invoice' && entityId != null;
 
   /// Human-readable label for the originating event.
+  @Deprecated('use enum_labels')
   String get eventLabel => switch (eventType) {
         'invoice_assigned' => 'Invoice assigned',
         'invoice_approved' => 'Invoice approved',

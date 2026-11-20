@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
+import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/notification.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 
@@ -16,34 +18,35 @@ class NotificationListTile extends StatelessWidget {
     this.onTap,
   });
 
-  /// "5m ago" / "3h ago" / "2d ago" / "Mar 4, 2026" — friendly recency without
-  /// pulling in a dependency, matching the list-tile date style elsewhere.
-  String _relativeTime() {
+  /// "5 minutes ago" / "3 hours ago" / "2 days ago" (ICU plurals, so each
+  /// locale inflects the count), then a localized date past a week.
+  String _relativeTime(AppLocalizations l) {
     final delta = DateTime.now().difference(notification.createdAt);
-    if (delta.inMinutes < 1) return 'just now';
-    if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
-    if (delta.inHours < 24) return '${delta.inHours}h ago';
-    if (delta.inDays < 7) return '${delta.inDays}d ago';
+    if (delta.inMinutes < 1) return l.relativeTimeJustNow;
+    if (delta.inMinutes < 60) return l.relativeTimeMinutesAgo(delta.inMinutes);
+    if (delta.inHours < 24) return l.relativeTimeHoursAgo(delta.inHours);
+    if (delta.inDays < 7) return l.relativeTimeDaysAgo(delta.inDays);
     return formatDate(notification.createdAt.toLocal());
   }
 
-  String get _semanticLabel {
+  String _semanticLabel(AppLocalizations l) {
     final parts = <String>[
-      if (!notification.isRead) 'Unread',
-      notification.eventLabel,
+      if (!notification.isRead) l.notificationUnread,
+      notificationEventLabel(l, notification.eventType),
       notification.title,
       if (notification.body != null && notification.body!.isNotEmpty)
         notification.body!,
-      _relativeTime(),
+      _relativeTime(l),
     ];
     return parts.join(', ');
   }
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     final unread = !notification.isRead;
     return Semantics(
-      label: _semanticLabel,
+      label: _semanticLabel(l),
       button: onTap != null,
       excludeSemantics: true,
       child: ListTile(
@@ -83,7 +86,7 @@ class NotificationListTile extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    notification.eventLabel,
+                    notificationEventLabel(l, notification.eventType),
                     style: TextStyle(
                       color: Colors.grey.shade700,
                       fontSize: 12,
@@ -92,7 +95,7 @@ class NotificationListTile extends StatelessWidget {
                   ),
                   const Spacer(),
                   Text(
-                    _relativeTime(),
+                    _relativeTime(l),
                     style: TextStyle(
                       color: Colors.grey.shade700,
                       fontSize: 12,

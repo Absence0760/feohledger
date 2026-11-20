@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/notifications_screen.dart';
 import 'package:feohledger_mobile/stores/notification_store.dart';
 
@@ -37,10 +38,11 @@ class _NotificationBellState extends State<NotificationBell> {
     return ListenableBuilder(
       listenable: NotificationStore.instance,
       builder: (context, _) {
+        final l = AppLocalizations.of(context);
         final unread = NotificationStore.instance.unread;
         final label = unread > 0
-            ? 'Notifications, $unread unread'
-            : 'Notifications';
+            ? l.notificationBellUnread(unread)
+            : l.notificationsTitle;
         // Merge into one node and exclude the inner IconButton/Badge semantics
         // (the Badge count + the IconButton tooltip would otherwise produce
         // competing labels) so screen readers announce one sensible phrase that
@@ -51,7 +53,7 @@ class _NotificationBellState extends State<NotificationBell> {
           container: true,
           excludeSemantics: true,
           child: IconButton(
-            tooltip: 'Notifications',
+            tooltip: l.notificationsTitle,
             onPressed: _open,
             icon: unread > 0
                 ? Badge(

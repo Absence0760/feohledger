@@ -23,6 +23,7 @@ enum ApExceptionStatus {
     );
   }
 
+  @Deprecated('use enum_labels')
   String get label => switch (this) {
     ApExceptionStatus.open => 'Open',
     ApExceptionStatus.escalated => 'Escalated',
@@ -52,6 +53,7 @@ enum ApExceptionSeverity {
     );
   }
 
+  @Deprecated('use enum_labels')
   String get label => switch (this) {
     ApExceptionSeverity.error => 'Error',
     ApExceptionSeverity.warning => 'Warning',
