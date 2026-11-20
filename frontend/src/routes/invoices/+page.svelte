@@ -1129,7 +1129,7 @@
 			<MenuButton
 				label={m('invoices.bulk.export')}
 				items={BULK_EXPORT_FORMATS}
-				disabled={bulkBusy}
+				busy={bulkBusy}
 				onselect={(format) => bulkExport(format)}
 				testId="invoices-bulk-export"
 			/>
