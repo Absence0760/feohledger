@@ -205,7 +205,11 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
   column; the badge "En attente d’approbation" ≈190px in 150px). In a `fixed`
   table DataTable lets each `<th>` wrap, so a header column needs only its
   longest single *word* in any of the six catalogues
-  (`src/lib/i18n/locales/*.ts`). A `<Badge>` never wraps, so a status column
+  (`src/lib/i18n/locales/*.ts`). That holds for a fluid column too: the
+  columns without a width share what the `min-width` leaves, so give a
+  second fluid column a width of its own when that share is narrower than its
+  longest header word (/requisitions' "Departamento", 127px in a 120px
+  share). A `<Badge>` never wraps, so a status column
   is sized to its longest badge label in any locale, plus the cell padding.
   **Action columns wrap too:** in a `fixed` table `td.actions` is
   `white-space: normal`, so when a row's buttons don't fit — another locale, or
