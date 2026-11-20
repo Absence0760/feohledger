@@ -133,8 +133,31 @@ MockClient _screenClient({
   String summaryCurrency = 'USD',
   String? mode = 'processor',
   Map<String, dynamic>? runDetail,
+}) =>
+    MockClient(
+      _screenHandler(
+        queue: queue,
+        runs: runs,
+        onPost: onPost,
+        summaryCurrency: summaryCurrency,
+        mode: mode,
+        runDetail: runDetail,
+      ),
+    );
+
+/// [_screenClient]'s responses as a bare handler, for a test that overrides
+/// one route and delegates the rest. Delegating through a second
+/// `MockClient.send` instead re-finalizes the already-sent request and every
+/// delegated read fails with "Can't finalize a finalized Request".
+MockClientHandler _screenHandler({
+  List<Map<String, dynamic>>? queue,
+  List<Map<String, dynamic>>? runs,
+  http.Response Function(http.Request req)? onPost,
+  String summaryCurrency = 'USD',
+  String? mode = 'processor',
+  Map<String, dynamic>? runDetail,
 }) {
-  return MockClient((req) async {
+  return (req) async {
     if (req.method == 'POST') {
       return onPost?.call(req) ?? _json({'message': 'ok'});
     }
@@ -158,7 +181,7 @@ MockClient _screenClient({
       return _json({'items': items, 'total': items.length});
     }
     return _json({});
-  });
+  };
 }
 
 Future<void> _pumpUntil(WidgetTester tester, Finder finder) async {
@@ -297,14 +320,14 @@ void main() {
   testWidgets('a failed queue load says why and offers Retry, which reloads',
       (tester) async {
     var fail = true;
-    final ok = _screenClient(queue: [_queueItem('1')]);
+    final ok = _screenHandler(queue: [_queueItem('1')]);
     await loginThen(
       ['ap_manager'],
       MockClient((req) async {
         if (fail && req.url.path.endsWith('/payments/queue')) {
           return _json({'detail': 'Queue unavailable'}, 503);
         }
-        return ok.send(req).then(http.Response.fromStream);
+        return ok(req);
       }),
     );
 
@@ -328,14 +351,14 @@ void main() {
 
   testWidgets('a failed runs load is the Runs tab\'s error, not the queue\'s',
       (tester) async {
-    final ok = _screenClient(queue: [_queueItem('1')]);
+    final ok = _screenHandler(queue: [_queueItem('1')]);
     await loginThen(
       ['ap_manager'],
       MockClient((req) async {
         if (req.url.path.contains('/payments/runs')) {
           return _json({'detail': 'Runs unavailable'}, 503);
         }
-        return ok.send(req).then(http.Response.fromStream);
+        return ok(req);
       }),
     );
 
