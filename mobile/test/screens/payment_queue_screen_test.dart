@@ -126,9 +126,26 @@ Map<String, dynamic> _runResponse({
 /// `GET /api/payments/runs/{id}` for a run awaiting CFO sign-off, carrying
 /// the caller's `actions.approve` verdict (`run_action_refusals`):
 /// `null` = the server would accept, a map = the coded refusal it would answer.
-Map<String, dynamic> _pendingCfoDetail(Map<String, dynamic>? approve) => {
+/// Execute and Cancel are accepted unless [execute] says otherwise.
+Map<String, dynamic> _pendingCfoDetail(
+  Map<String, dynamic>? approve, {
+  Map<String, dynamic>? execute,
+}) =>
+    {
       ..._runResponse(requiresCfoApproval: true),
-      'actions': {'approve': approve},
+      'actions': {'approve': approve, 'execute': execute, 'cancel': null},
+    };
+
+/// `GET /api/payments/runs/{id}` for a draft run with the caller's
+/// `actions.execute` / `.cancel` verdicts.
+Map<String, dynamic> _draftDetail({
+  Map<String, dynamic>? execute,
+  Map<String, dynamic>? cancel,
+  bool requiresCfoApproval = false,
+}) =>
+    {
+      ..._runResponse(requiresCfoApproval: requiresCfoApproval),
+      'actions': {'execute': execute, 'cancel': cancel},
     };
 
 /// `actions.approve` for a caller without the cfo role (`holds_any_role`).
@@ -141,6 +158,10 @@ const _roleRefused = {
 /// `GET /api/payments/execution-mode`'s `mode`. Defaults to `processor` so the
 /// screen's Execute tests keep reading a tenant FeohLedger sends payments for;
 /// `null` makes the read fail, which must hide Execute (fail closed).
+///
+/// `GET /api/payments/runs/{id}` answers [runDetail] when given; otherwise the
+/// listed run with Execute and Cancel accepted (`actions.execute` /
+/// `.cancel` null) and no other verdict, or a 503 when [runDetailFails].
 MockClient _screenClient({
   List<Map<String, dynamic>>? queue,
   List<Map<String, dynamic>>? runs,
@@ -148,6 +169,7 @@ MockClient _screenClient({
   String summaryCurrency = 'USD',
   String? mode = 'processor',
   Map<String, dynamic>? runDetail,
+  bool runDetailFails = false,
 }) =>
     MockClient(
       _screenHandler(
@@ -157,6 +179,7 @@ MockClient _screenClient({
         summaryCurrency: summaryCurrency,
         mode: mode,
         runDetail: runDetail,
+        runDetailFails: runDetailFails,
       ),
     );
 
@@ -171,6 +194,7 @@ MockClientHandler _screenHandler({
   String summaryCurrency = 'USD',
   String? mode = 'processor',
   Map<String, dynamic>? runDetail,
+  bool runDetailFails = false,
 }) {
   return (req) async {
     if (req.method == 'POST') {
@@ -182,8 +206,18 @@ MockClientHandler _screenHandler({
           ? _json({'detail': 'unavailable'}, 503)
           : _json({'mode': mode, 'reason': 'configured'});
     }
-    if (runDetail != null && RegExp(r'/payments/runs/[^/]+$').hasMatch(path)) {
-      return _json(runDetail);
+    final detailOf = RegExp(r'/payments/runs/([^/]+)$').firstMatch(path);
+    if (detailOf != null) {
+      if (runDetailFails) return _json({'detail': 'unavailable'}, 503);
+      if (runDetail != null) return _json(runDetail);
+      final listed = (runs ?? const <Map<String, dynamic>>[])
+          .where((r) => r['id'] == detailOf.group(1));
+      if (listed.isNotEmpty) {
+        return _json({
+          ...listed.first,
+          'actions': {'execute': null, 'cancel': null},
+        });
+      }
     }
     if (path.endsWith('/payments/queue')) {
       return _queueResponse(queue ?? [_queueItem('1')]);
@@ -408,14 +442,25 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
     }
 
-    testWidgets('a run awaiting sign-off is flagged and Execute never reaches '
-        'the server', (tester) async {
+    // The CFO wait is the server's `actions.execute` refusal
+    // (`payment_run_awaiting_cfo`), not a client pre-flight: Execute renders
+    // disabled with the localized reason and nothing reaches the server.
+    testWidgets('a run awaiting sign-off is flagged and Execute is disabled '
+        'with the server reason', (tester) async {
       var executeCalls = 0;
       await loginThen(
         ['ap_manager'],
         _screenClient(
           queue: [],
           runs: [_runResponse(requiresCfoApproval: true)],
+          runDetail: _draftDetail(
+            requiresCfoApproval: true,
+            execute: {
+              'code': 'payment_run_awaiting_cfo',
+              'message': 'server english',
+              'params': <String, dynamic>{},
+            },
+          ),
           onPost: (req) {
             if (req.url.path.endsWith('/execute')) executeCalls++;
             return _json({'message': 'ok'});
@@ -430,15 +475,22 @@ void main() {
 
       await tester.tap(find.byType(PopupMenuButton<String>));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Execute'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 400));
-
-      expect(executeCalls, 0, reason: 'the pre-flight gate must short-circuit');
+      final item = find.ancestor(
+        of: find.text('Execute'),
+        matching: find.byType(PopupMenuItem<String>),
+      );
+      expect(tester.widget<PopupMenuItem<String>>(item).enabled, isFalse);
       expect(
-        find.text('This run needs CFO approval before it can be executed.'),
+        find.text("This run exceeds the organization's CFO-approval threshold "
+            'and is awaiting sign-off from a user with the CFO role.'),
         findsOneWidget,
       );
+      expect(find.text('server english'), findsNothing);
+
+      await tester.tap(find.text('Execute'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.text('Execute payment run?'), findsNothing);
+      expect(executeCalls, 0);
     });
 
     testWidgets('a signed-off run executes normally', (tester) async {
@@ -483,9 +535,9 @@ void main() {
         ['ap_manager'],
         _screenClient(
           queue: [],
-          // The server says sign-off is not required (e.g. the threshold moved
-          // after the run was drafted), so the pre-flight gate lets it through
-          // and the refusal comes back over the wire.
+          // The detail read accepted Execute, but the state moved between the
+          // read and the tap (e.g. the threshold changed), so the refusal
+          // comes back over the wire.
           runs: [_runResponse()],
           onPost: (req) {
             if (req.url.path.endsWith('/execute')) {
@@ -815,8 +867,8 @@ void main() {
 
     testWidgets('no verdict (the detail read failed) offers no sign-off',
         (tester) async {
-      // No `runDetail`: `GET /runs/{id}` answers without `actions`, so the
-      // verdict is unanswered and the screen fails closed.
+      // No `runDetail`: `GET /runs/{id}` answers with no `actions.approve`,
+      // so that verdict is unanswered and the screen fails closed on it.
       await loginThen(
         ['cfo'],
         _screenClient(
@@ -831,6 +883,159 @@ void main() {
 
       expect(find.text('Approve as CFO'), findsNothing);
       expect(find.text('Execute'), findsOneWidget);
+    });
+  });
+
+  // Execute and Cancel are offered from the run detail's `actions.execute` /
+  // `.cancel` (`run_action_refusals`), never from `canManagePayments` and the
+  // run's status: a role refusal hides the item, any other refusal renders it
+  // disabled with the reason, and no verdict offers nothing.
+  group('run Execute / Cancel verdicts', () {
+    Future<void> openRunsTab(WidgetTester tester) async {
+      await _pumpUntil(tester, find.text('Runs'));
+      await tester.tap(find.text('Runs'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Future<void> openRunMenu(WidgetTester tester) async {
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+    }
+
+    PopupMenuItem<String> itemFor(WidgetTester tester, String label) =>
+        tester.widget<PopupMenuItem<String>>(
+          find.ancestor(
+            of: find.text(label),
+            matching: find.byType(PopupMenuItem<String>),
+          ),
+        );
+
+    testWidgets('the creator of a run sees Execute disabled with the '
+        'maker-checker reason, and Cancel still enabled', (tester) async {
+      var executeCalls = 0;
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(
+          queue: [],
+          runs: [_runResponse()],
+          runDetail: _draftDetail(
+            execute: {
+              'code': 'payment_run_segregation',
+              'message': 'server english',
+              'params': {'step': 'execute'},
+            },
+          ),
+          onPost: (req) {
+            if (req.url.path.endsWith('/execute')) executeCalls++;
+            return _json({'message': 'ok'});
+          },
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await openRunsTab(tester);
+      await openRunMenu(tester);
+
+      expect(itemFor(tester, 'Execute').enabled, isFalse);
+      expect(
+        find.text(
+          'Segregation of duties: the user who created this payment run '
+          'cannot also approve or execute it. A different user must.',
+        ),
+        findsOneWidget,
+      );
+      expect(itemFor(tester, 'Cancel').enabled, isTrue);
+
+      await tester.tap(find.text('Execute'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.text('Execute payment run?'), findsNothing);
+      expect(executeCalls, 0);
+    });
+
+    testWidgets('a reader whose role may do neither sees neither',
+        (tester) async {
+      const role = {
+        'code': 'role_not_permitted',
+        'message': 'Your role does not permit this action',
+        'params': <String, dynamic>{},
+      };
+      await loginThen(
+        ['cfo'],
+        _screenClient(
+          queue: [],
+          runs: [_runResponse()],
+          runDetail: _draftDetail(execute: role, cancel: role),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await openRunsTab(tester);
+
+      // Nothing to offer, so no menu at all.
+      expect(find.byType(PopupMenuButton<String>), findsNothing);
+    });
+
+    testWidgets('a run that left draft since the list was read offers neither',
+        (tester) async {
+      const notDraft = {
+        'code': 'payment_run_not_draft',
+        'message': "Can only execute 'draft' runs, not 'executing'",
+        'params': <String, dynamic>{},
+      };
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(
+          queue: [],
+          runs: [_runResponse()],
+          runDetail: _draftDetail(execute: notDraft, cancel: notDraft),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await openRunsTab(tester);
+
+      expect(find.byType(PopupMenuButton<String>), findsNothing);
+    });
+
+    testWidgets('no verdict (the detail read failed) offers neither',
+        (tester) async {
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(queue: [], runs: [_runResponse()], runDetailFails: true),
+      );
+
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await openRunsTab(tester);
+
+      // The run still lists; only its controls are withheld.
+      expect(find.text('Draft'), findsOneWidget);
+      expect(find.byType(PopupMenuButton<String>), findsNothing);
+    });
+
+    testWidgets('an accepted Cancel posts /cancel', (tester) async {
+      final posted = <String>[];
+      await loginThen(
+        ['ap_manager'],
+        _screenClient(
+          queue: [],
+          runs: [_runResponse()],
+          onPost: (req) {
+            posted.add(req.url.path);
+            return _json({'message': 'Payment run cancelled'});
+          },
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await openRunsTab(tester);
+      await openRunMenu(tester);
+      expect(itemFor(tester, 'Execute').enabled, isTrue);
+      await tester.tap(find.text('Cancel'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(posted, ['/api/payments/runs/run1/cancel']);
     });
   });
 

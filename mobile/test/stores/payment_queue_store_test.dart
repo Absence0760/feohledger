@@ -555,6 +555,145 @@ void main() {
   // The no-rail pilot (issue #517, backend decisions §251): the store mirrors
   // the server's execution mode, failing closed, and drives the two record
   // doors the web payments page calls.
+  // The Runs tab's Execute / Cancel / "Approve as CFO" are offered from the
+  // run detail's `actions` (`run_action_refusals`), read per DRAFT run because
+  // the run list carries none of them.
+  group('run verdicts', () {
+    Map<String, dynamic> run(String id, String status) => {
+          'id': id,
+          'status': status,
+          'total_amount': '10.00',
+          'currency': 'USD',
+          'payment_count': 1,
+          'requires_cfo_approval': true,
+          'cfo_approved_at': null,
+          'created_at': '2026-01-10T12:00:00',
+        };
+    const segregation = {
+      'code': 'payment_run_segregation',
+      'message': 'm',
+      'params': {'step': 'execute'},
+    };
+    const role = {'code': 'role_not_permitted', 'message': 'm'};
+
+    MockClient client({
+      required List<Map<String, dynamic>> runs,
+      required Map<String, http.Response Function()> details,
+      List<String>? read,
+    }) =>
+        MockClient((req) async {
+          final path = req.url.path;
+          final m = RegExp(r'/payments/runs/([^/]+)$').firstMatch(path);
+          if (m != null) {
+            read?.add(m.group(1)!);
+            final answer = details[m.group(1)];
+            return answer == null ? _json({'detail': 'nope'}, 404) : answer();
+          }
+          return _json({'items': runs, 'total': runs.length, 'page': 1});
+        });
+
+    test('each draft run carries its own execute / cancel / approve verdict',
+        () async {
+      final read = <String>[];
+      ApiClient().debugConfigure(
+        client: client(
+          runs: [run('mine', 'draft'), run('theirs', 'draft')],
+          read: read,
+          details: {
+            // The creator: maker-checker refuses execute and approve.
+            'mine': () => _json({
+                  ...run('mine', 'draft'),
+                  'actions': {
+                    'approve': segregation,
+                    'execute': segregation,
+                    'cancel': null,
+                  },
+                }),
+            // A colleague holding no payment.execute / cfo role.
+            'theirs': () => _json({
+                  ...run('theirs', 'draft'),
+                  'actions': {'approve': role, 'execute': role, 'cancel': null},
+                }),
+          },
+        ),
+      );
+      await store.fetchRuns();
+
+      expect(read.toSet(), {'mine', 'theirs'});
+      expect(store.runExecuteVerdict('mine').code, 'payment_run_segregation');
+      expect(store.runExecuteVerdict('mine').isOffered(), isTrue);
+      expect(store.runApproveVerdict('mine').code, 'payment_run_segregation');
+      expect(store.runCancelVerdict('mine').allowed, isTrue);
+      expect(store.runExecuteVerdict('theirs').isOffered(), isFalse);
+      expect(store.runApproveVerdict('theirs').isOffered(), isFalse);
+      expect(store.runCancelVerdict('theirs').allowed, isTrue);
+    });
+
+    test('a run past draft is never read and takes no verdict', () async {
+      final read = <String>[];
+      ApiClient().debugConfigure(
+        client: client(
+          runs: [run('done', 'completed'), run('sent', 'exported')],
+          read: read,
+          details: const {},
+        ),
+      );
+      await store.fetchRuns();
+
+      expect(read, isEmpty);
+      expect(store.runs, hasLength(2));
+      for (final id in ['done', 'sent']) {
+        expect(store.runExecuteVerdict(id).answered, isFalse);
+        expect(store.runCancelVerdict(id).answered, isFalse);
+      }
+    });
+
+    test('a failed detail read fails closed for that run only', () async {
+      ApiClient().debugConfigure(
+        client: client(
+          runs: [run('down', 'draft'), run('up', 'draft')],
+          details: {
+            'down': () => _json({'detail': 'unavailable'}, 503),
+            'up': () => _json({
+                  ...run('up', 'draft'),
+                  'actions': {'approve': null, 'execute': null, 'cancel': null},
+                }),
+          },
+        ),
+      );
+      await store.fetchRuns();
+
+      // The list still loads; the run whose detail failed offers nothing.
+      expect(store.runsLoadError, isNull);
+      expect(store.runs, hasLength(2));
+      expect(store.runExecuteVerdict('down').answered, isFalse);
+      expect(store.runCancelVerdict('down').answered, isFalse);
+      expect(store.runApproveVerdict('down').answered, isFalse);
+      expect(store.runExecuteVerdict('up').allowed, isTrue);
+      expect(store.runCancelVerdict('up').allowed, isTrue);
+    });
+
+    test('reset forgets every verdict', () async {
+      ApiClient().debugConfigure(
+        client: client(
+          runs: [run('r', 'draft')],
+          details: {
+            'r': () => _json({
+                  ...run('r', 'draft'),
+                  'actions': {'execute': null, 'cancel': null},
+                }),
+          },
+        ),
+      );
+      await store.fetchRuns();
+      expect(store.runExecuteVerdict('r').allowed, isTrue);
+
+      store.reset();
+      expect(store.runExecuteVerdict('r').answered, isFalse);
+      expect(store.runCancelVerdict('r').answered, isFalse);
+    });
+  });
+
   group('execution mode', () {
     MockClient modeClient(http.Response Function() mode) =>
         makeClient(mode: mode);

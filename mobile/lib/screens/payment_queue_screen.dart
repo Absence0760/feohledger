@@ -4,6 +4,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/load_error_messages.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -721,18 +722,29 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
   Widget? _runMenu(PaymentRun run) {
     final l = AppLocalizations.of(context);
     final store = PaymentQueueStore.instance;
-    final manageDraft = _canManage && run.isExecutable;
     final approve = _approveItem(l, run);
+    // Execute only where FeohLedger SENDS payments — the server's execution
+    // mode, failing closed while it is unknown. On a record-only tenant the
+    // endpoint answers `payments_record_only`, so the control could only
+    // ever be refused; the record path below replaces it. Who may execute
+    // THIS run (`payment.execute`, maker-checker, CFO sign-off) is the run
+    // detail's `actions.execute`, never a role or status check here.
+    final execute = store.canDispatch
+        ? _verdictItem(
+            'execute',
+            l.payRunActionExecute,
+            store.runExecuteVerdict(run.id),
+          )
+        : null;
+    final cancel = _verdictItem(
+      'cancel',
+      l.payRunActionCancel,
+      store.runCancelVerdict(run.id),
+    );
     final items = <PopupMenuEntry<String>>[
       ?approve,
-      // Execute only where FeohLedger SENDS payments — the server's execution
-      // mode, failing closed while it is unknown. On a record-only tenant the
-      // endpoint answers `payments_record_only`, so the control could only
-      // ever be refused; the record path below replaces it.
-      if (manageDraft && store.canDispatch)
-        PopupMenuItem(value: 'execute', child: Text(l.payRunActionExecute)),
-      if (_canManage && run.isCancellable)
-        PopupMenuItem(value: 'cancel', child: Text(l.payRunActionCancel)),
+      ?execute,
+      ?cancel,
       // Record the run as paid outside FeohLedger, in either mode. The menu
       // entry appears where [PaymentRun.mayRecordOutside] says a run can hold
       // an open record decision; whether THIS reader may record it is the
@@ -762,21 +774,41 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
   /// as the web does, instead of an Approve that can only 403.
   PopupMenuEntry<String>? _approveItem(AppLocalizations l, PaymentRun run) {
     if (!run.canTakeCfoApproval) return null;
-    final verdict = PaymentQueueStore.instance.runApproveVerdict(run.id);
-    if (!verdict.isOffered()) return null;
-    if (verdict.allowed) {
-      return PopupMenuItem(value: 'approve', child: Text(l.payRunActionApprove));
+    return _verdictItem(
+      'approve',
+      l.payRunActionApprove,
+      PaymentQueueStore.instance.runApproveVerdict(run.id),
+    );
+  }
+
+  /// A run menu item offered from the server's [verdict]: none while it is
+  /// unanswered (fail closed) or refused for the reader's role
+  /// (`role_not_permitted`) or the run's status (`payment_run_not_draft` —
+  /// a run the list showed as a draft that has since moved on); enabled when
+  /// accepted; otherwise disabled with the refusal in the reader's language
+  /// (maker-checker, the CFO wait), instead of a control that can only 403.
+  PopupMenuEntry<String>? _verdictItem(
+    String value,
+    String label,
+    ActionVerdict verdict,
+  ) {
+    if (!verdict.isOffered(hiddenCodes: const {'payment_run_not_draft'})) {
+      return null;
     }
+    if (verdict.allowed) {
+      return PopupMenuItem(value: value, child: Text(label));
+    }
+    final l = AppLocalizations.of(context);
     final reason = localizeCodedRefusal(l, verdict.refusal) ??
         (verdict.refusal?['message'] as String? ?? '');
     return PopupMenuItem(
-      value: 'approve',
+      value: value,
       enabled: false,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(l.payRunActionApprove),
+          Text(label),
           if (reason.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2),
@@ -817,14 +849,6 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
       A11y.announce(context, text);
     } else if (action == 'execute') {
-      // CFO approval is a server-side gate; surface it before attempting.
-      if (run.awaitsCfoApproval) {
-        final text = l.payRunCfoBlocked;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(text)));
-        A11y.announce(context, text);
-        return;
-      }
       final confirmed = await _confirm(
         l.payRunExecuteTitle,
         l.payRunExecuteBody(_runTotal(run)),

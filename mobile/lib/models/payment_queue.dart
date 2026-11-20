@@ -454,14 +454,10 @@ class PaymentRun {
     );
   }
 
+  /// A draft — the only status whose Execute / Cancel / CFO sign-off the Runs
+  /// tab asks the server about (the run detail's `actions`). Whether THIS
+  /// reader may take any of them is that verdict, never a check here.
   bool get isDraft => status == PaymentRunStatus.draft;
-
-  /// Only `draft` runs can be executed (or cancelled) from the app.
-  bool get isExecutable => isDraft;
-
-  /// Cancel is the draft's other exit (`POST /runs/{id}/cancel` refuses
-  /// anything else).
-  bool get isCancellable => isDraft;
 
   /// The run is over the org's CFO threshold and nobody has signed it off —
   /// execute will be refused until someone does.
@@ -469,7 +465,7 @@ class PaymentRun {
 
   /// Whether the run HAS a CFO step to render a control for: a draft still
   /// waiting on one (the web run dialog's `pendingCfo`). It only narrows which
-  /// runs the Runs tab asks about; whether THIS reader may sign is the run
+  /// runs render the item; whether THIS reader may sign is the run
   /// detail's `actions.approve` verdict ([PaymentRunRecordDetail.approve]),
   /// never a role or maker-checker check here.
   bool get canTakeCfoApproval => isDraft && awaitsCfoApproval;
@@ -527,16 +523,25 @@ const kExternalPaymentMethods = <String>[
 ///   sheet;
 /// * [approve] — `POST /runs/{id}/approve` (`payment_controls.
 ///   run_approve_refusal` after `require_roles(ROLE_CFO)`), read by the Runs
-///   tab's "Approve as CFO".
+///   tab's "Approve as CFO";
+/// * [execute] — `POST /runs/{id}/execute` (`payment.execute`, then
+///   `run_execute_refusal`: draft, maker-checker, CFO sign-off), read by the
+///   Runs tab's Execute;
+/// * [cancel] — `POST /runs/{id}/cancel` (`RUN_CANCEL_ROLES`, then
+///   `run_cancel_refusal`), read by the Runs tab's Cancel.
 class PaymentRunRecordDetail {
   final PaymentRun run;
   final ActionVerdict recordOutside;
   final ActionVerdict approve;
+  final ActionVerdict execute;
+  final ActionVerdict cancel;
 
   const PaymentRunRecordDetail({
     required this.run,
     required this.recordOutside,
     this.approve = ActionVerdict.unanswered,
+    this.execute = ActionVerdict.unanswered,
+    this.cancel = ActionVerdict.unanswered,
   });
 
   factory PaymentRunRecordDetail.fromJson(Map<String, dynamic> json) {
@@ -551,6 +556,12 @@ class PaymentRunRecordDetail {
       approve: verdicts == null
           ? ActionVerdict.unanswered
           : ActionVerdict.fromVerdicts(verdicts, 'approve'),
+      execute: verdicts == null
+          ? ActionVerdict.unanswered
+          : ActionVerdict.fromVerdicts(verdicts, 'execute'),
+      cancel: verdicts == null
+          ? ActionVerdict.unanswered
+          : ActionVerdict.fromVerdicts(verdicts, 'cancel'),
     );
   }
 }

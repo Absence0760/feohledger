@@ -57,7 +57,7 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
 
   List<PaymentQueueItem> _queue = [];
   List<PaymentRun> _runs = [];
-  Map<String, ActionVerdict> _runApprove = const {};
+  Map<String, PaymentRunRecordDetail> _runVerdicts = const {};
   PaymentSummary? _summary;
   bool _loading = false;
   bool _runsLoading = false;
@@ -129,34 +129,45 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
       item.requiredMethod ?? _selection[item.id] ?? PaymentMethod.ach;
 
   int get selectedCount => _selection.length;
-  /// The caller's verdict on `POST /runs/{id}/approve` for each run that has
-  /// a CFO step ([PaymentRun.canTakeCfoApproval]), from the run detail's
-  /// `actions.approve`. The run list carries no such verdict, so it is read
-  /// per pending run — few: only over-threshold drafts not yet signed off. A
-  /// failed read leaves that run [ActionVerdict.unanswered], which offers
-  /// nothing (fail closed).
-  Future<Map<String, ActionVerdict>> _loadApproveVerdicts(
+  /// The caller's verdicts on each draft run's actions — `POST /runs/{id}/
+  /// approve`, `/execute` and `/cancel` — from the run detail's `actions`
+  /// (`run_action_refusals`, the gates those endpoints raise from). The run
+  /// list carries none of them, so the detail is read per draft run: a
+  /// non-draft run takes none of the three. A failed read leaves that run
+  /// with no verdicts, which offers nothing (fail closed).
+  Future<Map<String, PaymentRunRecordDetail>> _loadRunVerdicts(
     List<PaymentRun> runs,
   ) async {
-    final pending = runs.where((r) => r.canTakeCfoApproval).toList();
-    final verdicts = await Future.wait(
-      pending.map((r) async {
+    final drafts = runs.where((r) => r.isDraft).toList();
+    final details = await Future.wait(
+      drafts.map((r) async {
         try {
-          return (await PaymentApi.runDetail(r.id)).approve;
+          return await PaymentApi.runDetail(r.id);
         } catch (_) {
-          return ActionVerdict.unanswered;
+          return null;
         }
       }),
     );
     return {
-      for (var i = 0; i < pending.length; i++) pending[i].id: verdicts[i],
+      for (var i = 0; i < drafts.length; i++)
+        if (details[i] != null) drafts[i].id: details[i]!,
     };
   }
 
   /// The caller's verdict on signing [runId] off as CFO —
-  /// [ActionVerdict.unanswered] for a run with no CFO step or none read.
+  /// [ActionVerdict.unanswered] for a run not read or whose read failed.
   ActionVerdict runApproveVerdict(String runId) =>
-      _runApprove[runId] ?? ActionVerdict.unanswered;
+      _runVerdicts[runId]?.approve ?? ActionVerdict.unanswered;
+
+  /// The caller's verdict on executing [runId] (it moves money) —
+  /// [ActionVerdict.unanswered] for a run not read or whose read failed.
+  ActionVerdict runExecuteVerdict(String runId) =>
+      _runVerdicts[runId]?.execute ?? ActionVerdict.unanswered;
+
+  /// The caller's verdict on cancelling [runId] —
+  /// [ActionVerdict.unanswered] for a run not read or whose read failed.
+  ActionVerdict runCancelVerdict(String runId) =>
+      _runVerdicts[runId]?.cancel ?? ActionVerdict.unanswered;
 
   bool get hasSelection => _selection.isNotEmpty;
 
@@ -167,7 +178,7 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
   void reset() {
     _queue = [];
     _runs = [];
-    _runApprove = const {};
+    _runVerdicts = const {};
     _summary = null;
     _loading = false;
     _runsLoading = false;
@@ -333,10 +344,10 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
     try {
       final runs = await PaymentApi.runs();
       if (!_runsSeq.isCurrent(token)) return;
-      final approve = await _loadApproveVerdicts(runs);
+      final verdicts = await _loadRunVerdicts(runs);
       if (!_runsSeq.isCurrent(token)) return;
       _runs = runs;
-      _runApprove = approve;
+      _runVerdicts = verdicts;
     } catch (e) {
       if (!_runsSeq.isCurrent(token)) return;
       _runsLoadError = e;
