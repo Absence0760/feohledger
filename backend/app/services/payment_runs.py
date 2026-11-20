@@ -543,6 +543,10 @@ class VendorPayability:
     status: str
     payments_blocked: bool
     screening_status: str
+    #: The stored screen is covered by an active false-positive adjudication
+    #: (``vendors.screening_adjudication_id``, decisions §477). It lifts the
+    #: ``match`` / ``review`` hold only, never the sticky block.
+    screening_adjudicated: bool = False
 
     @property
     def status_payable(self) -> bool:
@@ -554,6 +558,8 @@ class VendorPayability:
         The sticky block is named first: it is what refuses before any screen."""
         if self.payments_blocked:
             return HOLD_PAYMENTS_BLOCKED
+        if self.screening_adjudicated:
+            return None
         if self.screening_status == "match":
             return HOLD_SANCTIONS_MATCH
         if self.screening_status in SANCTIONS_HELD_SCREENING_STATUSES:
@@ -582,11 +588,16 @@ async def vendor_payability(
             status=status or "unknown",
             payments_blocked=bool(blocked),
             screening_status=screening or "unscreened",
+            screening_adjudicated=adjudication_id is not None,
         )
-        for vid, status, blocked, screening in (
+        for vid, status, blocked, screening, adjudication_id in (
             await db.execute(
                 select(
-                    Vendor.id, Vendor.status, Vendor.payments_blocked, Vendor.screening_status
+                    Vendor.id,
+                    Vendor.status,
+                    Vendor.payments_blocked,
+                    Vendor.screening_status,
+                    Vendor.screening_adjudication_id,
                 ).where(Vendor.id.in_(vendor_ids))
             )
         ).all()

@@ -241,7 +241,12 @@ async def _sweep_tenant(
                     vendor_failures += 1
                     continue
 
-                if not was_flagged and outcome.screening_status in _FLAGGED_STATUSES:
+                if (
+                    not was_flagged
+                    and outcome.screening_status in _FLAGGED_STATUSES
+                    # An adjudicated false positive (decisions §477) is not news.
+                    and outcome.adjudication_id is None
+                ):
                     new_flags += 1
                     # No notification event-type exists for vendor screening
                     # (see module docstring); log so the AP team can monitor.

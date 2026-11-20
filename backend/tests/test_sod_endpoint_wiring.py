@@ -57,6 +57,7 @@ from app.api.permissions import (
     PERM_VENDOR_BANK_CHANGE_APPROVE,
     PERM_VENDOR_BLOCK,
     PERM_VENDOR_MANAGE,
+    PERM_VENDOR_SANCTIONS_ADJUDICATE,
     ROLE_DEFAULT_PERMISSIONS,
 )
 from app.main import app
@@ -173,6 +174,7 @@ _VENDOR_MANAGE = frozenset({PERM_VENDOR_MANAGE})
 _VENDOR_BLOCK = frozenset({PERM_VENDOR_BLOCK})
 _BANK_CHANGE_APPROVE = frozenset({PERM_VENDOR_BANK_CHANGE_APPROVE})
 _USER_MANAGE = frozenset({PERM_USER_MANAGE})
+_SANCTIONS_ADJUDICATE = frozenset({PERM_VENDOR_SANCTIONS_ADJUDICATE})
 
 CASES = [
     ("/api/invoices/{invoice_id}/approve", "POST", _INVOICE_APPROVE),
@@ -306,6 +308,9 @@ CASES = [
     # stays with `payment.void`.
     ("/api/vendors/{vendor_id}/cancel-cards", "POST", _VENDOR_MANAGE | _VENDOR_BLOCK),
     ("/api/vendors/{vendor_id}/unblock", "POST", _VENDOR_BLOCK),
+    # --- vendor.sanctions.adjudicate: clearing a false-positive screen (§477).
+    ("/api/vendors/{vendor_id}/screening/adjudicate", "POST", _SANCTIONS_ADJUDICATE),
+    ("/api/vendors/{vendor_id}/screening/adjudication/revoke", "POST", _SANCTIONS_ADJUDICATE),
     # --- vendor.bank_change.approve: the BEC / bank-redirect dual-control gate.
     # Its sibling `POST /change-requests/{id}/reject` is deliberately NOT here —
     # reject never touches the vendor row (it can't redirect a payment), so it

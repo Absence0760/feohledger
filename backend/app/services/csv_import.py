@@ -484,6 +484,7 @@ async def import_vendors_csv(
             accepts_virtual_cards=_parse_bool(row.get("accepts_virtual_cards")),
             status="unverified",
             source="manual",
+            onboarded_by_user_id=actor_id,
         )
         db.add(vendor)
         created.append(vendor)
@@ -906,6 +907,7 @@ async def _resolve_or_create_vendor(
         code=vendor_code,
         status="unverified",
         source="manual",
+        onboarded_by_user_id=actor_id,
     )
     db.add(vendor)
     await db.flush()

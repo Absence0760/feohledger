@@ -74,6 +74,7 @@ from app.services.sanctions_adapters import (
     UnknownSanctionsProviderError,
     get_sanctions_adapter,
 )
+from app.services.sanctions_adjudication import covering_adjudication, screen_fingerprint
 from app.services.sanctions_categories import (
     adverse_media_finding,
     adverse_media_reason,
@@ -360,7 +361,32 @@ async def check_payment_compliance(
     )
     db.add(sanctions_row)
 
-    if screening.result == "match":
+    # An adjudicated false positive (decisions §477): the SAME result a human
+    # has recorded as not this vendor reads as clear. Only that exact result —
+    # same provider, verdict, list and entry — is covered; a new or different
+    # hit falls through to the refusal / hold below.
+    covering = await covering_adjudication(
+        db,
+        vendor_id=vendor.id,
+        provider=screening.provider,
+        result=screening.result,
+        fingerprint=screen_fingerprint(
+            provider=screening.provider,
+            result=screening.result,
+            matched_list=screening.matched_list,
+            raw_response=sanctions_row.raw_response,
+        ),
+    )
+    if covering is not None:
+        logger.info(
+            "[compliance] vendor=%s screen result=%s covered by adjudication=%s",
+            vendor.id,
+            screening.result,
+            covering.id,
+        )
+    adjudicated = covering is not None
+
+    if screening.result == "match" and not adjudicated:
         match_reasons = [
             f"vendor matched sanctions list "
             f"({screening.matched_list or 'unspecified'}) via {screening.provider}"
@@ -373,7 +399,7 @@ async def check_payment_compliance(
             screening_result=screening,
             sanctions_check_row=sanctions_row,
         )
-    if screening.result == "review_required":
+    if screening.result == "review_required" and not adjudicated:
         if screening.matched_list:
             hold_reason(
                 exception_finding(
@@ -388,7 +414,7 @@ async def check_payment_compliance(
                     "compliance_review_required_unlisted", provider=screening.provider
                 )
             )
-    elif screening.result != "clear":
+    elif screening.result not in ("clear", "match", "review_required"):
         # `ScreeningResult.result` is a three-value contract — 'clear' | 'match'
         # | 'review_required'. Anything else is a provider we do not understand,
         # and the branch structure above meant an unrecognised value matched
@@ -423,7 +449,7 @@ async def check_payment_compliance(
     # alongside a `clear` verdict (nothing on a formal list yet) would otherwise
     # be auto-allowed, and one reason here is what turns the verdict into a
     # `hold` for AP review — fail closed.
-    if screening.adverse_media:
+    if screening.adverse_media and not adjudicated:
         hold_reason(adverse_media_finding(screening.provider))
 
     # ---------- 2. KYC status on high-risk corridors -------------------------

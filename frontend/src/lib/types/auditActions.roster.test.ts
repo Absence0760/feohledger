@@ -48,6 +48,7 @@ const NOT_AUDIT_ACTIONS = new Set([
 	'vendor.bank_change.approve',
 	'vendor.block',
 	'vendor.manage',
+	'vendor.sanctions.adjudicate',
 	'user.manage',
 	// Rate-limit bucket name (auth.py).
 	'auth.forgot_password',
