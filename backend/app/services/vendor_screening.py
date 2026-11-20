@@ -52,6 +52,7 @@ from app.services.sanctions_adapters import (
     UnknownSanctionsProviderError,
     get_sanctions_adapter,
 )
+from app.services.sanctions_adjudication import check_fingerprint, covering_adjudication
 from app.services.sanctions_categories import (
     has_adverse_media,
     merge_categories_into_raw_response,
@@ -83,6 +84,9 @@ class ScreenOutcome:
     # (`vendor_card_revocation.revoke_vendor_cards`). `None` when the screen
     # did not block the vendor.
     card_revocation: VendorCardRevocation | None = None
+    # The active false-positive adjudication covering this exact result
+    # (decisions §477), or None. A covered result holds nothing.
+    adjudication_id: uuid.UUID | None = None
 
     @property
     def adverse_media(self) -> bool:
@@ -181,8 +185,21 @@ async def screen_vendor_record(
     vendor.screening_status = _STATUS_MAP.get(screening.result, "review")
     vendor.last_screened_at = now
 
+    # An adjudicated false positive (decisions §477) covers this screen only
+    # when it is the SAME result: same provider, verdict, list and entry. A new
+    # or different hit finds nothing and the vendor holds again.
+    covering = await covering_adjudication(
+        db,
+        vendor_id=vendor.id,
+        provider=row.provider,
+        result=row.result,
+        fingerprint=check_fingerprint(row),
+    )
+    vendor.screening_adjudication_id = covering.id if covering is not None else None
+    adjudicated = covering is not None
+
     newly_blocked = False
-    if screening.result == "match":
+    if screening.result == "match" and not adjudicated:
         if not vendor.payments_blocked:
             newly_blocked = True
         vendor.payments_blocked = True
@@ -213,6 +230,7 @@ async def screen_vendor_record(
             "categories": list(screening.categories),
             "check_type": check_type,
             "newly_blocked": newly_blocked,
+            "adjudication_id": str(covering.id) if covering is not None else None,
         },
     )
 
@@ -221,7 +239,7 @@ async def screen_vendor_record(
     # not only a new block, so a re-screen of an already-blocked vendor also
     # retries any card a previous attempt could not close.
     card_revocation: VendorCardRevocation | None = None
-    if screening.result == "match":
+    if screening.result == "match" and not adjudicated:
         card_revocation = await revoke_vendor_cards(
             db,
             vendor=vendor,
@@ -250,6 +268,7 @@ async def screen_vendor_record(
         sanctions_check=row,
         categories=screening.categories,
         card_revocation=card_revocation,
+        adjudication_id=covering.id if covering is not None else None,
     )
 
 

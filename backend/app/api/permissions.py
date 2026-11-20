@@ -55,6 +55,12 @@ PERM_PAYMENT_RECORD_EXTERNAL = "payment.record_external"
 PERM_VENDOR_BANK_CHANGE_APPROVE = "vendor.bank_change.approve"  # approve a staged bank/tax change
 PERM_VENDOR_BLOCK = "vendor.block"  # block / unblock payments to a vendor
 PERM_VENDOR_MANAGE = "vendor.manage"  # create / edit / verify / reject vendors
+# Record that a vendor's sanctions screen result is a false positive (decisions
+# §477): the one way a vendor that keeps screening `match` / `review` becomes
+# payable and bookable again. Default admin + cfo, NOT ap_manager: the manager
+# already onboards vendors, approves their bank details and executes runs, so
+# clearing the sanctions hold too would put the whole payee path in one role.
+PERM_VENDOR_SANCTIONS_ADJUDICATE = "vendor.sanctions.adjudicate"
 
 # User & access administration.
 PERM_USER_MANAGE = "user.manage"  # create / edit / delete users, assign roles
@@ -71,6 +77,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     PERM_VENDOR_BANK_CHANGE_APPROVE,
     PERM_VENDOR_BLOCK,
     PERM_VENDOR_MANAGE,
+    PERM_VENDOR_SANCTIONS_ADJUDICATE,
     PERM_USER_MANAGE,
 )
 
@@ -87,6 +94,7 @@ PERMISSION_LABELS: dict[str, str] = {
     PERM_VENDOR_BANK_CHANGE_APPROVE: "Approve vendor bank / tax changes",
     PERM_VENDOR_BLOCK: "Block / unblock vendor payments",
     PERM_VENDOR_MANAGE: "Manage vendors",
+    PERM_VENDOR_SANCTIONS_ADJUDICATE: "Adjudicate sanctions false positives",
     PERM_USER_MANAGE: "Manage users & roles",
 }
 
@@ -117,6 +125,8 @@ PERMISSION_LABELS: dict[str, str] = {
 #     same set as payment execute: the people who already close an invoice
 #     out as paid. Its supporting reads (the payments list / queue / runs) OR
 #     it in beside execute/void, the way they already OR the two of those.
+#   vendor sanctions adjudicate        NEW (no prior route, decisions §477) —
+#     admin + cfo. Not ap_manager (see the constant), never ap_clerk.
 #
 # ap_clerk holds NONE of the sensitive permissions — exactly as today (a clerk
 # can upload + enter data but cannot approve or pay).
@@ -154,6 +164,7 @@ ROLE_DEFAULT_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_PAYMENT_EXECUTE,
             PERM_PAYMENT_VOID,
             PERM_PAYMENT_RECORD_EXTERNAL,
+            PERM_VENDOR_SANCTIONS_ADJUDICATE,
         }
     ),
     ROLE_AP_CLERK: frozenset(),  # clerk holds no sensitive permission
