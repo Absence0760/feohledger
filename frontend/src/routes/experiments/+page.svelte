@@ -31,6 +31,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import LoadingState from '#lib/components/ui/LoadingState.svelte';
@@ -416,7 +417,10 @@
 						</Badge>
 					</td>
 					<td class="actions">
-						{#if canMutate && exp.status === 'draft'}
+						<!-- Start reads the row's verdict (`actions.start`, from the
+						     endpoint's own `start_refusal`); Delete, Stop and Conclude
+						     still restate theirs (docs/followups.md). -->
+						{#if isAllowed(exp.actions?.start)}
 							<RowAction
 								variant="success"
 								busy={isBusy('start', exp.id)}
@@ -424,6 +428,8 @@
 								ariaLabel={m('common.rowActionAria', { action: m('experiments.row.start'), name: exp.name })}
 								onclick={() => doStart(exp)}
 							>{m('experiments.row.start')}</RowAction>
+						{/if}
+						{#if canMutate && exp.status === 'draft'}
 							<RowAction
 								variant="danger"
 								armed={isArmed('delete', exp.id)}

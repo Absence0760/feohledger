@@ -176,6 +176,27 @@ const CREDIT_MEMO_STATUS_KEYS: Record<string, MessageKey> = {
 	void: 'creditMemos.status.void'
 };
 
+const DISCOUNT_OFFER_STATUS_KEYS: Record<string, MessageKey> = {
+	offered: 'discounts.status.offered',
+	accepted: 'discounts.status.accepted',
+	captured: 'discounts.status.captured',
+	declined: 'discounts.status.declined',
+	expired: 'discounts.status.expired'
+};
+
+const EXPERIMENT_STATUS_KEYS: Record<string, MessageKey> = {
+	draft: 'experiments.status.draft',
+	running: 'experiments.status.running',
+	concluded: 'experiments.status.concluded'
+};
+
+const SUGGESTION_STATUS_KEYS: Record<string, MessageKey> = {
+	open: 'adaptive.suggestions.status.open',
+	stale: 'adaptive.suggestions.status.stale',
+	applied: 'adaptive.suggestions.status.applied',
+	dismissed: 'adaptive.suggestions.status.dismissed'
+};
+
 // --- the invoice approval money gates ---------------------------------------
 
 /**
@@ -549,6 +570,45 @@ const BUILDERS: Record<string, Builder> = {
 	credit_memo_invoice_currency_unknown: fixed('refusal.creditMemoInvoiceCurrencyUnknown'),
 	// `api/discounts.py` — an invoice-scoped offer on an invoice in no stated currency.
 	discount_offer_invoice_currency_unknown: fixed('refusal.discountOfferInvoiceCurrencyUnknown'),
+	// `api/discounts.py::accept_refusal` / `decline_refusal` — the offer row's
+	// `actions.{accept,decline}` verdicts and the endpoints' 409s / 422
+	discount_offer_invoice_settled: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.discountOfferInvoiceSettled', {
+					status: statusLabel(status, invoiceStatusLabelKey, t)
+				});
+	},
+	discount_offer_no_capturable_tier: fixed('refusal.discountOfferNoCapturableTier'),
+	discount_offer_tier_unavailable: fixed('refusal.discountOfferTierUnavailable'),
+	discount_offer_not_open: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.discountOfferNotOpen', {
+					status: statusLabel(status, (s) => DISCOUNT_OFFER_STATUS_KEYS[s] ?? null, t)
+				});
+	},
+	discount_offer_decline_window_closed: fixed('refusal.discountOfferDeclineWindowClosed'),
+	// `api/workflow_experiments.py::start_refusal` — the row's `actions.start`
+	experiment_not_startable: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.experimentNotStartable', {
+					status: statusLabel(status, (s) => EXPERIMENT_STATUS_KEYS[s] ?? null, t)
+				});
+	},
+	// `api/adaptive_workflows.py::dismiss_refusal` — the row's `actions.dismiss`
+	workflow_suggestion_not_dismissable: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.workflowSuggestionNotDismissable', {
+					status: statusLabel(status, (s) => SUGGESTION_STATUS_KEYS[s] ?? null, t)
+				});
+	},
 	// `api/organization.py` — `payments.home_currency` that is not a code.
 	organization_home_currency_invalid: fixed('refusal.organizationHomeCurrencyInvalid'),
 	credit_memo_invoice_settled: (p, t) => {

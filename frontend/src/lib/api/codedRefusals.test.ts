@@ -121,6 +121,9 @@ describe('codedRefusalText', () => {
 		['credit_memo_entity_mismatch', 'refusal.creditMemoEntityMismatch'],
 		['credit_memo_currency_mismatch', 'refusal.creditMemoCurrencyMismatch'],
 		['discount_offer_invoice_currency_unknown', 'refusal.discountOfferInvoiceCurrencyUnknown'],
+		['discount_offer_no_capturable_tier', 'refusal.discountOfferNoCapturableTier'],
+		['discount_offer_tier_unavailable', 'refusal.discountOfferTierUnavailable'],
+		['discount_offer_decline_window_closed', 'refusal.discountOfferDeclineWindowClosed'],
 		['organization_home_currency_invalid', 'refusal.organizationHomeCurrencyInvalid'],
 		[INVOICE_STALE_EDIT, 'refusal.invoiceStaleEdit'],
 		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
@@ -353,6 +356,23 @@ describe('codedRefusalText', () => {
 		expect(
 			codedRefusalText('credit_memo_not_editable', { status: 'from_the_future' }, enT)
 		).toContain('from_the_future');
+	});
+
+	it('names an offer, experiment or suggestion status by its label, and refuses without one', () => {
+		expect(codedRefusalText('discount_offer_invoice_settled', { status: 'paid' }, enT)).toContain(
+			EN_ALL['invoices.status.paid']
+		);
+		expect(codedRefusalText('discount_offer_not_open', { status: 'captured' }, enT)).toContain(
+			EN_ALL['discounts.status.captured']
+		);
+		expect(codedRefusalText('experiment_not_startable', { status: 'concluded' }, enT)).toContain(
+			EN_ALL['experiments.status.concluded']
+		);
+		expect(
+			codedRefusalText('workflow_suggestion_not_dismissable', { status: 'applied' }, enT)
+		).toContain(EN_ALL['adaptive.suggestions.status.applied']);
+		expect(codedRefusalText('discount_offer_not_open', {}, enT)).toBeNull();
+		expect(codedRefusalText('experiment_not_startable', {}, enT)).toBeNull();
 	});
 
 	it("names an expense report's status by its label, and refuses without one", () => {
