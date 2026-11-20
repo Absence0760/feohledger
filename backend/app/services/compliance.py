@@ -74,7 +74,12 @@ from app.services.sanctions_adapters import (
     UnknownSanctionsProviderError,
     get_sanctions_adapter,
 )
-from app.services.sanctions_adjudication import covering_adjudication, screen_fingerprint
+from app.services.sanctions_adjudication import (
+    SCREENED_INPUTS_KEY,
+    covering_adjudication,
+    screen_fingerprint,
+    screened_inputs_hash,
+)
 from app.services.sanctions_categories import (
     adverse_media_finding,
     adverse_media_reason,
@@ -353,9 +358,15 @@ async def check_payment_compliance(
         risk_score=screening.risk_score,
         # The PII-free category taxonomy rides the row so `vendor_risk_scoring`
         # (compute-on-read, no adapter call) can see WHY a screen was elevated.
-        raw_response=merge_categories_into_raw_response(
-            screening.raw_response, screening.categories
-        ),
+        raw_response={
+            **(
+                merge_categories_into_raw_response(screening.raw_response, screening.categories)
+                or {}
+            ),
+            # What was screened: an adjudication covers the result only for
+            # the inputs it was made on (decisions §477).
+            SCREENED_INPUTS_KEY: await screened_inputs_hash(db, vendor),
+        },
         matched_list=screening.matched_list,
         correlation_id=correlation_id,
     )
@@ -363,10 +374,15 @@ async def check_payment_compliance(
 
     # An adjudicated false positive (decisions §477): the SAME result a human
     # has recorded as not this vendor reads as clear. Only that exact result —
-    # same provider, verdict, list and entry — is covered; a new or different
-    # hit falls through to the refusal / hold below.
+    # same provider, verdict, list, entry and screened inputs — is covered, and
+    # only by the adjudication the stored screen is shown under
+    # (`vendors.screening_adjudication_id`); a new or different hit, or an
+    # older active row the review queue does not lead with, falls through to
+    # the refusal / hold below.
     covering = await covering_adjudication(
         db,
+        pointer_only=True,
+        pointer=vendor.screening_adjudication_id,
         vendor_id=vendor.id,
         provider=screening.provider,
         result=screening.result,

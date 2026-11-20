@@ -215,20 +215,27 @@ export function unblockVendor(id: string): Promise<Vendor> {
 }
 
 // Record the vendor's stored `match` / `review` screen as a false positive
-// (`vendor.sanctions.adjudicate`, decisions §477). The reason is required.
+// (`vendor.sanctions.adjudicate`, decisions §477). The reason is required, and
+// `sanctionsCheckId` is the screen the reviewer saw (the row's
+// `latest_check_id`): a newer screen answers 409 instead of being stamped.
 export function adjudicateSanctionsFalsePositive(
 	id: string,
-	reason: string
+	reason: string,
+	sanctionsCheckId: string
 ): Promise<SanctionsAdjudication> {
-	return api.post<SanctionsAdjudication>(`/api/vendors/${id}/screening/adjudicate`, { reason });
+	return api.post<SanctionsAdjudication>(`/api/vendors/${id}/screening/adjudicate`, {
+		reason,
+		sanctions_check_id: sanctionsCheckId
+	});
 }
 
-// End the vendor's active adjudication; the gates hold on the screen again.
+// End EVERY active adjudication of the vendor; the gates hold on the screen
+// again, and a revoked match re-blocks the vendor and closes its cards.
 export function revokeSanctionsAdjudication(
 	id: string,
 	reason: string
-): Promise<SanctionsAdjudication> {
-	return api.post<SanctionsAdjudication>(`/api/vendors/${id}/screening/adjudication/revoke`, {
+): Promise<SanctionsAdjudication[]> {
+	return api.post<SanctionsAdjudication[]>(`/api/vendors/${id}/screening/adjudication/revoke`, {
 		reason
 	});
 }

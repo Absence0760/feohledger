@@ -52,7 +52,12 @@ from app.services.sanctions_adapters import (
     UnknownSanctionsProviderError,
     get_sanctions_adapter,
 )
-from app.services.sanctions_adjudication import check_fingerprint, covering_adjudication
+from app.services.sanctions_adjudication import (
+    SCREENED_INPUTS_KEY,
+    check_fingerprint,
+    covering_adjudication,
+    screened_inputs_hash,
+)
 from app.services.sanctions_categories import (
     has_adverse_media,
     merge_categories_into_raw_response,
@@ -97,6 +102,49 @@ class ScreenOutcome:
 def _adapter_for(org_settings: dict | None) -> SanctionsAdapter:
     cfg = ((org_settings or {}).get("compliance") or {}).get("sanctions") or {}
     return get_sanctions_adapter(cfg)
+
+
+def set_sanctions_match_block(
+    vendor: Vendor, *, matched_list: str | None, provider: str, now: datetime
+) -> bool:
+    """Set the sticky payment block an uncovered sanctions ``match`` owes.
+    True when the vendor was not already blocked."""
+    newly_blocked = not vendor.payments_blocked
+    vendor.payments_blocked = True
+    # No PII: the list NAME only, never match details.
+    vendor.payments_blocked_reason = (
+        f"sanctions match ({matched_list or 'unspecified list'}) via {provider}"
+    )
+    vendor.payments_blocked_at = now
+    return newly_blocked
+
+
+async def apply_sanctions_match(
+    db: AsyncSession,
+    *,
+    vendor: Vendor,
+    organization_id: uuid.UUID,
+    org_settings: dict | None,
+    actor_id: uuid.UUID | None,
+    matched_list: str | None,
+    provider: str,
+    trigger: str = "vendor.sanctions_match",
+) -> VendorCardRevocation | None:
+    """Everything an uncovered ``match`` does to the vendor: the sticky block,
+    then the closing of its live cards. Revoking a ``match`` adjudication
+    (``sanctions_adjudication.revoke``) calls this, so the end of a clearance
+    re-applies exactly what the screen would have."""
+    set_sanctions_match_block(
+        vendor, matched_list=matched_list, provider=provider, now=datetime.now(UTC)
+    )
+    return await revoke_vendor_cards(
+        db,
+        vendor=vendor,
+        organization_id=organization_id,
+        org_settings=org_settings,
+        actor_id=actor_id,
+        trigger=trigger,
+    )
 
 
 def _beneficial_owners(vendor: Vendor) -> list[dict] | None:
@@ -173,9 +221,15 @@ async def screen_vendor_record(
         # is compute-on-read off the latest `sanctions_checks` row and never
         # calls an adapter, so this is the only way an adverse-media hit can
         # reach the vendor's `risk_factors`.
-        raw_response=merge_categories_into_raw_response(
-            screening.raw_response, screening.categories
-        ),
+        raw_response={
+            **(
+                merge_categories_into_raw_response(screening.raw_response, screening.categories)
+                or {}
+            ),
+            # What was screened (decisions §477): an adjudication covers this
+            # result only for these inputs.
+            SCREENED_INPUTS_KEY: await screened_inputs_hash(db, vendor),
+        },
         correlation_id=corr,
     )
     db.add(row)
@@ -200,15 +254,9 @@ async def screen_vendor_record(
 
     newly_blocked = False
     if screening.result == "match" and not adjudicated:
-        if not vendor.payments_blocked:
-            newly_blocked = True
-        vendor.payments_blocked = True
-        # No PII: the list NAME only, never match details.
-        vendor.payments_blocked_reason = (
-            f"sanctions match ({screening.matched_list or 'unspecified list'}) "
-            f"via {screening.provider}"
+        newly_blocked = set_sanctions_match_block(
+            vendor, matched_list=screening.matched_list, provider=screening.provider, now=now
         )
-        vendor.payments_blocked_at = now
 
     # PII-free audit row: result + list NAME + provider only. Raw match
     # details live solely in the sanctions_checks JSONB (invariant #7).
