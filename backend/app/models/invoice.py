@@ -38,15 +38,6 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     # response field never has to remember the workaround.
     __mapper_args__ = {"eager_defaults": True}
 
-    def __init__(self, **kwargs):
-        # A construction that does not mention `currency` keeps the historical
-        # "USD" (test fixtures rely on it); one that passes `currency=None`
-        # records "unknown" as NULL. Every construction site under `app/` names
-        # its currency explicitly (pinned by `tests/test_invoice_currency_explicit.py`),
-        # so this fallback never labels a real document.
-        kwargs.setdefault("currency", "USD")
-        super().__init__(**kwargs)
-
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     correlation_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), default=uuid.uuid4, unique=True, index=True
@@ -60,8 +51,9 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     # no currency rather than a guessed one (§160/§196/§200). Every money path
     # refuses it as `currency_unknown` through `payment_runs.payable_currency_code`.
     # No column default: a column `default` also replaces an explicit `None` at
-    # INSERT, which would turn the upload's "unknown" back into USD. See
-    # `__init__` for the constructor-level fallback.
+    # INSERT, which would turn the upload's "unknown" back into USD. Nor a
+    # constructor default: a construction that omits `currency` is NULL too
+    # (decisions §475), so every `Invoice(...)` names it.
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     # Materialized conversion of `amount` into the org's reporting (base)
     # currency. Populated by `services.currency_conversion.materialize_reporting_amount`
