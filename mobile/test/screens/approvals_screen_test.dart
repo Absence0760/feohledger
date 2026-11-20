@@ -587,6 +587,9 @@ void main() {
           )
           .first,
     );
+    // scrollUntilVisible ends on a jump it never lays out; without a frame
+    // the tap below would aim at the button's pre-scroll position.
+    await tester.pump();
     expect(find.text('Showing 20 of 57'), findsOneWidget);
     // Material's 48dp target (WCAG 2.5.8).
     expect(tester.getSize(loadMore).height, greaterThanOrEqualTo(48));

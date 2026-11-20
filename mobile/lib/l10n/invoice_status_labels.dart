@@ -4,11 +4,8 @@ import 'package:feohledger_mobile/models/invoice.dart';
 /// The localized name of an invoice [status] — the one mapping from the
 /// 12-state enum to reader-facing text.
 ///
-/// `InvoiceStatus.label` is the English the model has always carried, and the
-/// shared `StatusBadge` still renders it until the badge enum maps get their
-/// own extraction turn (`mobile/docs/i18n.md` § String coverage). When that
-/// turn comes, the badge reads this function rather than growing a second
-/// map, so the bulk status sheet and the badge cannot name a state
+/// The shared `StatusBadge` and the bulk status sheet both read this function
+/// (re-exported from `enum_labels.dart`), so they cannot name a state
 /// differently. The switch is exhaustive: a new enum value fails to compile
 /// here instead of rendering English.
 String invoiceStatusLabel(AppLocalizations l, InvoiceStatus status) =>

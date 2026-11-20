@@ -2,9 +2,9 @@
 /// exhaustive switch per enum, so a new enum value fails to compile here
 /// instead of rendering English.
 ///
-/// The models still carry English `label` getters, deprecated in favour of
-/// these: screens read them until their own extraction turn. A widget never
-/// does (`test/widgets/shared_widget_l10n_test.dart`).
+/// The models carry no English names of their own: every screen and widget
+/// reads these (`test/l10n/enum_labels_test.dart`,
+/// `test/widgets/shared_widget_l10n_test.dart`).
 library;
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';

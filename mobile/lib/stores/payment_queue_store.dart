@@ -355,7 +355,7 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
     _actionError = null;
     _runActionErrorDetail = null;
     try {
-      final result = await PaymentApi.approveRun(runId);
+      await PaymentApi.approveRun(runId);
       await fetchRuns();
       return ambientLocalizations().payRunApproved;
     } catch (e) {

@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/erp_refusal_messages.dart';
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/invoice_warning_messages.dart';
 import 'package:feohledger_mobile/l10n/load_error_messages.dart';
@@ -285,7 +286,7 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
             _row(l.exceptionDetailFieldAmount,
                 formatMoneyString(exc.amount, currency: exc.currency)),
         ],
-        _row(l.exceptionDetailFieldSeverity, exc.severity.label),
+        _row(l.exceptionDetailFieldSeverity, exceptionSeverityLabel(l, exc.severity)),
       ],
     );
   }

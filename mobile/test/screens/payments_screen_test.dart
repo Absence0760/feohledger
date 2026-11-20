@@ -28,7 +28,8 @@ http.Response _list(List<Map<String, dynamic>> items) => http.Response(
 
 Map<String, dynamic> _paymentJson(
   String id, {
-  double amount = 1250.50,
+  // A number or the decimal string the backend actually sends (`MoneyAmount`).
+  Object amount = 1250.50,
   String method = 'ach',
   String status = 'completed',
   String? reference = 'REF-001',
@@ -158,14 +159,16 @@ void main() {
     // substitute a default". The digits still render; the symbol does not.
     ApiClient().debugConfigure(
       client: MockClient((req) async => _list([
-            _paymentJson('1', amount: 1250.50, currency: null),
+            _paymentJson('1', amount: '1250.50', currency: null),
           ])),
     );
 
     await tester.pumpWidget(_localized(const PaymentsScreen()));
     await _pumpUntil(tester, find.byType(ListTile));
 
-    expect(find.text('1,250.50'), findsOneWidget);
+    // With no code there is nothing to format with, so the server's own
+    // decimal string is the figure, verbatim (`formatMoneyString`).
+    expect(find.text('1250.50'), findsOneWidget);
     expect(find.textContaining(r'$'), findsNothing);
   });
 

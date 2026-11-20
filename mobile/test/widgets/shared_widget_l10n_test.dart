@@ -30,17 +30,12 @@ import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/notification_store.dart';
 import 'package:feohledger_mobile/widgets/cash_flow_button.dart';
 import 'package:feohledger_mobile/widgets/contract_list_tile.dart';
-import 'package:feohledger_mobile/widgets/contract_status_badge.dart';
 import 'package:feohledger_mobile/widgets/exception_list_tile.dart';
-import 'package:feohledger_mobile/widgets/exception_status_badge.dart';
 import 'package:feohledger_mobile/widgets/inspection_list_tile.dart';
-import 'package:feohledger_mobile/widgets/inspection_result_badge.dart';
 import 'package:feohledger_mobile/widgets/invoice_list_tile.dart';
 import 'package:feohledger_mobile/widgets/notification_bell.dart';
 import 'package:feohledger_mobile/widgets/notification_list_tile.dart';
-import 'package:feohledger_mobile/widgets/status_badge.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
-import 'package:feohledger_mobile/widgets/vendor_status_badge.dart';
 
 import '../support/untranslated_text.dart';
 
@@ -211,7 +206,9 @@ void main() {
               ),
         ],
       ),
-      allowed: {'ACME', 'AC-1'},
+      // ERP and AI are acronyms the Japanese catalogue keeps as written
+      // (`vendorSourceErp` / `vendorSourceAi`), like CSV elsewhere.
+      allowed: {'ACME', 'AC-1', 'ERP', 'AI'},
     );
   });
 

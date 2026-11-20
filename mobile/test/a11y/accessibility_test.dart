@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/exception.dart';
@@ -62,6 +63,8 @@ import 'package:feohledger_mobile/widgets/record_payment_dialog.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 import 'package:feohledger_mobile/widgets/vendor_status_badge.dart';
+
+final _en = lookupAppLocalizations(const Locale('en'));
 
 // Regression guard mirroring the web axe pass: every key surface must clear
 // Flutter's built-in accessibility guidelines — minimum tap-target size
@@ -406,7 +409,9 @@ void main() {
         await tester.pumpWidget(_host(VendorStatusBadge(status: status)));
         await expectLater(tester, meetsGuideline(textContrastGuideline));
         expect(
-          find.bySemanticsLabel('Status: ${status.label}'),
+          find.bySemanticsLabel(
+            'Status: ${vendorStatusLabel(_en, status)}',
+          ),
           findsOneWidget,
         );
         handle.dispose();
@@ -953,8 +958,10 @@ void main() {
         final handle = tester.ensureSemantics();
         await tester.pumpWidget(_host(ExceptionStatusBadge(status: status)));
         await expectLater(tester, meetsGuideline(textContrastGuideline));
-        expect(find.bySemanticsLabel('Status: ${status.label}'),
-            findsOneWidget);
+        expect(
+          find.bySemanticsLabel('Status: ${exceptionStatusLabel(_en, status)}'),
+          findsOneWidget,
+        );
         handle.dispose();
       });
     }

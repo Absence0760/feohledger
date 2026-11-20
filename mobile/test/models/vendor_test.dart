@@ -19,11 +19,6 @@ void main() {
       expect(VendorStatus.active.isUnverified, isFalse);
       expect(VendorStatus.rejected.isUnverified, isFalse);
     });
-
-    test('labels are human-readable', () {
-      expect(VendorStatus.active.label, 'Active');
-      expect(VendorStatus.unverified.label, 'Unverified');
-    });
   });
 
   group('Vendor.fromJson card revocation', () {
@@ -96,7 +91,6 @@ void main() {
       expect(v.name, 'Acme Supplies');
       expect(v.status, VendorStatus.active);
       expect(v.source, 'erp_sync');
-      expect(v.sourceLabel, 'ERP');
       expect(v.invoiceCount, 7);
     });
 
@@ -112,7 +106,6 @@ void main() {
       expect(v.email, isNull);
       expect(v.invoiceCount, 0);
       expect(v.status, VendorStatus.unverified);
-      expect(v.sourceLabel, 'Manual');
     });
   });
 }

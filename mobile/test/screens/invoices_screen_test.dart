@@ -227,7 +227,12 @@ void main() {
     await tester.pumpWidget(_localized(const InvoicesScreen()));
     await _pumpUntil(tester, find.byType(InvoiceListTile));
 
-    await tester.tap(find.widgetWithText(FilterChip, 'Paid'));
+    // The chips are a horizontal scroll row; at the test window's width
+    // "Paid" sits past the right edge, so scroll to it as a user would.
+    final paid = find.widgetWithText(FilterChip, 'Paid');
+    await tester.ensureVisible(paid);
+    await tester.pump();
+    await tester.tap(paid);
     await _pumpUntil(tester, find.text('No invoices match these filters'));
 
     expect(find.text('No invoices match these filters'), findsOneWidget);

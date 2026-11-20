@@ -26,7 +26,7 @@ import 'package:feohledger_mobile/utils/sequenced_fetch.dart';
 /// independent list (`InvoiceStore`'s approvals queue) holds another
 /// instance on that list's own sequence.
 class PagedList<T> {
-  PagedList(this._seq, {Object? Function(T item)? keyOf}) : _keyOf = keyOf;
+  PagedList(this._seq, {this._keyOf});
 
   final RequestSequence _seq;
 

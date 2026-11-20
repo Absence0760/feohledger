@@ -216,7 +216,7 @@ void main() {
         (req) async => _json(_inspectionJson('qi9', number: 'QI-9')),
       ),
     );
-    expect((await store.getById('qi9'))?.inspectionNumber, 'QI-9');
+    expect((await store.getById('qi9')).inspectionNumber, 'QI-9');
 
     ApiClient().debugConfigure(
       client: MockClient((req) async => _json({'detail': 'Not found'}, 404)),

@@ -28,7 +28,7 @@ mobile/
 │   │   ├── invoice.dart         # Invoice, InvoiceStatus enum (12 states); isEditable mirrors backend IMMUTABLE_STATUSES; `Invoice.financiallyLocked` is the server's `financially_locked` verdict (missing = locked; decisions §370) + kFinancialInvoiceFields / stripFinancialFields
 │   │   ├── mfa_challenge.dart    # MFAChallenge (login MFA-challenge response) — challengeToken + offered methods (totp/email) + mustEnroll
 │   │   ├── exception.dart       # ApException, ApExceptionStatus + ApExceptionSeverity enums
-│   │   ├── notification.dart    # AppNotification (in-app notification center row); eventLabel + linksToInvoice helper; copyMarkedRead for optimistic mark-read
+│   │   ├── notification.dart    # AppNotification (in-app notification center row); linksToInvoice helper (event names: `l10n/enum_labels.dart`); copyMarkedRead for optimistic mark-read
 │   │   ├── payment.dart         # Payment (amount + discount as display strings, never `double`; + its invoice's `currency`; `toJson` for the offline cache), PaymentMethod, DashboardData (reads the `reporting` block's rollups + `reporting_currency` — the face-value keys are cross-currency sums), aging, trends
 │   │   ├── payment_queue.dart   # PaymentQueueItem (own invoice currency), PaymentSummary (+ the reporting `currency` it names), PaymentRun (total in the `currency` the run response names; `PaymentRunStatus` enum + the run rules as predicates — `isExecutable` / `isCancellable` / `awaitsCfoApproval` / `canTakeCfoApproval` / `mayRecordOutside` — so no screen compares a raw status string), PaymentRunSelection (money as display strings — no client float math)
 │   │   ├── vendor.dart          # Vendor, VendorStatus enum (active/unverified/inactive/rejected)

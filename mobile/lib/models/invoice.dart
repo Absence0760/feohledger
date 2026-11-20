@@ -22,22 +22,6 @@ enum InvoiceStatus {
     );
   }
 
-  @Deprecated('use enum_labels')
-  String get label => switch (this) {
-    InvoiceStatus.newStatus => 'New',
-    InvoiceStatus.pending => 'Pending',
-    InvoiceStatus.readyForReview => 'Ready for Review',
-    InvoiceStatus.approved => 'Approved',
-    InvoiceStatus.rejected => 'Rejected',
-    InvoiceStatus.sendingToErp => 'Sending to ERP',
-    InvoiceStatus.sentToErp => 'Sent to ERP',
-    InvoiceStatus.postedInErp => 'Posted in ERP',
-    InvoiceStatus.paymentScheduled => 'Payment Scheduled',
-    InvoiceStatus.paid => 'Paid',
-    InvoiceStatus.done => 'Done',
-    InvoiceStatus.failed => 'Failed',
-  };
-
   bool get isActionable => this == InvoiceStatus.readyForReview;
 
   /// Whether the invoice's fields may be edited via `PATCH /api/invoices/{id}`.
