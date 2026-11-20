@@ -157,11 +157,11 @@
 
 	const COLUMNS = $derived([
 		{ label: m('vendors.col.vendor') },
-		{ label: m('vendors.changeRequests.col.changeType') },
+		{ label: m('vendors.changeRequests.col.changeType'), class: 'col-type' },
 		{ label: m('vendors.changeRequests.col.proposed') },
 		{ label: m('vendors.changeRequests.col.requestedBy') },
-		{ label: m('vendors.changeRequests.col.requested') },
-		{ label: m('vendors.col.status') },
+		{ label: m('vendors.changeRequests.col.requested'), class: 'col-date' },
+		{ label: m('vendors.col.status'), class: 'col-status' },
 		{ class: 'actions-col' }
 	]);
 
@@ -473,7 +473,9 @@
 			testId="change-requests-load-error"
 		/>
 	{:else}
+	<div class="change-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
 		{loading}
@@ -552,6 +554,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 
 	<LoadMoreFooter
 		shown={items.length}
@@ -702,6 +705,23 @@
 </Modal>
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.change-table { min-width: 0; }
+	.change-table :global(table) { min-width: 1150px; }
+	.change-table :global(th.col-type) { width: 170px; }
+	.change-table :global(th.col-date) { width: 130px; }
+	.change-table :global(th.col-status) { width: 130px; }
+	.change-table :global(th.actions-col) { width: 270px; }
+
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
 	.intro {
 		margin: 0;

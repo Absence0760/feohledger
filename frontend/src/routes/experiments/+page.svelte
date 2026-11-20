@@ -54,10 +54,10 @@
 	const COLUMNS = $derived([
 		{ label: m('experiments.col.name') },
 		{ label: m('experiments.col.workflow') },
-		{ label: m('experiments.col.primaryMetric') },
-		{ label: m('experiments.col.split') },
-		{ label: m('experiments.col.assigned'), class: 'right' },
-		{ label: m('experiments.col.status') },
+		{ label: m('experiments.col.primaryMetric'), class: 'col-metric' },
+		{ label: m('experiments.col.split'), class: 'col-split' },
+		{ label: m('experiments.col.assigned'), class: 'right col-count' },
+		{ label: m('experiments.col.status'), class: 'col-status' },
 		{ class: 'actions-col' }
 	]);
 
@@ -388,7 +388,9 @@
 		     banner came from a dependency-free `$effect`. -->
 		<LoadError message={loadError} onretry={load} testId="experiments-error" />
 	{:else}
+	<div class="experiment-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={filtered.length === 0}
 		{loading}
@@ -461,6 +463,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 	{/if}
 </PageHeader>
 
@@ -608,6 +611,24 @@
 </Modal>
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.experiment-table { min-width: 0; }
+	.experiment-table :global(table) { min-width: 1150px; }
+	.experiment-table :global(th.col-metric) { width: 190px; }
+	.experiment-table :global(th.col-split) { width: 120px; }
+	.experiment-table :global(th.col-count) { width: 110px; }
+	.experiment-table :global(th.col-status) { width: 130px; }
+	.experiment-table :global(th.actions-col) { width: 220px; }
+
 	.lede {
 		color: var(--text-muted);
 		max-width: 70ch;

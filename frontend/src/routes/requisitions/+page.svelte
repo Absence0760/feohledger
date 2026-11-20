@@ -123,12 +123,12 @@
 	]);
 
 	const COLUMNS = $derived([
-		{ label: m('requisitions.col.requisitionNumber') },
+		{ label: m('requisitions.col.requisitionNumber'), class: 'col-number' },
 		{ label: m('requisitions.col.title') },
 		{ label: m('requisitions.col.department') },
-		{ label: m('requisitions.col.neededBy') },
-		{ label: m('requisitions.col.total'), class: 'right' },
-		{ label: m('requisitions.col.status') },
+		{ label: m('requisitions.col.neededBy'), class: 'col-date' },
+		{ label: m('requisitions.col.total'), class: 'right col-amount' },
+		{ label: m('requisitions.col.status'), class: 'col-status' },
 		{ label: '', class: 'actions-col' }
 	]);
 
@@ -477,7 +477,9 @@
 	{#if errored}
 		<LoadError message={m('requisitions.empty.errored')} onretry={() => load()} testId="requisitions-error" />
 	{:else}
+	<div class="req-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={requisitions.length === 0}
 		{loading}
@@ -547,6 +549,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 	{/if}
 
 	<LoadMoreFooter
@@ -580,6 +583,24 @@
 {/if}
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.req-table { min-width: 0; }
+	.req-table :global(table) { min-width: 1100px; }
+	.req-table :global(th.col-number) { width: 140px; }
+	.req-table :global(th.col-date) { width: 120px; }
+	.req-table :global(th.col-amount) { width: 150px; }
+	.req-table :global(th.col-status) { width: 150px; }
+	.req-table :global(th.actions-col) { width: 300px; }
+
 	.filter-row {
 		display: flex;
 		align-items: center;

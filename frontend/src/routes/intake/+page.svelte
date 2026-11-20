@@ -102,12 +102,12 @@
 	]);
 
 	const COLUMNS = $derived([
-		{ label: m('intake.col.requestNumber') },
+		{ label: m('intake.col.requestNumber'), class: 'col-number' },
 		{ label: m('intake.col.title') },
-		{ label: m('intake.col.type') },
+		{ label: m('intake.col.type'), class: 'col-type' },
 		{ label: m('intake.col.vendor') },
-		{ label: m('intake.col.estimated'), class: 'right' },
-		{ label: m('intake.col.status') },
+		{ label: m('intake.col.estimated'), class: 'right col-amount' },
+		{ label: m('intake.col.status'), class: 'col-status' },
 		{ label: '', class: 'actions-col' }
 	]);
 
@@ -407,7 +407,9 @@
 	{#if errored}
 		<LoadError message={m('intake.empty.errored')} onretry={() => load()} testId="intake-error" />
 	{:else}
+	<div class="intake-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
 		{loading}
@@ -495,6 +497,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 	{/if}
 
 	<LoadMoreFooter
@@ -518,6 +521,24 @@
 {/if}
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.intake-table { min-width: 0; }
+	.intake-table :global(table) { min-width: 1250px; }
+	.intake-table :global(th.col-number) { width: 140px; }
+	.intake-table :global(th.col-type) { width: 150px; }
+	.intake-table :global(th.col-amount) { width: 150px; }
+	.intake-table :global(th.col-status) { width: 150px; }
+	.intake-table :global(th.actions-col) { width: 360px; }
+
 	.filter-row {
 		display: flex;
 		align-items: center;
