@@ -106,4 +106,46 @@ test.describe('screening review queue — payments-blocked KPI', () => {
 			'—'
 		);
 	});
+	test('a count still loading reads as pending, not unavailable', async ({ page }) => {
+		// The cards used to say "Count unavailable" from first paint until
+		// `/counts` answered: a claim that the tallies could not be had, made
+		// before anything was asked.
+		await page.route('**/api/vendors/screening/review-queue**', async (route) => {
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ items: [QUEUE_ROW], total: 1, page: 1, page_size: 20 })
+			});
+		});
+		let release!: () => void;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		await page.route('**/api/vendors/counts**', async (route) => {
+			await held;
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					total: 5,
+					by_status: { active: 5 },
+					payments_blocked: 2,
+					by_screening_status: { clear: 4, review: 1 }
+				})
+			});
+		});
+
+		await page.goto('/vendors/screening');
+
+		const blockedCard = page.locator('.kpi', { hasText: 'Payments blocked' });
+		await expect(blockedCard).toHaveAttribute('data-kpi-state', 'pending');
+		await expect(page.locator('.kpi', { hasText: 'Sanctions matches' })).toHaveAttribute(
+			'data-kpi-state',
+			'pending'
+		);
+		await expect(page.locator('.kpi-row')).not.toContainText('Count unavailable');
+
+		release();
+		await expect(blockedKpi(page)).toHaveText('2');
+		await expect(blockedCard).toHaveAttribute('data-kpi-state', 'value');
+		await expect(page.locator('.kpi-row')).not.toContainText('Count unavailable');
+	});
 });
