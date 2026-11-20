@@ -8,7 +8,7 @@ import {
 	revokeRejectedSession,
 	sessionRejection
 } from '#lib/api/sessionRejection.ts';
-import { m } from '#lib/i18n/store.svelte.ts';
+import { localeReady, m } from '#lib/i18n/store.svelte.ts';
 
 // Re-exported so callers that already import from `#lib/api` (e.g. the
 // hand-rolled fetch in `api/expenses.ts`) don't need a second import path.
@@ -76,6 +76,23 @@ export function apiErrorFromBody(
 	const { code, params } = apiErrorCode(body.detail);
 	const message = localizeApiDetail(body.detail, m) ?? formatApiDetail(body.detail, fallback);
 	return new ApiError(message, status, code, params, body.detail);
+}
+
+/**
+ * {@link apiErrorFromBody}, once the preloaded refusal catalogue has landed.
+ * The message is baked into the error when it is built, so a refusal answered
+ * before that slice arrived (a page whose very first request is refused, such
+ * as `/verify`'s completion) would otherwise keep the server's English
+ * sentence for good. Only the error path waits; a successful response never
+ * does, and the wait is already resolved after startup.
+ */
+export async function localizedApiError(
+	body: { detail?: unknown },
+	fallback: string,
+	status: number
+): Promise<ApiError> {
+	await localeReady();
+	return apiErrorFromBody(body, fallback, status);
 }
 
 function getToken(): string | null {
@@ -153,7 +170,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 		// caller's catch handle it so forms can render error banners instead
 		// of being torn down mid-render by a navigation.
 		if (token) endSessionIfRejected(res.status, body.detail);
-		throw apiErrorFromBody(
+		throw await localizedApiError(
 			body,
 			res.status === 401 ? 'Unauthorized' : `API error ${res.status}`,
 			res.status
@@ -182,7 +199,7 @@ async function blobFromResponse(res: Response): Promise<Blob> {
 		if (endSessionIfRejected(res.status, body.detail) && res.status === 401) {
 			throw new ApiError('Unauthorized', 401);
 		}
-		throw apiErrorFromBody(body, `Failed to load file: ${res.status}`, res.status);
+		throw await localizedApiError(body, `Failed to load file: ${res.status}`, res.status);
 	}
 	return res.blob();
 }
@@ -339,7 +356,7 @@ async function streamChatTurn(
 		// through `apiErrorFromBody` so it is localized like every other
 		// coded refusal (`api/codedRefusals.ts`).
 		const j = (await res.json().catch(() => ({}))) as { detail?: unknown };
-		throw assistantBudgetError(j.detail) ?? apiErrorFromBody(j, m('assistant.error.generic'), 429);
+		throw assistantBudgetError(j.detail) ?? (await localizedApiError(j, m('assistant.error.generic'), 429));
 	}
 	if (!res.ok || !res.body) {
 		throw new Error(`Stream error ${res.status}`);

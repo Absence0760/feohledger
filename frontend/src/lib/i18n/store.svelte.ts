@@ -31,6 +31,10 @@ const sliceLocale: Partial<Record<SliceName, Locale>> = Object.fromEntries(
 );
 const wanted = new Set<SliceName>();
 const sliceLoading = new Map<SliceName, Promise<void>>();
+// The first-mount `setLocale` (main catalogue + preloaded slices), so a caller
+// that bakes a sentence into a value at one instant can wait for it. Resolved
+// until `initLocale` runs; `setLocale` never rejects.
+let startupLocale: Promise<void> = Promise.resolve();
 // Dev-only: keys already reported as rendered before their slice was asked for.
 const reported = new Set<string>();
 
@@ -234,7 +238,20 @@ export function initLocale(): void {
 	// `setLocale` fetches them in `next` beside the main catalogue: one parallel
 	// round trip in the reader's language, never an English copy first.
 	for (const s of PRELOADED_SLICES) wanted.add(s);
-	void setLocale(next);
+	startupLocale = setLocale(next);
+}
+
+/**
+ * Resolves once the catalogue and the preloaded slices (the refusal sentences)
+ * `initLocale` asked for have landed, or failed and fallen back to English.
+ * Cheap and already-resolved after startup. For code that turns a message key
+ * into a string ONCE rather than in a reactive read — the `ApiError` message is
+ * built when the response arrives, so a refusal that beat the slice home (a
+ * page whose first request fails, like `/verify`) would carry the server's
+ * English forever; see `api.ts::localizedApiError`.
+ */
+export function localeReady(): Promise<void> {
+	return startupLocale;
 }
 
 export { isSupportedLocale };

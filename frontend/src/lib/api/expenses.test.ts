@@ -25,7 +25,8 @@ vi.mock('#lib/i18n/store.svelte.ts', async () => {
 		m: (key: string, params?: Record<string, string | number>) =>
 			(messages as Record<string, string>)[key] === undefined
 				? key
-				: fill((messages as Record<string, string>)[key], params, 'de')
+				: fill((messages as Record<string, string>)[key], params, 'de'),
+		localeReady: () => Promise.resolve()
 	};
 });
 

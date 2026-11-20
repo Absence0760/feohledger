@@ -289,7 +289,7 @@ describe('catalogue slices', () => {
 
 	it('that are preloaded are asked for at startup, and only by the store', () => {
 		const store = SOURCES['/src/lib/i18n/store.svelte.ts'];
-		expect(store).toMatch(/for \(const s of PRELOADED_SLICES\) wanted\.add\(s\);\s*void setLocale\(next\);/);
+		expect(store).toMatch(/for \(const s of PRELOADED_SLICES\) wanted\.add\(s\);\s*startupLocale = setLocale\(next\);/);
 		for (const s of PRELOADED_SLICES) {
 			expect(LOADING_DIRS.get(s) ?? [], `${s} is preloaded; a route need not load it`).toEqual([]);
 			expect(OWNERS.get(s) ?? [], `${s} is preloaded; a component need not load it`).toEqual([]);
