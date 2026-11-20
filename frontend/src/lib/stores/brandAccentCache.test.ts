@@ -35,7 +35,11 @@ function memoryStorage(init: Record<string, string> = {}, throws = false) {
 	return { storage, data };
 }
 
-const GOOD = { '--accent': '#c0392b', '--accent-strong': '#7b1d14' };
+const GOOD = {
+	'--brand-accent-dark': '#cd6256',
+	'--brand-accent-light': '#c0392b',
+	'--accent-strong': '#7b1d14'
+};
 const HOSTILE = [
 	'red',
 	'#fff; background: url(https://evil.test/x)',
@@ -48,7 +52,7 @@ const HOSTILE = [
 ];
 
 describe('accent cache: read / write / clear', () => {
-	it('round-trips the two applied values under the tenant key', () => {
+	it('round-trips the applied values under the tenant key', () => {
 		const { storage, data } = memoryStorage();
 		writeAccentCache(storage, 'acme', GOOD);
 		expect([...data.keys()]).toEqual(['feoh_brand_accent:acme']);
@@ -76,8 +80,8 @@ describe('accent cache: read / write / clear', () => {
 
 	it('the fetched branding overwrites a stale entry', () => {
 		const { storage } = memoryStorage({ [accentCacheKey('acme')]: JSON.stringify(GOOD) });
-		writeAccentCache(storage, 'acme', { '--accent': '#00ff00' });
-		expect(readAccentCache(storage, 'acme')).toEqual({ '--accent': '#00ff00' });
+		writeAccentCache(storage, 'acme', { '--brand-accent-dark': '#00ff00' });
+		expect(readAccentCache(storage, 'acme')).toEqual({ '--brand-accent-dark': '#00ff00' });
 	});
 
 	it('clear removes the entry', () => {
@@ -103,15 +107,21 @@ describe('accent cache: read / write / clear', () => {
 describe('accent cache: validation', () => {
 	for (const bad of HOSTILE) {
 		it(`drops ${JSON.stringify(bad)} on read and on write`, () => {
-			const tampered = { '--accent': bad, '--accent-strong': '#7b1d14' };
+			const tampered = { '--brand-accent-light': bad, '--accent-strong': '#7b1d14' };
 			const { storage } = memoryStorage({ [accentCacheKey('acme')]: JSON.stringify(tampered) });
 			expect(readAccentCache(storage, 'acme')).toEqual({ '--accent-strong': '#7b1d14' });
 			expect(sanitizeAccentVars(tampered)).toEqual({ '--accent-strong': '#7b1d14' });
 		});
 	}
 
-	it('keeps only the two accent props', () => {
+	it('keeps only the brand accent props', () => {
 		expect(sanitizeAccentVars({ ...GOOD, '--bg': '#000000', color: '#fff' })).toEqual(GOOD);
+	});
+
+	it('drops a pre-§477 `--accent` entry: an inline --accent would beat both palettes', () => {
+		expect(sanitizeAccentVars({ '--accent': '#c0392b', '--accent-strong': '#7b1d14' })).toEqual({
+			'--accent-strong': '#7b1d14'
+		});
 		expect(sanitizeAccentVars('#fff')).toEqual({});
 		expect(sanitizeAccentVars(null)).toEqual({});
 	});
@@ -173,7 +183,12 @@ describe('app.html accent-boot script', () => {
 
 	it('ignores hostile values exactly as the store does', () => {
 		for (const bad of HOSTILE) {
-			const tampered = JSON.stringify({ '--accent': bad, '--accent-strong': '#7b1d14', '--bg': '#000' });
+			const tampered = JSON.stringify({
+				'--brand-accent-dark': bad,
+				'--accent': '#c0392b',
+				'--accent-strong': '#7b1d14',
+				'--bg': '#000'
+			});
 			const entries = { [accentCacheKey('acme')]: tampered };
 			expect(run('acme.localhost', entries)).toEqual(
 				readAccentCache(memoryStorage(entries).storage, 'acme')

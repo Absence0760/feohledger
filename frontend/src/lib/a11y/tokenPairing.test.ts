@@ -17,9 +17,11 @@ import {
 	lightPaletteBlocks,
 	PALETTE_THEMES,
 	parsePalette,
+	resolveColorValue,
 	type PaletteTheme,
 	type StyleSource
 } from './cssAudit';
+import { BRAND_ACCENT_PROPS } from '#lib/stores/brandTheme.ts';
 
 /**
  * Repo-wide token-pairing guard (WCAG 2.2 SC 1.4.3).
@@ -68,6 +70,10 @@ const palettes: Record<PaletteTheme, Record<string, string>> = {
 
 const assignedTokens = new Set<string>();
 for (const file of files) for (const t of collectAssignedTokens(file.source)) assignedTokens.add(t);
+// The white-label accent props are set at runtime from a `.ts` store this walk
+// does not read (`brand.svelte.ts` loops over the list), so name them here: the
+// palette's `var(--brand-accent-dark, …)` is a live hook, not a dead token.
+for (const t of BRAND_ACCENT_PROPS) assignedTokens.add(t);
 
 const sources: StyleSource[] = files.flatMap((f) => extractStyleBlocks(f.path, f.source));
 
@@ -271,8 +277,10 @@ for (const theme of PALETTE_THEMES) describe(`palette contract [${theme}]`, () =
 		'--brand-violet'
 	]) {
 		it(`${token} is legible on --bg and --surface`, () => {
-			const value = palette[token];
-			expect(value, `${token} must be declared in :root`).toBeDefined();
+			expect(palette[token], `${token} must be declared in :root`).toBeDefined();
+			// Resolved, not read raw: `--accent` is `var(--brand-accent-*, <default>)`
+			// so a white-label brand can supply one value per theme (decisions §477).
+			const value = resolveColorValue(palette[token], palette) ?? palette[token];
 			for (const surface of ['--bg', '--surface'] as const) {
 				const ratio = contrastRatio(value, palette[surface]);
 				expect(

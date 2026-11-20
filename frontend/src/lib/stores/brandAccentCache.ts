@@ -1,5 +1,6 @@
 /**
- * Per-workspace cache of the two applied white-label accent values, so a
+ * Per-workspace cache of the applied white-label accent values (one accent
+ * per theme plus the strong accent — `BRAND_ACCENT_PROPS`), so a
  * branded tenant's first frame after a reload paints in its own colour rather
  * than the platform blue for a round trip (docs/white-label.md § Accent before
  * first paint, docs/decisions.md §463).
@@ -18,12 +19,16 @@
  * - Every storage access is wrapped: a private mode or blocked site data
  *   degrades to "no cache", which is the old behaviour.
  */
-import { isValidHexColor } from '#lib/stores/brandTheme.ts';
+import { BRAND_ACCENT_PROPS, isValidHexColor } from '#lib/stores/brandTheme.ts';
 
 export const ACCENT_CACHE_PREFIX = 'feoh_brand_accent:';
 
-/** The two custom properties the cache may set — nothing else, ever. */
-export const ACCENT_PROPS = ['--accent', '--accent-strong'] as const;
+/**
+ * The custom properties the cache may set — nothing else, ever. An entry
+ * written before §477 holds `--accent`, which is dropped on read: that one
+ * cold load paints the platform accent and the fetched branding corrects it.
+ */
+export const ACCENT_PROPS = BRAND_ACCENT_PROPS;
 
 type AccentVars = Partial<Record<(typeof ACCENT_PROPS)[number], string>>;
 
@@ -38,7 +43,7 @@ export function accentCacheKey(tenantKey: string): string {
 	return ACCENT_CACHE_PREFIX + tenantKey;
 }
 
-/** Keep only the two accent props, and only when each is a valid hex colour. */
+/** Keep only the accent props, and only when each is a valid hex colour. */
 export function sanitizeAccentVars(raw: unknown): AccentVars {
 	const vars: AccentVars = {};
 	if (!raw || typeof raw !== 'object') return vars;
@@ -70,7 +75,7 @@ export function readAccentCache(
 export function writeAccentCache(
 	storage: AccentStorage | null | undefined,
 	tenantKey: string | null,
-	vars: Record<string, string>
+	vars: Partial<Record<string, string>>
 ): void {
 	if (!storage || !tenantKey) return;
 	const clean = sanitizeAccentVars(vars);

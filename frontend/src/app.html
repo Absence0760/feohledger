@@ -81,7 +81,7 @@
 					if (!raw) return;
 					var cached = JSON.parse(raw);
 					if (!cached || typeof cached !== 'object') return;
-					var props = ['--accent', '--accent-strong'];
+					var props = ['--brand-accent-dark', '--brand-accent-light', '--accent-strong'];
 					for (var j = 0; j < props.length; j++) {
 						var value = cached[props[j]];
 						if (typeof value === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value.trim())) {

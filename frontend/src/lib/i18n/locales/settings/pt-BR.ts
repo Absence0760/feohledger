@@ -81,6 +81,10 @@ export const messages = {
 	'org.branding.accentColorPicker': 'Seletor de cor de destaque',
 	'org.branding.accentStrong': 'Cor de destaque (forte)',
 	'org.branding.accentStrongPicker': 'Seletor de cor de destaque forte',
+	'org.branding.accentTextLight':
+		'Como texto no tema claro esta cor atinge só {ratio} (a WCAG AA exige 4,5:1), então links e abas ativas a mostrarão escurecida para {applied}.',
+	'org.branding.accentTextDark':
+		'Como texto no tema escuro esta cor atinge só {ratio} (a WCAG AA exige 4,5:1), então links e abas ativas a mostrarão clareada para {applied}.',
 	'org.branding.supportUrl': 'URL de suporte',
 	'org.branding.supportUrlPlaceholder': 'https://help.example.com',
 	'org.branding.legalUrl': 'URL legal / termos',

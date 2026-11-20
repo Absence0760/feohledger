@@ -1135,7 +1135,11 @@
 
 	// ── White-label branding ────────────────────────────────────────────
 	import { brand } from '#lib/stores/brand.svelte.ts';
-	import { accentStrongContrast } from '#lib/stores/brandTheme.ts';
+	import {
+		accentStrongContrast,
+		accentTextContrast,
+		THEME_NAMES
+	} from '#lib/stores/brandTheme.ts';
 	import { formatRatio, WCAG_AA_NORMAL } from '#lib/a11y/contrast.ts';
 	import FieldWarning from '#lib/components/ui/FieldWarning.svelte';
 
@@ -1200,6 +1204,11 @@
 	const accentStrongFails = $derived(
 		accentStrongRatio !== null && accentStrongRatio < WCAG_AA_NORMAL
 	);
+	// `accent_color` is also small text (links, the active tab), and no colour
+	// reads at 4.5:1 on both palettes' surfaces. Each theme shows the least
+	// shade of it that does (`themeAccent`, decisions §477); say so per theme,
+	// with the shade, so the change to the brand is never silent.
+	const accentText = $derived(accentTextContrast(brandAccentColor));
 
 	async function saveBranding() {
 		// Client-side validation mirroring the backend BrandConfig guards, so a
@@ -2116,6 +2125,22 @@
 										placeholder={DEFAULT_ACCENT}
 									/>
 								</span>
+								{#each THEME_NAMES as theme (theme)}
+									{@const verdict = accentText?.[theme]}
+									<FieldWarning
+										show={!!verdict && !verdict.meetsAA}
+										testId={`accent-text-contrast-${theme}`}
+										message={m(
+											theme === 'light'
+												? 'org.branding.accentTextLight'
+												: 'org.branding.accentTextDark',
+											{
+												ratio: verdict ? formatRatio(verdict.ratio) : '',
+												applied: verdict?.applied ?? ''
+											}
+										)}
+									/>
+								{/each}
 							</label>
 							<label>
 								<span>{m('org.branding.accentStrong')}</span>
