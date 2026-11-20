@@ -5,7 +5,8 @@
 	import { goto } from '$app/navigation';
 	import AuthCard from '#lib/components/auth/AuthCard.svelte';
 	import Spinner from '#lib/components/ui/Spinner.svelte';
-	import { setToken } from '#lib/api.ts';
+	import { ApiError, setToken } from '#lib/api.ts';
+	import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { brand } from '#lib/stores/brand.svelte.ts';
@@ -44,11 +45,21 @@
 	let phase = $state<'working' | 'error'>('working');
 	// Our own sentence is kept as its KEY and rendered through `m()`, so it
 	// follows the catalogue: a non-English one loads lazily and can land after
-	// this page has already decided what went wrong. A refusal from the
-	// backend arrives as text, localized by the transport.
+	// this page has already decided what went wrong. A coded refusal from the
+	// backend is kept as its `detail` and localized HERE, reactively, not
+	// frozen as the text the transport rendered: the exchange runs on mount,
+	// and its answer can land before the preloaded `refusal` slice has, when
+	// the transport could only fall back to the server's sentence
+	// (`api/resolvedOnly.ts`). Re-derived, it states the refusal from its code
+	// as soon as the slice arrives, and follows a locale switch.
 	let messageKey = $state<MessageKey | null>(null);
+	let refusalDetail = $state<unknown>(undefined);
 	let serverMessage = $state('');
-	const message = $derived(messageKey ? m(messageKey) : serverMessage);
+	const message = $derived(
+		messageKey
+			? m(messageKey)
+			: ((refusalDetail === undefined ? null : localizeApiDetail(refusalDetail, m)) ?? serverMessage)
+	);
 	// The IdP's own error code, shown small under the sentence for support.
 	let idpCode = $state<string | null>(null);
 	// The page the user set out for, stashed by /login before the IdP round
@@ -85,8 +96,10 @@
 			// The server's own refusal when it sent one for the user (a
 			// coded one arrives localized); never a network or JS message.
 			const text = apiErrorMessage(e, '');
-			if (text) serverMessage = text;
-			else messageKey = 'auth.callback.failed';
+			if (text) {
+				serverMessage = text;
+				if (e instanceof ApiError) refusalDetail = e.detail;
+			} else messageKey = 'auth.callback.failed';
 		}
 	});
 </script>
