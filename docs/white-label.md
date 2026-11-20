@@ -25,7 +25,7 @@ product name, logo, and accent colors. Shipped so far:
 |-------|-----------|--------|
 | `product_name` | `settings.brand.product_name` | Sidebar product name + document `<title>`. Fallback: **"FeohLedger"**. |
 | `logo_url` | `settings.brand.logo_url` | Sidebar logo `<img>`, and the mark in PDF and email headers. Fallback: the FeohLedger mark while the product keeps the platform name, otherwise a monogram of `product_name` in the app and the product name alone on PDFs and emails (see **The fallback mark** below). |
-| `accent_color` | `settings.brand.accent_color` | Overrides the `--accent` CSS token (borders, focus rings, accent text). |
+| `accent_color` | `settings.brand.accent_color` | Overrides the `--accent` CSS token (borders, focus rings, accent text), once per theme: shown as itself where it reads as text, as a darker (Light) or lighter (Dark) shade of it where it does not (see **The accent as text, per theme** below). |
 | `accent_strong_color` | `settings.brand.accent_strong_color` | Overrides the `--accent-strong` token (text-bearing accent backgrounds — buttons, active chips). |
 | `support_url` | `settings.brand.support_url` | Reserved for support links (exposed via the brand store). |
 | `legal_url` | `settings.brand.legal_url` | Reserved for legal/terms links (exposed via the brand store). |
@@ -62,6 +62,24 @@ that edit the colour — the `/organization` Branding panel and the
 else's users — show the real white-on-colour ratio inline as the field is
 typed (`stores/brandTheme.ts` `accentStrongContrast`, `ui/FieldWarning`).
 
+**The accent as text, per theme.** `accent_color` becomes `--accent`, which is
+also small text: links, the active tab, armed row actions. No colour reads at
+4.5:1 on both palettes (a colour dark enough for the light `--bg` is too dark
+for the dark `--surface`), so one inline `--accent` beating both palettes was
+bound to fail one of them. The brand store therefore never writes `--accent`
+inline. It writes `--brand-accent-dark` and `--brand-accent-light`, and each
+palette in `src/app.css` reads its own (`--accent: var(--brand-accent-dark,
+#638cff)` in the dark block, `var(--brand-accent-light, #2c4fc4)` in both light
+copies). Each value is `themeAccent(accent_color, theme)` in
+`stores/brandTheme.ts`: the tenant's hex unchanged when it already clears 4.5:1
+on that theme's `--bg` and `--surface`, otherwise the least mix of it toward
+black (Light) or white (Dark) that does. A mix with black or white keeps the
+hue. There is no per-theme setting: the tenant picks one colour, and the app
+keeps it legible in whichever theme the reader chose (decisions §477). The
+`/organization` Branding panel says so per theme while the field is typed,
+with the ratio and the shade the app will show instead
+(`accentTextContrast`, `ui/FieldWarning`).
+
 It is **advisory, not a block.** The backend accepts any valid hex on purpose:
 the brand is the tenant's call, and a hard refusal would make the API the
 arbiter of a design decision. What was missing was anyone stating the cost
@@ -92,7 +110,8 @@ unit-tested under vitest): `isValidHexColor()` and `brandThemeVars(brand)`. The
 latter returns only the CSS custom-property overrides for colors the org
 configured **with a valid hex** — an unset or malformed color is omitted so the
 AA-passing `src/app.css` default token stands. The theme is **never duplicated**;
-only `--accent` / `--accent-strong` are overridden.
+only the accent is overridden, through `BRAND_ACCENT_PROPS`
+(`--brand-accent-dark`, `--brand-accent-light`, `--accent-strong`).
 
 **Application** — `frontend/src/routes/+layout.svelte` runs an `$effect` (gated
 on the user being fully signed into a tenant, since the read needs auth) that
@@ -109,7 +128,7 @@ overrides (logout / tenant switch).
 
 **Accent before first paint** — the applied accent is cached per workspace so a
 branded tenant never sees the platform blue first. `brand.applyTheme()` writes
-the two values it applied to this origin's `localStorage` under
+the values it applied (`BRAND_ACCENT_PROPS`) to this origin's `localStorage` under
 `feoh_brand_accent:<getTenantStorageKey()>` (the slug on a platform host, the
 hostname on a vanity host; never the shared `feoh_theme` cookie, which every
 workspace sees) via `frontend/src/lib/stores/brandAccentCache.ts`, and only after
@@ -122,7 +141,9 @@ leaves the cached colour standing. Every value is re-validated as a 3- or
 entry cannot inject CSS; every storage access is wrapped, and blocked storage
 means "no cache" (the old behaviour). `reset()` clears the entry.
 `brandAccentCache.test.ts` executes the inline script against the store's own
-reads to keep the two equal (decisions §463).
+reads to keep the two equal (decisions §463). An entry cached before §477 holds
+`--accent`, which both readers drop: that workspace's next cold load paints the
+platform accent once, and the read re-caches the per-theme values.
 
 **The fallback mark** — `brand.mark` (`brandTheme.ts::brandMark`,
 `docs/decisions.md` §173). A configured logo always wins. Without one, the
@@ -155,7 +176,8 @@ When an org sets a custom accent, that's their choice. The defaults
 the **strong** accent exists specifically as a darker companion so white text on
 an accent background clears WCAG 1.4.3 contrast. Orgs are encouraged (UI hint) to
 set a darker strong accent for the same reason, but the app does not enforce a
-contrast ratio on custom colors in this slice.
+contrast ratio on `accent_strong_color`. `accent_color` as text is different:
+each theme shows a shade of it that clears 4.5:1 (above, decisions §477).
 
 ## Supplier-portal theming
 
@@ -211,7 +233,7 @@ helpers (`brandThemeVars`, `isValidHexColor`) with the employee store via
 The portal layout (`frontend/src/routes/portal/+layout.svelte`) runs an
 `$effect` that calls `portalBrand.ensureLoadedAndApply()` once a tenant is
 resolved (gated only on the tenant, not on auth, so it runs on the login page).
-`applyTheme()` writes `--accent` / `--accent-strong` onto
+`applyTheme()` writes the same `BRAND_ACCENT_PROPS` onto
 `document.documentElement` only for valid configured colors (an unset/malformed
 color leaves the AA-passing `app.css` token standing). The portal header renders
 the tenant logo (when set) + product name, falling back to the FeohLedger mark
@@ -235,7 +257,7 @@ buyer's theme.
   request never returns B's brand).
 - Frontend: `frontend/tests-e2e/portal/branding.spec.ts` — sets a known brand
   via the admin `PUT /api/organization/branding` then asserts the portal login
-  applies the accent (`--accent`/`--accent-strong` on `<html>`) + the
+  applies the accent (`--brand-accent-dark`/`--accent-strong` on `<html>`) + the
   product-name heading + `<title>` + the logo `<img>`.
 
 ## Branded outbound surfaces (PDFs + emails)

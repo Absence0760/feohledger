@@ -24102,3 +24102,41 @@ Rejected: keeping the fallback and only guarding `app/` (the §473 state),
 which leaves a default in the model for the next non-`app` caller, such as a
 script, to reach; and a column `default`, which also overwrites an explicit
 `None` at INSERT (§473).
+
+## 477. A white-label accent is derived per theme, not set per theme (closes the §289 accent-as-text followup; round 33, 2026-11-20)
+
+A tenant's `accent_color` was written inline on `<html>` as `--accent`, so it
+beat both palettes. `--accent` is also small text (links, the active tab, armed
+row actions), and no colour clears 4.5:1 on both palettes' text surfaces: to
+reach it on the light `--bg` (#f4f5f8) a colour needs relative luminance below
+about 0.16, and on the dark `--surface` (#181a23) above about 0.22. So one inline
+value always failed WCAG 1.4.3 in one theme. The platform's own dark accent
+`#638cff` is 2.86:1 on the light `--bg`, and nothing measured a brand accent as
+text in either theme.
+
+Decision: keep one tenant setting and derive the colour shown in each theme.
+`stores/brandTheme.ts` `themeAccent(color, theme)` returns the colour unchanged
+when it clears 4.5:1 on that theme's `--bg` and `--surface` (the two surfaces
+the platform accent is held to in `tokenPairing.test.ts`). Otherwise it returns
+the least mix of the colour toward black (Light) or white (Dark) that does,
+found by bisection on the byte-rounded colour. A linear mix with black or white
+keeps the hue. The store writes the results as `--brand-accent-dark` and
+`--brand-accent-light`, never `--accent`, and each palette in `src/app.css`
+reads its own (`--accent: var(--brand-accent-dark, #638cff)`, and
+`var(--brand-accent-light, #2c4fc4)` in both light copies). `--accent-strong`
+stays one inline value, because its contract (white text on it) does not depend
+on the theme. The `/organization` Branding panel reports the colour as text in
+both themes while it is typed, with the shade shown in place of a failing one
+(`accentTextContrast`). The accent cache and the `accent-boot` script carry the
+new props. An entry cached before this change holds `--accent`, which both drop,
+so that workspace's next cold load paints the platform accent once.
+
+Rejected: a per-theme tenant setting (`accent_color_light`). It needs a schema,
+API, partner-modal and mobile change, and it still lets a tenant save an
+illegible light accent: the advisory alone would not fix 1.4.3. Nothing in
+`docs/white-label.md` or §28 asks for per-theme brand control. A tenant whose
+brand needs an exact light shade can still pick a colour that clears 4.5:1 in
+Light; it is then shown unchanged there. Also rejected: CSS `light-dark()` in
+the inline value, which also needs two colours and would put a non-hex string
+in the cache and the boot script, which validate hex; and refusing a failing
+colour, which §28 already rejected for the strong accent.
