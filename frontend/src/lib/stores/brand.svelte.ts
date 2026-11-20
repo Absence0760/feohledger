@@ -100,7 +100,7 @@ class BrandStore {
 	 * clear any previously-applied override that's no longer set). No-op on the
 	 * server. Only touches the brand accent props (`BRAND_ACCENT_PROPS`: one
 	 * accent per theme, plus the strong accent) — never `--accent` itself, which
-	 * each palette in `app.css` reads from its own one (decisions §477).
+	 * each palette in `app.css` reads from its own one (decisions §478).
 	 */
 	applyTheme(): void {
 		if (typeof document === 'undefined') return;

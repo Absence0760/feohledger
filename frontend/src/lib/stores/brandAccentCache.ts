@@ -25,7 +25,7 @@ export const ACCENT_CACHE_PREFIX = 'feoh_brand_accent:';
 
 /**
  * The custom properties the cache may set — nothing else, ever. An entry
- * written before §477 holds `--accent`, which is dropped on read: that one
+ * written before §478 holds `--accent`, which is dropped on read: that one
  * cold load paints the platform accent and the fetched branding corrects it.
  */
 export const ACCENT_PROPS = BRAND_ACCENT_PROPS;

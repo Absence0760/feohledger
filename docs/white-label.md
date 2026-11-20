@@ -75,7 +75,7 @@ copies). Each value is `themeAccent(accent_color, theme)` in
 on that theme's `--bg` and `--surface`, otherwise the least mix of it toward
 black (Light) or white (Dark) that does. A mix with black or white keeps the
 hue. There is no per-theme setting: the tenant picks one colour, and the app
-keeps it legible in whichever theme the reader chose (decisions §477). The
+keeps it legible in whichever theme the reader chose (decisions §478). The
 `/organization` Branding panel says so per theme while the field is typed,
 with the ratio and the shade the app will show instead
 (`accentTextContrast`, `ui/FieldWarning`).
@@ -141,7 +141,7 @@ leaves the cached colour standing. Every value is re-validated as a 3- or
 entry cannot inject CSS; every storage access is wrapped, and blocked storage
 means "no cache" (the old behaviour). `reset()` clears the entry.
 `brandAccentCache.test.ts` executes the inline script against the store's own
-reads to keep the two equal (decisions §463). An entry cached before §477 holds
+reads to keep the two equal (decisions §463). An entry cached before §478 holds
 `--accent`, which both readers drop: that workspace's next cold load paints the
 platform accent once, and the read re-caches the per-theme values.
 
@@ -177,7 +177,7 @@ the **strong** accent exists specifically as a darker companion so white text on
 an accent background clears WCAG 1.4.3 contrast. Orgs are encouraged (UI hint) to
 set a darker strong accent for the same reason, but the app does not enforce a
 contrast ratio on `accent_strong_color`. `accent_color` as text is different:
-each theme shows a shade of it that clears 4.5:1 (above, decisions §477).
+each theme shows a shade of it that clears 4.5:1 (above, decisions §478).
 
 ## Supplier-portal theming
 

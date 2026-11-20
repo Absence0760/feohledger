@@ -92,7 +92,7 @@ export const ACCENT_TEXT_SURFACES: Record<ThemeName, Record<'--bg' | '--surface'
  * colour picked for one theme ended up as text on the other. Instead each
  * palette in `src/app.css` reads its own one —
  * `--accent: var(--brand-accent-dark, …)` in the dark block,
- * `var(--brand-accent-light, …)` in the light ones (docs/decisions.md §477).
+ * `var(--brand-accent-light, …)` in the light ones (docs/decisions.md §478).
  * `--accent-strong` keeps one value: its contract (white text on it) does not
  * depend on the theme.
  */
@@ -143,7 +143,7 @@ function mixToward(color: Rgb, theme: ThemeName, t: number): Rgb {
  * otherwise the least-changed shade of it that does — darkened for Light,
  * lightened for Dark. `null` for a value that is not a usable hex.
  *
- * No new tenant setting (docs/decisions.md §477): the tenant picks one brand
+ * No new tenant setting (docs/decisions.md §478): the tenant picks one brand
  * colour, and the app keeps it legible in whichever theme the reader chose.
  * Darkening on a light page (or lightening on a dark one) only ever raises the
  * ratio once the colour is past the surface's own lightness, so the smallest

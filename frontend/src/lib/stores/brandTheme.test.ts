@@ -116,7 +116,7 @@ function worst(color: string, theme: ThemeName): number {
 }
 
 /**
- * The derivation behind a white-label accent (docs/decisions.md §477): one
+ * The derivation behind a white-label accent (docs/decisions.md §478): one
  * brand colour, shown per theme as itself when it reads as text there, or as
  * the least-changed shade of its own hue that does.
  */

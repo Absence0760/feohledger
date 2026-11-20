@@ -232,7 +232,7 @@ test.describe('white-label accent before first paint', () => {
 		await stubJson(page, BRANDING, { accent_color: ACCENT, accent_strong_color: STRONG });
 		await page.goto('/');
 		// #c0392b already reads as text on the light palette, so its light-theme
-		// accent is the colour itself (the dark one is a lightened shade, §477).
+		// accent is the colour itself (the dark one is a lightened shade, §478).
 		const accentOnRoot = () =>
 			page.evaluate(() =>
 				document.documentElement.style.getPropertyValue('--brand-accent-light')

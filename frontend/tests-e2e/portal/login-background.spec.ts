@@ -99,7 +99,7 @@ test.describe('/portal/login — decorative backdrop (#422)', () => {
 			// the public branding read resolves.
 			await expect
 				.poll(async () =>
-					// The dark-theme accent: #2fae5c reads as text there unchanged (§477).
+					// The dark-theme accent: #2fae5c reads as text there unchanged (§478).
 					page.evaluate(() =>
 						document.documentElement.style.getPropertyValue('--brand-accent-dark').trim()
 					)

@@ -48,7 +48,7 @@
 	   <html> (stores/brandTheme.ts), each already held to 4.5:1 as text on
 	   this palette's --bg and --surface. --accent itself is never written
 	   inline, because an inline value would beat the light palette too
-	   (decisions §477). */
+	   (decisions §478). */
 	--accent: var(--brand-accent-dark, #638cff);
 	/* WCAG 1.4.3 Contrast: --accent (#638cff) only reaches 3.12:1 against
 	   white, so white text on an --accent fill fails the 4.5:1 bar. This

@@ -1682,7 +1682,7 @@ script only decides which one the page asks for.
   writes `--brand-accent-dark` / `--brand-accent-light`, each the tenant's
   colour or the least darker / lighter shade of it that reads as text there
   (`stores/brandTheme.ts` `themeAccent`), and each palette's `--accent` reads
-  its own (`docs/decisions.md` §477). A new palette block that redeclares
+  its own (`docs/decisions.md` §478). A new palette block that redeclares
   `--accent` must keep that `var(--brand-accent-*, …)` shape.
 
 ### Colour tokens and contrast (WCAG 1.4.3)
@@ -1801,7 +1801,7 @@ always exists. Rationale + what was rejected: `docs/decisions.md` §28.
 advisory on both surfaces that edit it — `/organization` Branding and the
 `/admin/partner` child-branding modal. Advisory, not a block: the backend
 accepts any valid hex and the brand is the tenant's call. `--accent` as text
-is not left to the tenant: it is derived per theme (§ Themes, decisions §477),
+is not left to the tenant: it is derived per theme (§ Themes, decisions §478),
 and `accentTextContrast` reports the result for both themes on `/organization`
 Branding.
 

@@ -81,7 +81,7 @@ test.describe('supplier-portal white-label theming', () => {
 		await expect
 			.poll(async () =>
 				page.evaluate(() =>
-					// #a1b2c3 reads as text on the dark palette unchanged (§477).
+					// #a1b2c3 reads as text on the dark palette unchanged (§478).
 					document.documentElement.style.getPropertyValue('--brand-accent-dark').trim()
 				)
 			)

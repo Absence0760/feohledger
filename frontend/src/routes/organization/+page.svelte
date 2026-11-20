@@ -1206,7 +1206,7 @@
 	);
 	// `accent_color` is also small text (links, the active tab), and no colour
 	// reads at 4.5:1 on both palettes' surfaces. Each theme shows the least
-	// shade of it that does (`themeAccent`, decisions §477); say so per theme,
+	// shade of it that does (`themeAccent`, decisions §478); say so per theme,
 	// with the shade, so the change to the brand is never silent.
 	const accentText = $derived(accentTextContrast(brandAccentColor));
 

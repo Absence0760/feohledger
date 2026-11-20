@@ -24103,7 +24103,7 @@ which leaves a default in the model for the next non-`app` caller, such as a
 script, to reach; and a column `default`, which also overwrites an explicit
 `None` at INSERT (§473).
 
-## 477. A white-label accent is derived per theme, not set per theme (closes the §289 accent-as-text followup; round 33, 2026-11-20)
+## 478. A white-label accent is derived per theme, not set per theme (closes the §289 accent-as-text followup; round 33, 2026-11-20)
 
 A tenant's `accent_color` was written inline on `<html>` as `--accent`, so it
 beat both palettes. `--accent` is also small text (links, the active tab, armed

@@ -118,7 +118,7 @@ describe('accent cache: validation', () => {
 		expect(sanitizeAccentVars({ ...GOOD, '--bg': '#000000', color: '#fff' })).toEqual(GOOD);
 	});
 
-	it('drops a pre-§477 `--accent` entry: an inline --accent would beat both palettes', () => {
+	it('drops a pre-§478 `--accent` entry: an inline --accent would beat both palettes', () => {
 		expect(sanitizeAccentVars({ '--accent': '#c0392b', '--accent-strong': '#7b1d14' })).toEqual({
 			'--accent-strong': '#7b1d14'
 		});

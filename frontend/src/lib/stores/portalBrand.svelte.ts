@@ -83,7 +83,7 @@ class PortalBrandStore {
 	 * Apply the configured accent colors to `document.documentElement` (and clear
 	 * any previously-applied override that's no longer set). No-op on the server.
 	 * Only touches the brand accent props (one accent per theme plus the strong
-	 * accent, `BRAND_ACCENT_PROPS`, decisions §477) — never the rest of the theme.
+	 * accent, `BRAND_ACCENT_PROPS`, decisions §478) — never the rest of the theme.
 	 */
 	applyTheme(): void {
 		if (typeof document === 'undefined') return;

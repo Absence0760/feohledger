@@ -279,7 +279,7 @@ for (const theme of PALETTE_THEMES) describe(`palette contract [${theme}]`, () =
 		it(`${token} is legible on --bg and --surface`, () => {
 			expect(palette[token], `${token} must be declared in :root`).toBeDefined();
 			// Resolved, not read raw: `--accent` is `var(--brand-accent-*, <default>)`
-			// so a white-label brand can supply one value per theme (decisions §477).
+			// so a white-label brand can supply one value per theme (decisions §478).
 			const value = resolveColorValue(palette[token], palette) ?? palette[token];
 			for (const surface of ['--bg', '--surface'] as const) {
 				const ratio = contrastRatio(value, palette[surface]);
