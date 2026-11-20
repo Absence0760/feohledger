@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -479,13 +480,31 @@ async def _refuse_taken_email(
             detail=EMAIL_CHECK_THROTTLED_DETAIL,
             headers=exc.headers,
         ) from exc
+    await _refuse_held_email(db, org_id, email, exclude_user_id=exclude_user_id)
+
+
+async def _refuse_held_email(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    email: str,
+    *,
+    exclude_user_id: uuid.UUID | None = None,
+) -> None:
+    """The lookup half of :func:`_refuse_taken_email`, without the budget gate.
+
+    Also what a create that lost the race to the database answers with: a
+    concurrent writer took the address between the pre-check and the flush,
+    and `uq_users_email_lower` refused the insert (§475) — the same coded 409
+    the pre-check would have given a moment later, never a 500."""
     holder = await email_holder_org_id(db, email, exclude_user_id=exclude_user_id)
     if holder is None:
         return
     if holder == org_id:
         raise HTTPException(status_code=409, detail=EMAIL_IN_THIS_WORKSPACE_DETAIL)
     await record_auth_failure(
-        EMAIL_COLLISION_SCOPE, budget_key, window_seconds=EMAIL_COLLISION_WINDOW_SECONDS
+        EMAIL_COLLISION_SCOPE,
+        auth_identity_key(str(org_id)),
+        window_seconds=EMAIL_COLLISION_WINDOW_SECONDS,
     )
     raise HTTPException(status_code=409, detail=EMAIL_IN_OTHER_WORKSPACE_DETAIL)
 
@@ -622,8 +641,16 @@ async def create_user(
         organization_id=org_id,
         must_change_password=False,
     )
-    db.add(new_user)
-    await db.flush()
+    # A savepoint, so losing the race to a concurrent create of the same
+    # address (any case: the index is on `lower(email)`) is the coded 409, and
+    # the session stays usable to say so.
+    try:
+        async with db.begin_nested():
+            db.add(new_user)
+            await db.flush()
+    except IntegrityError:
+        await _refuse_held_email(db, org_id, email)
+        raise
 
     # Assign roles. Restrict the lookup to system roles + this org's
     # custom roles so an admin from acme can't accidentally (or

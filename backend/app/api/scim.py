@@ -23,6 +23,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -537,8 +538,16 @@ async def create_user(
         organization_id=org.id,
         must_change_password=False,
     )
-    db.add(user)
-    await db.flush()
+    # A concurrent create that took the address between the check above and
+    # this flush trips `uq_users_email_lower` (§475): answer it with the same
+    # 409 `uniqueness`, not a 500 the IdP would retry forever.
+    try:
+        async with db.begin_nested():
+            db.add(user)
+            await db.flush()
+    except IntegrityError:
+        await _refuse_taken_username(db, org, email)
+        raise
     await db.commit()
     await db.refresh(user)
     logger.info("SCIM provisioned user %s in org %s", user.id, org.slug)
