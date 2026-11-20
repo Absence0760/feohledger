@@ -1410,7 +1410,6 @@
 			onloadmore={() => expenseStore.loadMore()}
 			moreKey="expenses.loadMore"
 			allKey="expenses.showingAll"
-			loadingKey="expenses.loading"
 		/>
 	{:else if tab === 'reports'}
 		<!-- ===================== Reports tab ===================== -->

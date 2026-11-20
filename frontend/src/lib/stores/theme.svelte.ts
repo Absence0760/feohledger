@@ -32,11 +32,25 @@ class ThemeStore {
 	/** The palette actually showing. */
 	resolved: ResolvedTheme = $derived(resolveTheme(this.choice, this.#prefersLight));
 
+	constructor() {
+		// Read the stored choice and the OS NOW, not in `init()`: the root
+		// layout calls that from an `$effect`, which runs after its children
+		// have mounted, so until then `resolved` said dark whatever `app.html`
+		// had painted. The landing's ornament `<img>` mounted with the dark
+		// render under a stored Light choice, the browser started fetching it,
+		// and `init()` swapped it a moment later.
+		if (browser) this.#read();
+	}
+
+	#read(): void {
+		this.choice = readThemeChoice(browserStorage(), browserCookies());
+		this.#prefersLight = systemPrefersLight(window);
+	}
+
 	init(): void {
 		if (!browser || this.#initialised) return;
 		this.#initialised = true;
-		this.choice = readThemeChoice(browserStorage(), browserCookies());
-		this.#prefersLight = systemPrefersLight(window);
+		this.#read();
 		try {
 			window.matchMedia?.(PREFERS_LIGHT_QUERY).addEventListener('change', (e) => {
 				this.#prefersLight = e.matches;

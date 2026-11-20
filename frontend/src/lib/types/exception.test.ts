@@ -112,7 +112,7 @@ function backendStatuses(): Set<string> {
  * IS the queue's chip order, because the chips render one per count.
  */
 function summaryStatuses(): string[] {
-	const py = source('services/exception_lifecycle.py');
+	const py = source('api/exceptions.py');
 	const rows = [...py.matchAll(/"([a-z0-9_]+)":\s*by_status\.get\("([a-z0-9_]+)", 0\)/g)];
 	expect(rows.length, 'the /summary by_status block stopped matching').toBeGreaterThan(3);
 	for (const row of rows) {

@@ -51,13 +51,19 @@ const enT = (key: MessageKey, params?: Record<string, string | number>) =>
 
 describe('the invoices the Generate dialog offers', () => {
 	it('narrows to exactly the statuses the mint accepts — the backend tuple, read off disk', () => {
-		const source = readFileSync(
-			new URL('../../../../backend/app/api/payments.py', import.meta.url).pathname,
-			'utf8'
+		const read = (path: string) =>
+			readFileSync(new URL(`../../../../backend/app/${path}`, import.meta.url).pathname, 'utf8');
+		// The mint gates on `services/payment_gates.PAYABLE_INVOICE_STATUSES`,
+		// which is the string form of `models/invoice_status.PAYABLE_STATUSES`.
+		expect(read('services/payment_gates.py')).toMatch(
+			/^PAYABLE_INVOICE_STATUSES = tuple\(state\.value for state in PAYABLE_STATUSES\)$/m
 		);
-		const block = source.match(/^PAYABLE_INVOICE_STATUSES = \(([\s\S]*?)\n\)/m);
-		expect(block, 'PAYABLE_INVOICE_STATUSES not found in api/payments.py').not.toBeNull();
-		const backend = [...block![1].matchAll(/InvoiceStatus\.(\w+)\.value/g)].map((x) => x[1]);
+		const block = read('models/invoice_status.py').match(
+			/^PAYABLE_STATUSES: tuple\[InvoiceStatus, \.\.\.\] = \(([\s\S]*?)\n\)/m
+		);
+		expect(block, 'PAYABLE_STATUSES not found in models/invoice_status.py').not.toBeNull();
+		const backend = [...block![1].matchAll(/InvoiceStatus\.(\w+),/g)].map((x) => x[1]);
+		expect(backend.length).toBeGreaterThan(0);
 		expect([...CARDABLE_INVOICE_STATUSES].sort()).toEqual(backend.sort());
 	});
 

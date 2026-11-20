@@ -2760,7 +2760,7 @@
 							testId: `einvoice-format-${opt.format}`
 						}))}
 						onselect={handleEinvoiceDownload}
-						disabled={einvoiceBusy !== null}
+						busy={einvoiceBusy !== null}
 						testId="einvoice-menu-toggle"
 						menuTestId="einvoice-menu"
 					/>

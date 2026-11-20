@@ -30,6 +30,7 @@
 		items,
 		onselect,
 		disabled = false,
+		busy = false,
 		variant = 'secondary',
 		icon,
 		menuLabel,
@@ -42,6 +43,12 @@
 		items: readonly { value: T; label: string; testId?: string }[];
 		onselect: (value: T) => void;
 		disabled?: boolean;
+		/** The action it ran is in flight. The trigger refuses to open and
+		 *  announces `aria-busy`, spelled `aria-disabled` rather than `disabled`:
+		 *  choosing an item returns focus to the trigger, and a natively disabled
+		 *  button would drop that focus to `<body>` (2.4.3), as `RowAction busy`
+		 *  avoids for the same reason. */
+		busy?: boolean;
 		/** Which shared button class the trigger wears (`btn-<variant>`). */
 		variant?: 'secondary' | 'cancel' | 'ghost';
 		/** An icon drawn before the label (mark it `aria-hidden`). */
@@ -66,8 +73,11 @@
 	let menu: HTMLDivElement | undefined = $state();
 	const itemEls: HTMLButtonElement[] = $state([]);
 
+	// Disabled or busy: either way it does not open.
+	const unavailable = $derived(disabled || busy);
+
 	async function openMenu(focus: 'first' | 'last') {
-		if (disabled || items.length === 0) return;
+		if (unavailable || items.length === 0) return;
 		placement = { side: 'below', shiftX: 0 };
 		open = true;
 		await tick();
@@ -142,6 +152,18 @@
 		focusItem(next);
 	}
 
+	// The menu's keys are heard on the menu itself, natively, not through
+	// Svelte's delegated `onkeydown` (which runs at the app root): an enclosing
+	// dialog's focus trap listens on the dialog node, BETWEEN the menu and the
+	// root, so a delegated handler's `stopPropagation()` on Escape came after the
+	// trap had already closed the dialog.
+	$effect(() => {
+		const el = menu;
+		if (!el) return;
+		el.addEventListener('keydown', onMenuKeydown);
+		return () => el.removeEventListener('keydown', onMenuKeydown);
+	});
+
 	$effect(() => {
 		if (!open) return;
 		const onPointerDown = (e: PointerEvent) => {
@@ -156,9 +178,9 @@
 		};
 	});
 
-	// A trigger disabled while open (its action went busy) takes the menu with it.
+	// A trigger disabled or busy while open takes the menu with it.
 	$effect(() => {
-		if (disabled && open) closeMenu(false);
+		if (unavailable && open) closeMenu(false);
 	});
 </script>
 
@@ -173,6 +195,9 @@
 		aria-controls={open ? menuId : undefined}
 		data-testid={testId}
 		{disabled}
+		aria-disabled={busy || undefined}
+		aria-busy={busy || undefined}
+		class:busy
 		onclick={() => (open ? closeMenu(true) : void openMenu('first'))}
 		onkeydown={onTriggerKeydown}
 	>
@@ -202,7 +227,6 @@
 			aria-label={menuLabel}
 			aria-labelledby={menuLabel ? undefined : triggerId}
 			data-testid={menuTestId ?? (testId ? `${testId}-menu` : undefined)}
-			onkeydown={onMenuKeydown}
 		>
 			{#each items as item, i (item.value)}
 				<button
@@ -230,6 +254,15 @@
 
 	.menu-caret {
 		transition: transform 0.15s ease;
+	}
+
+	/* Busy reads as the shared buttons' disabled look (app.css), with the
+	   progress cursor: it is waiting, not refused. */
+	.menu-trigger.busy {
+		border-color: var(--border);
+		background: var(--surface);
+		color: var(--text-muted);
+		cursor: progress;
 	}
 
 	.menu-caret.flipped {

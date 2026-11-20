@@ -52,6 +52,14 @@ describe('MenuButton (closed)', () => {
 		expect(body).not.toMatch(/role="menuitem"/);
 	});
 
+	it('busy keeps the trigger focusable: aria-disabled + aria-busy, never native disabled', () => {
+		const tag = trigger({ busy: true });
+		expect(tag).toMatch(/aria-disabled="true"/);
+		expect(tag).toMatch(/aria-busy="true"/);
+		expect(tag).not.toMatch(/\sdisabled(=""|\s|>)/);
+		expect(trigger()).not.toMatch(/aria-(disabled|busy)/);
+	});
+
 	it('passes disabled and the test id through to the trigger', () => {
 		const tag = trigger({ disabled: true, testId: 'export' });
 		expect(tag).toMatch(/\sdisabled(=""|\s|>)/);
