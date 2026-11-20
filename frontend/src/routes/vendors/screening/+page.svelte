@@ -513,7 +513,14 @@
 		busy = { vendorId: target.vendor_id, action: 'adjudicate' };
 		try {
 			if (kind === 'adjudicate') {
-				const adjudication = await adjudicateSanctionsFalsePositive(target.vendor_id, reason);
+				// The stamp covers exactly the screen this row shows; a rescreen
+				// since it was read answers 409 and the reload below shows it.
+				if (!target.latest_check_id) return;
+				const adjudication = await adjudicateSanctionsFalsePositive(
+					target.vendor_id,
+					reason,
+					target.latest_check_id
+				);
 				toast(m('vendors.screening.queue.adjudication.adjudicated'), 'success');
 				if (selected?.vendor_id === target.vendor_id) adjudicationReason = '';
 				await applyAdjudication(target.vendor_id, adjudication);
@@ -525,6 +532,9 @@
 			}
 		} catch (err) {
 			toast(errorMessage(err, m('vendors.screening.queue.adjudication.failed')), 'error');
+			// A refusal means the row's verdicts were stale (a rescreen landed, or
+			// someone else adjudicated): read the queue again before offering more.
+			await applyAdjudication(target.vendor_id, target.adjudication);
 		} finally {
 			if (busy?.vendorId === target.vendor_id) busy = null;
 		}
