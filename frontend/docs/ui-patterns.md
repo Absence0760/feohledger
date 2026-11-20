@@ -985,7 +985,7 @@ Where each verdict lives (backend gate → field):
 | Expense reports (list + detail) | `actions.{submit,approve,reject,compose}` | `services/expense_controls.report_{submit,approve,reject,compose}_refusal` |
 | Expense card transactions | `actions.{match,create_expense,unmatch,ignore}` | `services/expense_controls.card_txn_{link,unmatch,ignore}_refusal` |
 | Intake | `actions.{submit,approve,reject,convert,cancel,reopen}` | `services/procurement_controls.intake_transition_refusal` / `.intake_convert_refusal`. Every refusal hides the control; a row that already names its requisition shows the link instead of Convert (which would only replay it) |
-| Requisitions | `actions.{submit,approve,reject,convert,cancel,reopen}` | `services/procurement_controls.requisition_{transition,approve,convert}_refusal`. `approval_segregation` shows Approve disabled beside its reason (`approve-refusal-<id>`); every other refusal hides the control; a converted row with its PO hides Convert |
+| Requisitions | `actions.{submit,approve,reject,convert,cancel,reopen}` | `services/procurement_controls.requisition_{transition,approve,convert}_refusal`. `requisition_approval_segregation` shows Approve disabled with its reason above it (`RowAction reason`, `approve-refusal-<id>`); every other refusal hides the control; a converted row with its PO hides Convert |
 
 Each is pinned by a backend parity test that, for every seeded role and row
 state, asks both sides — the verdict and the real POST — and fails unless they

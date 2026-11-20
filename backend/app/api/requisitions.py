@@ -641,11 +641,12 @@ async def approve_requisition(
     """Approve a pending requisition: ``pending_approval → approved``.
 
     Segregation of duties: the approver must be neither the requester nor anyone
-    who materially edited the draft (``material_editor_ids``) — reuses
-    ``check_segregation`` → 403. Stamps ``approved_by`` / ``approved_at``."""
+    who materially edited the draft (``material_editor_ids``) — the shared
+    ``violates_segregation`` rule, 403 ``requisition_approval_segregation``.
+    Stamps ``approved_by`` / ``approved_at``."""
     req = await _get_or_404(db, req_id, entity_id, for_update=True)
     # Status, then SoD — approver ∉ requester ∪ material editors
-    # (``check_segregation``'s coded 403, via the shared gate). The editor set
+    # (403 ``requisition_approval_segregation``, via the shared gate). The editor set
     # is what stops an ap_manager who rewrote someone else's draft (or the
     # intake-converted requisition they then edited) from approving the spend
     # they wrote.

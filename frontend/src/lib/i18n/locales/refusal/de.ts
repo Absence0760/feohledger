@@ -88,6 +88,7 @@ export const messages = {
 	'refusal.cardTxnAlreadyIgnored': "Diese Kartentransaktion wird bereits ignoriert.",
 	'refusal.intakeStatusRefused': "Das ist nicht möglich, solange diese Anfrage den Status {status} hat.",
 	'refusal.requisitionStatusRefused': "Das ist nicht möglich, solange diese Bestellanforderung den Status {status} hat.",
+	'refusal.requisitionApprovalSegregation': "Funktionstrennung: Wer diese Bestellanforderung gestellt oder bearbeitet hat, darf sie nicht auch freigeben.",
 	'refusal.expenseReportLocked': "Der Gesamtbetrag dieser Abrechnung ist gesperrt, solange ihr Status {status} ist. Ihre Positionen können nicht geändert werden.",
 	'refusal.expenseFxSourceMissing': "Es ist keine Wechselkursquelle konfiguriert, daher kann diese Position nicht in die Währung der Abrechnung umgerechnet werden.",
 	'refusal.expenseFxRateUnavailable': "Es ist kein Wechselkurs verfügbar, um {source} in die Abrechnungswährung {target} umzurechnen.",

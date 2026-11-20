@@ -215,7 +215,7 @@ async def test_the_requisition_verdicts_match_every_lifecycle_endpoint(realdb, r
                     assert set(resp.json()["actions"]) == set(ACTIONS)
     if role in ("admin", "ap_manager", "cfo"):
         # The requester and a material editor are both refused approve.
-        assert "approval_segregation" in seen
+        assert "requisition_approval_segregation" in seen
         assert "requisition_status_refused" in seen
     else:
         assert "role_not_permitted" in seen
@@ -229,7 +229,7 @@ async def test_the_requester_may_reject_their_own_requisition(realdb):
     req_id = await _requisition(realdb, requester=me, status="pending_approval")
     async with realdb.client(key=TENANT, role="ap_manager") as c:
         row = (await c.get(f"/api/requisitions/{req_id}")).json()
-        assert row["actions"]["approve"]["code"] == "approval_segregation"
+        assert row["actions"]["approve"]["code"] == "requisition_approval_segregation"
         assert row["actions"]["reject"] is None
         resp = await c.post(f"/api/requisitions/{req_id}/reject", json={"reason": "withdrawn"})
         assert resp.status_code == 200, resp.text

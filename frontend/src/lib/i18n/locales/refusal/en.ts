@@ -85,6 +85,7 @@ export const enRefusal = {
 	'refusal.cardTxnAlreadyIgnored': "This card transaction is already ignored.",
 	'refusal.intakeStatusRefused': "That can't be done while this intake request is {status}.",
 	'refusal.requisitionStatusRefused': "That can't be done while this requisition is {status}.",
+	'refusal.requisitionApprovalSegregation': "Segregation of duties: a user who requested or edited this requisition cannot also approve it.",
 	'refusal.expenseReportLocked': "This report's total is locked while it is {status}, so its lines can't be changed.",
 	'refusal.expenseFxSourceMissing': "No exchange-rate source is configured, so this line can't be converted into the report's currency.",
 	'refusal.expenseFxRateUnavailable': "No exchange rate is available to convert {source} into the report currency {target}.",

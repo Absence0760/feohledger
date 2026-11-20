@@ -529,6 +529,9 @@ const BUILDERS: Record<string, Builder> = {
 					status: statusLabel(status, intakeStatusLabelKey, t)
 				});
 	},
+	// `services/procurement_controls.requisition_approve_refusal` — the
+	// requester or a material editor approving it (not the invoice sentence)
+	requisition_approval_segregation: fixed('refusal.requisitionApprovalSegregation'),
 	requisition_status_refused: (p, t) => {
 		const status = str(p, 'status');
 		return status === null
