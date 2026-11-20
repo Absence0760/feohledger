@@ -8,6 +8,7 @@
 		REQUISITION_STATUS_TONES
 	} from '#lib/types/requisition.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { isAllowed, isOffered, refusalText } from '#lib/api/actionVerdicts.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listRequisitions,
@@ -47,22 +48,17 @@
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 
+	// Raise / edit / delete a draft: the create set.
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk'));
-	// approve / reject = admin | ap_manager | CFO. One predicate used to cover
-	// approve, reject AND convert, which silently dropped the CFO: `/requisitions`
-	// approve and reject are `require_roles(ADMIN, AP_MANAGER, CFO)`, so a CFO
-	// could open the queue and had no decision control on it — exactly the split
-	// `/expenses` already had to make between its report approve (allows cfo) and
-	// reject (does not).
-	const canDecideRole = $derived(auth.isManager || auth.isCfo);
-	// convert-to-PO stays admin | ap_manager — it is the money step, and
-	// `requisitions.py::convert_to_po` gates it that way.
-	const canConvert = $derived(auth.isManager);
-	// `POST /api/requisitions/{id}/reopen` is gated
-	// `require_roles(ADMIN, AP_MANAGER, AP_CLERK)` — the CREATE set, not the
-	// decide set. Reopening is the buyer redoing their own ask, so it reuses
-	// `canCreate`; a CFO can reject but cannot reopen, and `canDecideRole` would
-	// have offered them a button that can only 403.
+	// Whether a row offers Submit / Approve / Reject / Convert / Reopen /
+	// Cancel is NOT decided here: each row carries the server's verdict
+	// (`r.actions`, built from the gates the endpoints raise from — backend
+	// `api/requisitions.requisition_action_refusals`), read through
+	// `actionVerdicts.ts`. The page used to restate three role sets, a status
+	// list and `requester_user_id !== me`, which hid a Reject the endpoint
+	// accepts from the requester and offered a material editor an Approve that
+	// 403s. A status or role refusal hides the control; a segregation refusal
+	// shows Approve disabled beside its reason (`approveExplained`).
 
 	const PAGE_SIZE = 100;
 
@@ -435,14 +431,12 @@
 		}
 	}
 
-	// SoD: a manager can approve/reject a pending requisition only if they aren't
-	// the requester (the backend also enforces this — 403).
-	function canDecide(r: Requisition): boolean {
-		return (
-			canDecideRole &&
-			r.status === 'pending_approval' &&
-			auth.user?.id !== r.requester_user_id
-		);
+	// A refused Approve is explained (shown disabled with its sentence) when
+	// the reader holds a deciding role and the row is awaiting a decision —
+	// i.e. any refusal but the role and the status ones, which hide it.
+	function approveExplained(r: Requisition): boolean {
+		const v = r.actions?.approve;
+		return isOffered(v) && v?.code !== 'requisition_status_refused';
 	}
 
 	// Outside-click un-arms any pending armed-confirm (delete, reopen).
@@ -501,14 +495,19 @@
 						<Badge tone={REQUISITION_STATUS_TONES[r.status as RequisitionStatus]} variant={r.status}>{statusLabel(r.status)}</Badge>
 					</td>
 					<td class="actions">
-						{#if canCreate && r.status === 'draft'}
+						{#if isAllowed(r.actions?.submit)}
 							<RowAction variant="default" onclick={() => doSubmit(r)} disabled={busyId === r.id}>{m('requisitions.row.submit')}</RowAction>
 						{/if}
-						{#if canDecide(r)}
+						{#if isAllowed(r.actions?.approve)}
 							<RowAction variant="success" onclick={() => doApprove(r)} disabled={busyId === r.id}>{m('requisitions.row.approve')}</RowAction>
+						{:else if approveExplained(r)}
+							<span class="refusal-note" id={`approve-refusal-${r.id}`}>{refusalText(r.actions?.approve ?? null, m)}</span>
+							<RowAction variant="success" disabled describedby={`approve-refusal-${r.id}`}>{m('requisitions.row.approve')}</RowAction>
+						{/if}
+						{#if isAllowed(r.actions?.reject)}
 							<RowAction variant="danger" onclick={() => doReject(r)} disabled={busyId === r.id}>{m('requisitions.row.reject')}</RowAction>
 						{/if}
-						{#if canCreate && r.status === 'rejected'}
+						{#if isAllowed(r.actions?.reopen)}
 							<RowAction
 								variant="default"
 								armed={reopenArmedId === r.id}
@@ -525,10 +524,10 @@
 									: m('requisitions.row.reopen')}
 							</RowAction>
 						{/if}
-						{#if canConvert && r.status === 'approved'}
+						{#if isAllowed(r.actions?.convert) && !r.converted_po_id}
 							<RowAction variant="default" onclick={() => doConvert(r)} disabled={busyId === r.id}>{m('requisitions.row.convertToPo')}</RowAction>
 						{/if}
-						{#if canCreate && (r.status === 'draft' || r.status === 'submitted' || r.status === 'pending_approval' || r.status === 'approved')}
+						{#if isAllowed(r.actions?.cancel)}
 							<RowAction variant="default" onclick={() => doCancel(r)} disabled={busyId === r.id}>{m('requisitions.row.cancel')}</RowAction>
 						{/if}
 						{#if canCreate && r.status === 'draft'}
@@ -594,6 +593,14 @@
 	   `<th>` from `columns`, so the selectors go through `:global` under a
 	   page-owned wrapper (the /gl-accounts pattern). */
 	.req-table { min-width: 0; }
+	/* Why a decider's Approve is disabled (segregation of duties), beside it. */
+	.refusal-note {
+		display: block;
+		font-size: 0.74rem;
+		color: var(--text-muted);
+		max-width: 28ch;
+		white-space: normal;
+	}
 	.req-table :global(table) { min-width: 1100px; }
 	.req-table :global(th.col-number) { width: 140px; }
 	.req-table :global(th.col-date) { width: 120px; }

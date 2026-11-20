@@ -74,6 +74,8 @@ export const messages = {
 	'refusal.cardTxnNotMatched': "このカード取引はどの経費とも照合されていません。",
 	'refusal.cardTxnMatchedNotIgnorable': "このカード取引は照合済みです。無視する前に照合を解除してください。",
 	'refusal.cardTxnAlreadyIgnored': "このカード取引はすでに無視されています。",
+	'refusal.intakeStatusRefused': "この受付のステータスが「{status}」の間は実行できません。",
+	'refusal.requisitionStatusRefused': "この購買依頼のステータスが「{status}」の間は実行できません。",
 	'refusal.expenseReportLocked': "このレポートはステータスが{status}の間は合計金額がロックされているため、明細を変更できません。",
 	'refusal.expenseFxSourceMissing': "為替レートのソースが設定されていないため、この明細をレポートの通貨に換算できません。",
 	'refusal.expenseFxRateUnavailable': "{source}をレポート通貨{target}に換算する為替レートがありません。",
