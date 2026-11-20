@@ -232,32 +232,36 @@ const LIST_PAGES: ListPage[] = [
 	{ href: '/recurring', fixedTable: '.recurring-table table' },
 	{ href: '/vendor-statements', fixedTable: '.recon-table table' },
 	{ href: '/positive-pay', fixedTable: '.ppay-table table' },
-	{ href: '/experiments', fixedTable: '.experiment-table table' }
+	{ href: '/experiments', fixedTable: '.experiment-table table' },
+	{ href: '/workflows', fixedTable: '.wf-table table' },
+	{ href: '/admin?tab=users', fixedTable: '.users-table table' },
+	{ href: '/admin/entities', fixedTable: '.entities-table table' },
+	{ href: '/admin/api-keys', fixedTable: '.keys-table table' },
+	{ href: '/admin/access-review', fixedTable: '.review-table table' }
 ];
 
 /**
  * Sidebar destinations deliberately outside the budget, each with its reason.
  * "Unmeasured list page" entries are list pages the budget does not cover yet
- * (docs/followups.md § "The layout-shift budget covers twenty-one pages"): moving
- * one into `LIST_PAGES` is the whole change.
+ * (docs/followups.md § "The layout-shift budget covers twenty-six pages"): moving
+ * one into `LIST_PAGES` is the whole change once its reason is fixed.
  */
-const UNMEASURED = 'Unmeasured list page — see docs/followups.md';
 const NOT_LIST_PAGES: Record<string, string> = {
-	'/goods-receipts': UNMEASURED,
+	'/goods-receipts':
+		'Unmeasured: the receipts and inspections tables are still table-layout: auto with unsized columns — see docs/followups.md',
 	'/discounts':
 		'Unmeasured: the warning banners and the optimizer panel above the offers table mount once the dashboard lands — see docs/followups.md',
-	'/audit': UNMEASURED,
-	'/workflows': UNMEASURED,
-	'/adaptive': UNMEASURED,
+	'/audit':
+		'Unmeasured: the trail is a query result, and the signature-verification panel below the table moves down by the height of the rows a run returns — see docs/followups.md',
+	'/adaptive': 'Unmeasured list page — see docs/followups.md',
 	'/tax':
 		'Unmeasured: a loading placeholder stands where the box-allocation panel and the table mount once the report lands — see docs/followups.md',
-	'/admin?tab=users': UNMEASURED,
-	'/admin?tab=roles': UNMEASURED,
-	'/admin/entities': UNMEASURED,
-	'/admin/partner': UNMEASURED,
-	'/admin/api-keys': UNMEASURED,
-	'/admin/webhooks': UNMEASURED,
-	'/admin/access-review': UNMEASURED,
+	'/admin?tab=roles':
+		'Unmeasured: the system-roles table shows no loading row and grows from its empty row to the four system roles, pushing the custom-roles section down — see docs/followups.md',
+	'/admin/partner':
+		'Unmeasured: the e2e tenant is not a partner, so the page settles on its "not a partner" state and the children table never renders — see docs/followups.md',
+	'/admin/webhooks':
+		'Unmeasured: the subscriptions table replaces a loading line and grows by its rows, pushing the deliveries section down — see docs/followups.md',
 	'/assistant': 'A conversation, not a list',
 	'/cfo': 'Charts and KPI cards, not a list',
 	'/cash-flow': 'A planning workspace, not a list',
@@ -379,7 +383,8 @@ test.describe('list pages stay within the layout-shift budget', () => {
 				a.click();
 				a.remove();
 			}, href);
-			await expect(page).toHaveURL((url) => url.pathname === href);
+			// `href` may carry a query (`/admin?tab=users` picks the tab).
+			await expect(page).toHaveURL((url) => url.pathname + url.search === href);
 			await expect(page.locator('h1').first()).toBeVisible();
 
 			// The page's loading state, drawn while every response is held.
