@@ -103,6 +103,10 @@ class ExperimentResponse(BaseModel):
     entity_id: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    # The caller's verdict on each row action — `{"start"}`, a coded refusal or
+    # `None` — from the endpoint's own gate (`api/workflow_experiments.
+    # start_refusal`, issue #575). The page offers Start by it.
+    actions: dict | None = None
 
 
 class ExperimentListResponse(BaseModel):

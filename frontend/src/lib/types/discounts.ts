@@ -1,4 +1,5 @@
 import type { MoneyAmount } from '#lib/utils/money.ts';
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 
@@ -72,6 +73,14 @@ export interface DiscountOffer {
 	/** Denormalised for table display. */
 	vendor_name: string | null;
 	invoice_number: string | null;
+	/** The caller's verdict on Accept / Decline — each `null` (offer it) or the
+	 *  coded refusal the endpoint would answer with, from its own gate
+	 *  (`api/discounts.accept_refusal` / `decline_refusal`). Read through
+	 *  `#lib/api/actionVerdicts.ts`; absent means not known yet (fail closed). */
+	actions?: { accept: ActionRefusal; decline: ActionRefusal };
+	/** The tiers (`days`) `POST /accept` takes by name today; the accept dialog
+	 *  offers only these. Empty when Accept is refused. */
+	capturable_tier_days?: number[];
 }
 
 /** Paginated offer list — matches the shared `{items,total,page,page_size}` shape. */

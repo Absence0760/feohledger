@@ -18,6 +18,7 @@
 	import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
@@ -65,8 +66,10 @@
 	// audit page documents the same gotcha).
 	const userLoaded = $derived(auth.user !== null);
 	const canRead = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk', 'cfo'));
-	const canDecide = $derived(auth.isManager || auth.isCfo);
-	// PROPOSE (`_WRITE_ROLES`) = admin / ap_manager — narrower than `canDecide`.
+	// DECIDE (accept / decline) is not restated here: each row carries the
+	// server's verdict (`offer.actions`, from the endpoints' own gates — a
+	// settled invoice, closed tier windows, a lapsed or decided offer, the role).
+	// PROPOSE (`_WRITE_ROLES`) = admin / ap_manager — narrower than deciding.
 	// A CFO may accept or decline an offer a supplier put on the table, but
 	// putting one TO a supplier is an AP operation, so `POST /bulk-negotiate`
 	// 403s them. Showing the trigger to a CFO would be the same dead end this
@@ -197,6 +200,13 @@
 		return o.tiers.reduce((best, t) => (t.percent > best.percent ? t : best));
 	}
 
+	/** The tiers `POST /accept` takes by name today (`capturable_tier_days`,
+	 *  from the endpoint's own tier gate) — the only ones the dialog offers. */
+	function capturableTiers(o: DiscountOffer): DiscountTier[] {
+		const days = new Set(o.capturable_tier_days ?? []);
+		return o.tiers.filter((t) => days.has(t.days));
+	}
+
 	function bestDiscountAmount(o: DiscountOffer): MoneyString | null {
 		const t = bestTier(o);
 		if (!t) return null;
@@ -297,8 +307,8 @@
 
 	function openAccept(o: DiscountOffer) {
 		acceptTarget = o;
-		// Default to the richest tier.
-		selectedTierDays = bestTier(o)?.days ?? null;
+		// Default to the richest tier the server will still take today.
+		selectedTierDays = bestTier({ ...o, tiers: capturableTiers(o) })?.days ?? null;
 	}
 
 	async function confirmAccept() {
@@ -737,13 +747,16 @@
 								{/if}
 							</td>
 							<td class="actions">
-								<!-- Deciding an offer is `_ACCEPT_ROLES` (admin / ap_manager /
-								     cfo). A clerk reads this page; showing them buttons the
-								     API would 403 is the dead end in the other direction. -->
-								{#if offer.status === 'offered' && canDecide}
+								<!-- Each control reads the row's verdict (`offer.actions`), the
+								     answer the endpoint itself would give this reader — never a
+								     restated status or role check (ui-patterns.md § Whether to
+								     offer an action). -->
+								{#if isAllowed(offer.actions?.accept)}
 									<RowAction variant="success" onclick={() => openAccept(offer)} ariaLabel={m('discounts.row.acceptAria', { vendor: offer.vendor_name ?? offer.id.slice(0, 8) })}>
 										{m('discounts.row.accept')}
 									</RowAction>
+								{/if}
+								{#if isAllowed(offer.actions?.decline)}
 									<RowAction
 										variant="danger"
 										armed={confirmDeclineId === offer.id}
@@ -790,10 +803,10 @@
 				· {m('discounts.modal.base')} <Money amount={acceptTarget.base_amount} currency={acceptTarget.currency} />
 			</p>
 
-			{#if acceptTarget.tiers.length > 0}
+			{#if capturableTiers(acceptTarget).length > 0}
 				<fieldset class="tier-picker">
 					<legend>{m('discounts.modal.chooseTier')}</legend>
-					{#each [...acceptTarget.tiers].sort((a, b) => a.days - b.days) as tier (tier.days)}
+					{#each capturableTiers(acceptTarget).sort((a, b) => a.days - b.days) as tier (tier.days)}
 						<label class="tier-option">
 							<input
 								type="radio"

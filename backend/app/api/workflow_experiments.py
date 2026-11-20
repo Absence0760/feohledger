@@ -34,8 +34,10 @@ from app.api.deps import (
     ROLE_ADMIN,
     ROLE_AP_MANAGER,
     ROLE_CFO,
+    holds_any_role,
     require_roles,
 )
+from app.api.refusals import ActionRefusal, role_not_permitted
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice
 from app.models.user import User
@@ -81,10 +83,40 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt is not None else None
 
 
+#: Start refused: only a `draft` experiment can be started. A `running` one is
+#: refused too in the verdict — its repeat POST is an idempotent no-op, not an
+#: action worth offering — and `concluded` (or anything else) answers 409.
+EXPERIMENT_NOT_STARTABLE = "experiment_not_startable"
+
+
+def start_refusal(exp: WorkflowExperiment) -> ActionRefusal | None:
+    """Why ``POST /{id}/start`` would refuse, or ``None`` — the gate the
+    endpoint raises from and the row's ``actions.start`` verdict (issue #575).
+    The endpoint answers a `running` experiment's repeat with the unchanged row
+    before asking this, so only the verdict sees that refusal."""
+    if exp.status != "draft":
+        return ActionRefusal(
+            EXPERIMENT_NOT_STARTABLE,
+            "Only a draft experiment can be started.",
+            409,
+            params={"status": exp.status},
+        )
+    return None
+
+
+def _experiment_actions(exp: WorkflowExperiment, user: User) -> dict:
+    """The caller's verdict on each row action — ``start`` today."""
+    if not holds_any_role(user, _WRITE_ROLES):
+        return {"start": role_not_permitted()}
+    refusal = start_refusal(exp)
+    return {"start": refusal.verdict() if refusal else None}
+
+
 def _experiment_response(
-    exp: WorkflowExperiment, *, definition_name: str | None
+    exp: WorkflowExperiment, *, user: User, definition_name: str | None
 ) -> ExperimentResponse:
     return ExperimentResponse(
+        actions=_experiment_actions(exp, user),
         id=str(exp.id),
         name=exp.name,
         description=exp.description,
@@ -155,7 +187,7 @@ async def list_experiments(
     names = await _definition_names(db, {e.workflow_definition_id for e in experiments})
     return ExperimentListResponse(
         experiments=[
-            _experiment_response(e, definition_name=names.get(e.workflow_definition_id))
+            _experiment_response(e, user=user, definition_name=names.get(e.workflow_definition_id))
             for e in experiments
         ]
     )
@@ -222,7 +254,7 @@ async def create_experiment(
     )
     await db.commit()
     await db.refresh(exp)
-    return _experiment_response(exp, definition_name=defn.name)
+    return _experiment_response(exp, user=user, definition_name=defn.name)
 
 
 # ---------------------------------------------------------------------------
@@ -290,7 +322,9 @@ async def update_experiment(
     await db.commit()
     await db.refresh(exp)
     names = await _definition_names(db, {exp.workflow_definition_id})
-    return _experiment_response(exp, definition_name=names.get(exp.workflow_definition_id))
+    return _experiment_response(
+        exp, user=user, definition_name=names.get(exp.workflow_definition_id)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -312,12 +346,12 @@ async def start_experiment(
     if exp.status == "running":
         # Idempotent — already running.
         names = await _definition_names(db, {exp.workflow_definition_id})
-        return _experiment_response(exp, definition_name=names.get(exp.workflow_definition_id))
-    if exp.status != "draft":
-        raise HTTPException(
-            status_code=409,
-            detail="Only a draft experiment can be started.",
+        return _experiment_response(
+            exp, user=user, definition_name=names.get(exp.workflow_definition_id)
         )
+    refusal = start_refusal(exp)
+    if refusal is not None:
+        raise refusal.http()
     exp.status = "running"
     exp.started_at = datetime.now(UTC)
     await db.flush()
@@ -334,7 +368,9 @@ async def start_experiment(
     await db.commit()
     await db.refresh(exp)
     names = await _definition_names(db, {exp.workflow_definition_id})
-    return _experiment_response(exp, definition_name=names.get(exp.workflow_definition_id))
+    return _experiment_response(
+        exp, user=user, definition_name=names.get(exp.workflow_definition_id)
+    )
 
 
 @router.post("/{experiment_id}/stop", response_model=ExperimentResponse)
@@ -370,7 +406,9 @@ async def stop_experiment(
     await db.commit()
     await db.refresh(exp)
     names = await _definition_names(db, {exp.workflow_definition_id})
-    return _experiment_response(exp, definition_name=names.get(exp.workflow_definition_id))
+    return _experiment_response(
+        exp, user=user, definition_name=names.get(exp.workflow_definition_id)
+    )
 
 
 @router.post("/{experiment_id}/conclude", response_model=ExperimentResponse)
@@ -388,7 +426,9 @@ async def conclude_experiment(
     exp = await _get_experiment(db, experiment_id, organization_id=user.organization_id)
     if exp.status == "concluded":
         names = await _definition_names(db, {exp.workflow_definition_id})
-        return _experiment_response(exp, definition_name=names.get(exp.workflow_definition_id))
+        return _experiment_response(
+            exp, user=user, definition_name=names.get(exp.workflow_definition_id)
+        )
     exp.status = "concluded"
     exp.ended_at = datetime.now(UTC)
     await db.flush()
@@ -405,7 +445,9 @@ async def conclude_experiment(
     await db.commit()
     await db.refresh(exp)
     names = await _definition_names(db, {exp.workflow_definition_id})
-    return _experiment_response(exp, definition_name=names.get(exp.workflow_definition_id))
+    return _experiment_response(
+        exp, user=user, definition_name=names.get(exp.workflow_definition_id)
+    )
 
 
 # ---------------------------------------------------------------------------
