@@ -54,10 +54,17 @@ matching `require_roles(ADMIN, AP_MANAGER)` on the write endpoints.
 | Bulk: delete | Yes | Yes | No | Yes |
 | Bulk: status change | Yes | Yes | Ready for Review / New only | Yes |
 | Bulk: export | Yes | Yes | Yes | Yes |
+| Vendor: adjudicate / revoke a sanctions false positive (`vendor.sanctions.adjudicate`) | Yes³ | No | No | Yes³ |
+| Vendor: block / unblock payments (`vendor.block`) | Yes⁴ | Yes⁴ | No | No |
 
 ¹ Until the invoice is submitted for review, and never on one that was ever
 approved. ² `new` / `rejected` rows; a historical `done` / `paid` row is
-refused per row.
+refused per row. ³ Not the vendor's onboarder, nor whoever requested,
+provisioned the requester of, or approved its current bank details. AP manager
+is deliberately excluded: it already onboards vendors, approves their bank
+details and executes runs (decisions §477). ⁴ Not by the adjudicator of the
+false positive covering a stored sanctions `match`
+(`vendor_unblock_adjudicator`): clearing a match takes two people.
 
 **The AP clerk enters invoices; segregation of duties sits at approval.** That
 is standard AP practice — intake, validation and GL coding are the clerk's job,

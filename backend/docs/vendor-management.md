@@ -543,8 +543,8 @@ that it changed plus a last-4 — never the number.
 | `POST` | `/api/vendors/{id}/erp-links/search` | Search the connected ERP's whole contact list for this vendor's record, by name and its tax number (`vendor.manage`) — § Linking a vendor to an ERP record by hand |
 | `POST` | `/api/vendors/{id}/erp-links/link` | Link the vendor to one ERP record in the connected company, re-read first (`vendor.manage`) — § Linking a vendor to an ERP record by hand |
 | `POST` | `/api/vendors/sync-erp` | Pull vendors from connected ERP |
-| `POST` | `/api/vendors/{id}/screening/adjudicate` | Record the stored `match` / `review` screen as a false positive, `{reason}` required (`vendor.sanctions.adjudicate`) — § Adjudicating a sanctions false positive |
-| `POST` | `/api/vendors/{id}/screening/adjudication/revoke` | End the active adjudication, `{reason}` required (`vendor.sanctions.adjudicate`) |
+| `POST` | `/api/vendors/{id}/screening/adjudicate` | Record the stored `match` / `review` screen as a false positive, `{reason, sanctions_check_id}` required (`vendor.sanctions.adjudicate`; 409 when the id is no longer the latest stored screen) — § Adjudicating a sanctions false positive |
+| `POST` | `/api/vendors/{id}/screening/adjudication/revoke` | End every active adjudication, `{reason}` required (`vendor.sanctions.adjudicate`); returns the revoked rows |
 
 ### The paginated lists issue a fixed number of queries
 
@@ -629,8 +629,8 @@ not this vendor (decisions §477):
   different hit (another entry, another list, `review` → `match`, a republished
   list version) is not covered and holds again.
 - **The sticky block stays.** A `match` set `payments_blocked`; lifting it is
-  still `POST /{id}/unblock` (`vendor.block`), so clearing a match takes two
-  steps.
+  still `POST /{id}/unblock` (`vendor.block`), and not by the adjudicator, so
+  clearing a match takes two people.
 - **Segregation.** Refused (403 `sanctions_adjudication_segregation`) for the
   vendor's onboarder (`vendors.onboarded_by_user_id`, stamped by create and the
   CSV imports since 0139) and for the latest applied bank change's requester,
@@ -642,9 +642,26 @@ not this vendor (decisions §477):
   (adjudication id, check id, provider, verdict, list, fingerprint, reason) and
   a status-change row `vendor.screening_clearance_changed` (`from` / `to`) for
   each. Revoking re-arms both gates at once and needs no segregation.
-- **Queue verdicts.** Each review-queue row carries `adjudication`,
-  `adjudicate_refusal` and `revoke_adjudication_refusal`, from the gates the two
+- **Queue verdicts.** Each review-queue row carries `latest_check_id` (the
+  stored screen it shows, never a `pre_payment` row), `adjudication` (the one
+  covering it), `active_adjudications` (every unrevoked one), and
+  `adjudicate_refusal` / `revoke_adjudication_refusal`, from the gates the two
   endpoints raise.
+- **The stamp covers the screen the reviewer saw.** Adjudicate posts
+  `sanctions_check_id`; a newer stored screen answers 409
+  `sanctions_adjudication_stale_screen`.
+- **Changed inputs owe a new judgement.** The fingerprint includes a hash of the
+  screened inputs (name, tax id, bank country, owners, latest applied bank
+  change). Every material edit clears `screening_adjudication_id` before its
+  best-effort re-screen (`sanctions_adjudication.uncover_for_material_edit`,
+  run by `vendor_screening.screen_best_effort`), so a failed re-screen leaves
+  the vendor held.
+- **Revoke ends every active adjudication**; a revoked `match` re-sets the
+  sticky block and closes live cards in the same transaction. The adjudicator
+  of a covering match may not `/unblock` it (403 `vendor_unblock_adjudicator`).
+- **Web only.** The mobile app deliberately has no adjudication UI: it is a
+  compliance judgement with a written reason, made from the screening queue
+  on the web.
 
 ## Role Access
 

@@ -1127,7 +1127,14 @@ card** only where a retry can work.
 `_execute_single_payment` parks a payment at `status="pending_compliance"`
 in two cases: the invoice has no screenable vendor at all, or
 `services/compliance.check_payment_compliance` itself returns a `hold`
-verdict (sanctions/KYC review required). Both cases open a
+verdict (sanctions/KYC review required). A screen result an
+`vendor.sanctions.adjudicate` holder has adjudicated as a false positive
+(decisions §477) is not a hold: the live screen reads the SAME result on the
+SAME inputs as clear, and the ERP push and run-gate read
+(`payment_runs.VendorPayability.sanctions_hold`) lift the stored `match` /
+`review` hold while `vendors.screening_adjudication_id` is set. The sticky
+`payments_blocked` flag is never lifted by it, and a new hit or a material
+vendor edit holds again. Both cases open a
 `payment_compliance_hold` Exception (`exception_type`, severity `error`)
 scoped to the invoice — deduplicated on `(invoice_id,
 "payment_compliance_hold", "open")` so a retried/resumed execution never
