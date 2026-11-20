@@ -791,7 +791,11 @@ async def update_user(
         if new_email != normalize_email(target.email):
             target_email_new = new_email
             await _refuse_taken_email(db, org_id, new_email, exclude_user_id=user_id)
-            target.email = new_email
+            # Assigned inside the savepoint below, not here: any query in
+            # between autoflushes, and `begin_nested()` itself flushes pending
+            # changes in the OUTER transaction before issuing SAVEPOINT — so a
+            # rename assigned now would hit `uq_users_email_lower` outside the
+            # savepoint, poisoning the session instead of yielding the 409.
             changed_fields.append("email")
     if body.is_active is not None and body.is_active != target.is_active:
         target.is_active = body.is_active
@@ -817,9 +821,14 @@ async def update_user(
 
     # A savepoint, as on create: a concurrent writer that takes the new address
     # between the pre-check and this flush trips `uq_users_email_lower` (§475),
-    # and the rename answers with the same coded 409 rather than a 500.
+    # and the rename answers with the same coded 409 rather than a 500. The
+    # rename is applied INSIDE it — `begin_nested()` flushes everything already
+    # pending in the outer transaction first, so only a change made after it
+    # opens is one the savepoint can roll back.
     try:
         async with db.begin_nested():
+            if target_email_new is not None:
+                target.email = target_email_new
             await db.flush()
     except IntegrityError:
         if "email" in changed_fields:
