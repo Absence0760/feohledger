@@ -82,6 +82,10 @@ export const enSettings = {
 	'org.branding.accentColorPicker': 'Accent color picker',
 	'org.branding.accentStrong': 'Accent Color (strong)',
 	'org.branding.accentStrongPicker': 'Strong accent color picker',
+	'org.branding.accentTextLight':
+		'As text on the light theme this color reaches only {ratio} (WCAG AA needs 4.5:1), so links and active tabs there will show it darkened to {applied}.',
+	'org.branding.accentTextDark':
+		'As text on the dark theme this color reaches only {ratio} (WCAG AA needs 4.5:1), so links and active tabs there will show it lightened to {applied}.',
 	'org.branding.supportUrl': 'Support URL',
 	'org.branding.supportUrlPlaceholder': 'https://help.example.com',
 	'org.branding.legalUrl': 'Legal / Terms URL',

@@ -81,6 +81,10 @@ export const messages = {
 	'org.branding.accentColorPicker': 'Akzentfarbe auswählen',
 	'org.branding.accentStrong': 'Akzentfarbe (kräftig)',
 	'org.branding.accentStrongPicker': 'Kräftige Akzentfarbe auswählen',
+	'org.branding.accentTextLight':
+		'Als Text im hellen Design erreicht diese Farbe nur {ratio} (WCAG AA verlangt 4,5:1), daher zeigen Links und aktive Tabs dort sie abgedunkelt als {applied}.',
+	'org.branding.accentTextDark':
+		'Als Text im dunklen Design erreicht diese Farbe nur {ratio} (WCAG AA verlangt 4,5:1), daher zeigen Links und aktive Tabs dort sie aufgehellt als {applied}.',
 	'org.branding.supportUrl': 'Support-URL',
 	'org.branding.supportUrlPlaceholder': 'https://help.example.com',
 	'org.branding.legalUrl': 'Rechtliches / AGB-URL',

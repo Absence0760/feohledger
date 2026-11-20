@@ -101,7 +101,13 @@ CI plus two kinds of human review:
    overwrite `--accent` / `--accent-strong` at runtime. Both surfaces that edit
    those colours (`/organization` Branding, the `/admin/partner` child-branding
    modal) show the real white-on-colour ratio as an inline advisory before it
-   is saved — advisory, because the brand is the tenant's call.
+   is saved — advisory, because the brand is the tenant's call. `--accent` is
+   also small text, and there the app does not leave it to the tenant: each
+   palette shows the brand accent as itself where it clears 4.5:1 on that
+   theme's `--bg` and `--surface`, otherwise as the least darker (Light) or
+   lighter (Dark) shade of its hue that does (`stores/brandTheme.ts`
+   `themeAccent`, decisions §478). `/organization` Branding reports the ratio
+   and the shade per theme as the colour is typed.
 3. **Automated (opacity de-emphasis scan, every CI run).** The two guards
    above share one blind spot, and it is the app's most-repeated de-emphasis
    idiom. `opacity` is *group* opacity: it composites an element's whole
@@ -354,7 +360,9 @@ We are honest about where we are not yet fully conformant:
   but the backend accepts any valid hex on purpose — the brand is the tenant's
   call, and a hard refusal would make the API the arbiter of a design decision
   ([white-label.md](white-label.md), [decisions.md](decisions.md) §28). The
-  published statement discloses this as content we do not control.
+  published statement discloses this as content we do not control. The
+  `accent_color`, used as text, is not in this gap: each theme shows a shade of
+  it that clears 1.4.3 ([decisions.md](decisions.md) §478).
 - **PDF invoice previews.** Uploaded invoice PDFs are third-party documents
   whose internal tagging we don't control; the extracted invoice data is
   always available as accessible HTML alongside the preview.

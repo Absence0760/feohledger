@@ -44,7 +44,12 @@
 	   normal text, so the muted token is kept as-is. It does NOT clear it on
 	   --surface-2; see that token's note. */
 	--text-muted: #8a8fa0;
-	--accent: #638cff;
+	/* A white-label accent arrives as --brand-accent-dark / -light, inline on
+	   <html> (stores/brandTheme.ts), each already held to 4.5:1 as text on
+	   this palette's --bg and --surface. --accent itself is never written
+	   inline, because an inline value would beat the light palette too
+	   (decisions §478). */
+	--accent: var(--brand-accent-dark, #638cff);
 	/* WCAG 1.4.3 Contrast: --accent (#638cff) only reaches 3.12:1 against
 	   white, so white text on an --accent fill fails the 4.5:1 bar. This
 	   darker companion (#3f5fd6) computes ~4.92:1 white-on-it while staying
@@ -147,7 +152,8 @@
 	   above. The accent-derived ones use `color-mix()` on `var(--accent)`
 	   rather than a literal of today's blue, because `--accent` and
 	   `--accent-strong` are the two tokens a white-label tenant may
-	   override (`stores/brand.svelte.ts`): a glow spelled as
+	   override (`stores/brand.svelte.ts`, `--accent` through
+	   --brand-accent-dark / -light): a glow spelled as
 	   rgba(99, 140, 255, …) would stay blue under a tenant's red brand.
 	   A custom property that references another is resolved per element,
 	   so the brand's inline override on <html> flows straight through.
@@ -243,7 +249,7 @@
 	--border: #d3d7e1;
 	--text: #171a24;
 	--text-muted: #5a6072;
-	--accent: #2c4fc4;
+	--accent: var(--brand-accent-light, #2c4fc4);
 	--accent-strong: #2546b0;
 	--success: #11663a;
 	--success-strong: #0f5e35;
@@ -283,7 +289,7 @@
 		--border: #d3d7e1;
 		--text: #171a24;
 		--text-muted: #5a6072;
-		--accent: #2c4fc4;
+		--accent: var(--brand-accent-light, #2c4fc4);
 		--accent-strong: #2546b0;
 		--success: #11663a;
 		--success-strong: #0f5e35;

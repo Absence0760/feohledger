@@ -80,6 +80,10 @@ export const messages = {
 	'org.branding.accentColorPicker': 'アクセントカラーの選択',
 	'org.branding.accentStrong': 'アクセントカラー（強）',
 	'org.branding.accentStrongPicker': '強いアクセントカラーの選択',
+	'org.branding.accentTextLight':
+		'ライトテーマでテキストとして使うと、この色のコントラストは {ratio} しかありません（WCAG AA は 4.5:1 が必要）。そのためリンクやアクティブなタブでは {applied} に暗くして表示します。',
+	'org.branding.accentTextDark':
+		'ダークテーマでテキストとして使うと、この色のコントラストは {ratio} しかありません（WCAG AA は 4.5:1 が必要）。そのためリンクやアクティブなタブでは {applied} に明るくして表示します。',
 	'org.branding.supportUrl': 'サポートURL',
 	'org.branding.supportUrlPlaceholder': 'https://help.example.com',
 	'org.branding.legalUrl': '法的事項 / 利用規約URL',
