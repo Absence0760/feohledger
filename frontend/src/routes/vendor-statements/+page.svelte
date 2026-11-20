@@ -55,12 +55,12 @@
 
 	const COLUMNS = $derived([
 		{ label: m('vendorStatements.col.vendor') },
-		{ label: m('vendorStatements.col.statementDate') },
-		{ label: m('vendorStatements.col.reference') },
-		{ label: m('vendorStatements.col.discrepancies'), class: 'right' },
-		{ label: m('vendorStatements.col.statementTotal'), class: 'right' },
-		{ label: m('vendorStatements.col.ledgerTotal'), class: 'right' },
-		{ label: m('vendorStatements.col.status') },
+		{ label: m('vendorStatements.col.statementDate'), class: 'col-date' },
+		{ label: m('vendorStatements.col.reference'), class: 'col-ref' },
+		{ label: m('vendorStatements.col.discrepancies'), class: 'right col-count' },
+		{ label: m('vendorStatements.col.statementTotal'), class: 'right col-amount' },
+		{ label: m('vendorStatements.col.ledgerTotal'), class: 'right col-amount' },
+		{ label: m('vendorStatements.col.status'), class: 'col-status' },
 		{ class: 'actions-col' }
 	]);
 
@@ -380,7 +380,9 @@
 			testId="vendor-statements-load-error"
 		/>
 	{:else}
+		<div class="recon-table">
 		<DataTable
+			fixed
 			columns={COLUMNS}
 			isEmpty={!loading && recons.length === 0}
 			{loading}
@@ -439,6 +441,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		</div>
 	{/if}
 
 	<LoadMoreFooter
@@ -462,6 +465,25 @@
 {/if}
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.recon-table { min-width: 0; }
+	.recon-table :global(table) { min-width: 1200px; }
+	.recon-table :global(th.col-date) { width: 130px; }
+	.recon-table :global(th.col-ref) { width: 160px; }
+	.recon-table :global(th.col-count) { width: 130px; }
+	.recon-table :global(th.col-amount) { width: 150px; }
+	.recon-table :global(th.col-status) { width: 150px; }
+	.recon-table :global(th.actions-col) { width: 140px; }
+
 	.filter-row {
 		display: flex;
 		align-items: center;

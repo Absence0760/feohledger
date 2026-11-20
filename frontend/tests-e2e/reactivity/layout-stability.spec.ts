@@ -222,33 +222,35 @@ const LIST_PAGES: ListPage[] = [
 	{ href: '/credit-memos' },
 	{ href: '/expenses' },
 	{ href: '/contracts' },
-	{ href: '/bank-reconciliation' }
+	{ href: '/bank-reconciliation' },
+	{ href: '/vendors/screening', fixedTable: '.screening-table table' },
+	{ href: '/vendors/change-requests', fixedTable: '.change-table table' },
+	{ href: '/requisitions', fixedTable: '.req-table table' },
+	{ href: '/intake', fixedTable: '.intake-table table' },
+	{ href: '/catalogs', fixedTable: '.catalog-table table' },
+	{ href: '/budgets', fixedTable: '.budget-table table' },
+	{ href: '/recurring', fixedTable: '.recurring-table table' },
+	{ href: '/vendor-statements', fixedTable: '.recon-table table' },
+	{ href: '/positive-pay', fixedTable: '.ppay-table table' },
+	{ href: '/experiments', fixedTable: '.experiment-table table' }
 ];
 
 /**
  * Sidebar destinations deliberately outside the budget, each with its reason.
  * "Unmeasured list page" entries are list pages the budget does not cover yet
- * (docs/followups.md § "The layout-shift budget covers eleven pages"): moving
+ * (docs/followups.md § "The layout-shift budget covers twenty-one pages"): moving
  * one into `LIST_PAGES` is the whole change.
  */
 const UNMEASURED = 'Unmeasured list page — see docs/followups.md';
 const NOT_LIST_PAGES: Record<string, string> = {
-	'/vendors/screening': UNMEASURED,
-	'/vendors/change-requests': UNMEASURED,
 	'/goods-receipts': UNMEASURED,
-	'/requisitions': UNMEASURED,
-	'/intake': UNMEASURED,
-	'/catalogs': UNMEASURED,
-	'/budgets': UNMEASURED,
-	'/discounts': UNMEASURED,
-	'/recurring': UNMEASURED,
-	'/vendor-statements': UNMEASURED,
-	'/positive-pay': UNMEASURED,
+	'/discounts':
+		'Unmeasured: the warning banners and the optimizer panel above the offers table mount once the dashboard lands — see docs/followups.md',
 	'/audit': UNMEASURED,
 	'/workflows': UNMEASURED,
-	'/experiments': UNMEASURED,
 	'/adaptive': UNMEASURED,
-	'/tax': UNMEASURED,
+	'/tax':
+		'Unmeasured: a loading placeholder stands where the box-allocation panel and the table mount once the report lands — see docs/followups.md',
 	'/admin?tab=users': UNMEASURED,
 	'/admin?tab=roles': UNMEASURED,
 	'/admin/entities': UNMEASURED,

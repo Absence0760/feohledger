@@ -137,6 +137,11 @@
 	let blockedTotal = $state<number | null>(null);
 	let matchCount = $state<number | null>(null);
 	let reviewCount = $state<number | null>(null);
+	// The first `/counts` call has not answered yet. Until it does, a `null`
+	// figure is "still loading", not "unavailable": the cards draw the pending
+	// dash with no "unavailable" line, rather than claiming the tallies could
+	// not be had before anything was asked.
+	let countsPending = $state(true);
 
 	// Detail modal — the selected vendor + its screening history.
 	let selected = $state<ScreeningReviewItem | null>(null);
@@ -180,11 +185,11 @@
 	// list says "Contrôle").
 	const COLUMNS = $derived([
 		{ label: m('vendors.col.vendor') },
-		{ label: m('vendors.col.screening') },
-		{ label: m('vendors.screening.queue.col.matchedList') },
-		{ label: m('vendors.screening.queue.col.provider') },
-		{ label: m('vendors.screening.queue.col.riskScore') },
-		{ label: m('vendors.screening.queue.col.lastScreened') },
+		{ label: m('vendors.col.screening'), class: 'col-screening' },
+		{ label: m('vendors.screening.queue.col.matchedList'), class: 'col-list' },
+		{ label: m('vendors.screening.queue.col.provider'), class: 'col-provider' },
+		{ label: m('vendors.screening.queue.col.riskScore'), class: 'col-score' },
+		{ label: m('vendors.screening.queue.col.lastScreened'), class: 'col-date' },
 		{ class: 'actions-col' }
 	]);
 
@@ -263,6 +268,8 @@
 			blockedTotal = null;
 			matchCount = null;
 			reviewCount = null;
+		} finally {
+			if (countsSequence.isCurrentRequest(token)) countsPending = false;
 		}
 	}
 
@@ -514,22 +521,25 @@
 		     failed, or the caller is an ap_clerk (whom `/counts` 403s) — an
 		     em-dash says "we don't know" instead of a page-scoped undercount. -->
 		<KpiCard
-			value={matchCount ?? '—'}
+			value={matchCount}
+			pending={countsPending}
 			label={m('vendors.screening.queue.kpi.matches')}
 			helpTerm="sanctions-screening"
 			highlight={matchCount !== null && matchCount > 0 ? 'red' : null}
-			sub={matchCount === null ? m('vendors.screening.queue.kpi.unavailable') : null}
+			sub={matchCount === null && !countsPending ? m('vendors.screening.queue.kpi.unavailable') : null}
 		/>
 		<KpiCard
-			value={reviewCount ?? '—'}
+			value={reviewCount}
+			pending={countsPending}
 			label={m('vendors.screening.queue.kpi.needsReview')}
 			highlight={reviewCount !== null && reviewCount > 0 ? 'red' : null}
-			sub={reviewCount === null ? m('vendors.screening.queue.kpi.unavailable') : null}
+			sub={reviewCount === null && !countsPending ? m('vendors.screening.queue.kpi.unavailable') : null}
 		/>
 		<KpiCard
-			value={blockedTotal ?? '—'}
+			value={blockedTotal}
+			pending={countsPending}
 			label={m('vendors.screening.queue.kpi.blocked')}
-			sub={blockedTotal === null
+			sub={blockedTotal === null && !countsPending
 				? m('vendors.screening.queue.kpi.unavailable')
 				: m('vendors.screening.queue.kpi.blockedScope')}
 		/>
@@ -553,7 +563,9 @@
 			testId="screening-queue-load-error"
 		/>
 	{:else}
+	<div class="screening-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
 		{loading}
@@ -598,6 +610,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 
 	<!-- `showingAll` is rendered ONLY behind `total > 0`: `total` is the server's
 	     whole-set count, so stating it while a later page is unfetched would be
@@ -764,6 +777,25 @@
 </Modal>
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.screening-table { min-width: 0; }
+	.screening-table :global(table) { min-width: 1100px; }
+	.screening-table :global(th.col-screening) { width: 210px; }
+	.screening-table :global(th.col-list) { width: 180px; }
+	.screening-table :global(th.col-provider) { width: 140px; }
+	.screening-table :global(th.col-score) { width: 100px; }
+	.screening-table :global(th.col-date) { width: 130px; }
+	.screening-table :global(th.actions-col) { width: 120px; }
+
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
 	.vendor-name {
 		font-weight: 500;

@@ -65,13 +65,13 @@
 
 	const COLUMNS = $derived([
 		{ label: m('positivePay.col.file') },
-		{ label: m('positivePay.col.type') },
-		{ label: m('positivePay.col.format') },
-		{ label: m('positivePay.col.items'), class: 'right' },
-		{ label: m('positivePay.col.total'), class: 'right' },
-		{ label: m('positivePay.col.account') },
-		{ label: m('positivePay.col.created') },
-		{ label: m('positivePay.col.status') },
+		{ label: m('positivePay.col.type'), class: 'col-type' },
+		{ label: m('positivePay.col.format'), class: 'col-format' },
+		{ label: m('positivePay.col.items'), class: 'right col-count' },
+		{ label: m('positivePay.col.total'), class: 'right col-amount' },
+		{ label: m('positivePay.col.account'), class: 'col-account' },
+		{ label: m('positivePay.col.created'), class: 'col-date' },
+		{ label: m('positivePay.col.status'), class: 'col-status' },
 		{ class: 'actions-col' }
 	]);
 
@@ -370,7 +370,9 @@
 			testId="positive-pay-load-error"
 		/>
 	{:else}
+		<div class="ppay-table">
 		<DataTable
+			fixed
 			columns={COLUMNS}
 			isEmpty={!loading && files.length === 0}
 			{loading}
@@ -424,6 +426,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		</div>
 	{/if}
 
 	<LoadMoreFooter
@@ -447,6 +450,27 @@
 {/if}
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.ppay-table { min-width: 0; }
+	.ppay-table :global(table) { min-width: 1250px; }
+	.ppay-table :global(th.col-type) { width: 150px; }
+	.ppay-table :global(th.col-format) { width: 150px; }
+	.ppay-table :global(th.col-count) { width: 90px; }
+	.ppay-table :global(th.col-amount) { width: 150px; }
+	.ppay-table :global(th.col-account) { width: 110px; }
+	.ppay-table :global(th.col-date) { width: 120px; }
+	.ppay-table :global(th.col-status) { width: 130px; }
+	.ppay-table :global(th.actions-col) { width: 140px; }
+
 	.filter-row {
 		display: flex;
 		align-items: center;
