@@ -24102,3 +24102,55 @@ Rejected: keeping the fallback and only guarding `app/` (the §473 state),
 which leaves a default in the model for the next non-`app` caller, such as a
 script, to reach; and a column `default`, which also overwrites an explicit
 `None` at INSERT (§473).
+
+## 477. A sanctions false positive is adjudicated once, for that exact result, under its own permission (closes a §333 followup; round 33, 2026-11-20)
+
+**Context.** §333 refuses the ERP push on a stored `match` / `review` screen,
+and dispatch and `/compliance/release` re-screen live, so a vendor the provider
+keeps flagging wrongly could be neither paid nor booked, and nothing recorded a
+human's finding that the hit is not this vendor.
+
+**Decision.** `sanctions_adjudications` (migration 0139) records who, when, why
+(required, 3–2000 characters) and WHICH result: provider, verdict, list name
+and `fingerprint`, a sha256 over those plus the matched entry
+(`services/sanctions_adjudication.screen_fingerprint`: an adapter's own
+`raw_response.match_fingerprint` — entry id + list version — when it sets one,
+else the raw response minus per-call keys such as request ids and timestamps;
+only the hash is stored, never match details). An active row covers a screen
+only when provider and fingerprint are equal, so a fresh screen of the same
+match stays cleared and a new or different hit (another entry, another list, a
+`review` escalating to `match`, a republished list version) holds again.
+
+- The stored screen (`screen_vendor_record`) keeps
+  `vendors.screening_adjudication_id` in step and, on a covered `match`, neither
+  re-sets the sticky block nor revokes cards; `VendorPayability.sanctions_hold`
+  (the run gate and the ERP push) lifts the `match` / `review` hold only while
+  it is set. The live screen (`check_payment_compliance`) reads a covered result
+  as clear, adverse-media hold included.
+- **The sticky `payments_blocked` flag is not lifted.** It may carry a manual
+  reason and it is `vendor.block`'s to lift, so clearing a `match` takes two
+  signatures by default (adjudicator, then unblocker).
+- **Permission `vendor.sanctions.adjudicate`, default admin + cfo.** Not
+  `ap_manager`: that role onboards vendors, approves their bank details and
+  executes runs, so clearing the sanctions hold too would put the whole payee
+  path in one role. Never `ap_clerk`; the grant guard's subset rule already
+  stops a user-manager handing it out without holding it.
+- **Segregation:** refused (403 `sanctions_adjudication_segregation`) for the
+  vendor's onboarder (`vendors.onboarded_by_user_id`, stamped by create and both
+  CSV imports from 0139; not backfilled — NULL reads "no onboarder known", as
+  §141) and for the latest applied bank change's requester, the AP user who
+  provisioned the portal login that requested it, and its approver.
+- Stamp and revocation each write `vendor.sanctions_adjudicated` /
+  `vendor.sanctions_adjudication_revoked` plus a status-change row
+  `vendor.screening_clearance_changed` (`from` / `to`). Revocation needs the
+  same permission and no segregation (it only tightens). A merge leaves a
+  duplicate's adjudications on the duplicate: a judgement of one record's
+  screen is not transferred.
+
+**Rejected.** Rewriting `screening_status` to `clear` (the stored status would
+stop saying what the provider said); clearing by vendor rather than by result
+(a new hit would ride an old judgement); lifting the block in the same click.
+
+**Tests.** `test_sanctions_adjudication.py`, `test_permissions.py`,
+`test_sod_endpoint_wiring.py`, `test_vendor_merge.py`.
+
