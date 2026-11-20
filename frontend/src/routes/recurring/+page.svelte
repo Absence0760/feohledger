@@ -694,18 +694,18 @@
 	   "Loading…" row, then re-sized against the real rows, so every column
 	   slid sideways as the data landed (tests-e2e/reactivity/
 	   layout-stability.spec.ts). The predictable columns get widths sized to
-	   their widest content; the text column(s) carry none and share the rest.
+	   their widest content in any locale; the text column(s) carry none and share the rest.
 	   Past the `min-width` the table scrolls inside its region
 	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
 	   `<th>` from `columns`, so the selectors go through `:global` under a
 	   page-owned wrapper (the /gl-accounts pattern). */
 	.recurring-table { min-width: 0; }
-	.recurring-table :global(table) { min-width: 1300px; }
+	.recurring-table :global(table) { min-width: 1310px; }
 	.recurring-table :global(th.col-amount) { width: 150px; }
 	.recurring-table :global(th.col-cadence) { width: 150px; }
 	.recurring-table :global(th.col-date) { width: 130px; }
 	.recurring-table :global(th.col-count) { width: 110px; }
-	.recurring-table :global(th.col-status) { width: 170px; }
+	.recurring-table :global(th.col-status) { width: 180px; }
 	.recurring-table :global(th.actions-col) { width: 330px; }
 
 	/* Page-specific bits; shared design-system CSS lives in app.css. */

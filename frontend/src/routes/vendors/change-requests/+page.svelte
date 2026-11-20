@@ -710,16 +710,16 @@
 	   "Loading…" row, then re-sized against the real rows, so every column
 	   slid sideways as the data landed (tests-e2e/reactivity/
 	   layout-stability.spec.ts). The predictable columns get widths sized to
-	   their widest content; the text column(s) carry none and share the rest.
+	   their widest content in any locale; the text column(s) carry none and share the rest.
 	   Past the `min-width` the table scrolls inside its region
 	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
 	   `<th>` from `columns`, so the selectors go through `:global` under a
 	   page-owned wrapper (the /gl-accounts pattern). */
 	.change-table { min-width: 0; }
-	.change-table :global(table) { min-width: 1150px; }
+	.change-table :global(table) { min-width: 1160px; }
 	.change-table :global(th.col-type) { width: 170px; }
 	.change-table :global(th.col-date) { width: 130px; }
-	.change-table :global(th.col-status) { width: 130px; }
+	.change-table :global(th.col-status) { width: 140px; }
 	.change-table :global(th.actions-col) { width: 270px; }
 
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
@@ -750,10 +750,19 @@
 		font-weight: 500;
 	}
 
+	/* The separation-of-duties refusal sits on its own line above the row's
+	   buttons. Inline and `nowrap`, it was wider than the fixed actions column
+	   and pushed Reject off the table's edge, in English too. */
 	.sod-note {
+		display: block;
 		font-size: 0.74rem;
 		color: var(--text-muted);
-		white-space: nowrap;
+		white-space: normal;
+	}
+	/* The button under the note starts its own line, so it drops the global
+	   `td.actions > * + *` gap that spaces inline siblings. */
+	:global(.grid-container td.actions) > .sod-note + :global(*) {
+		margin-left: 0;
 	}
 
 	/* --- Detail modal --- */

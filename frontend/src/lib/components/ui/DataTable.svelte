@@ -152,6 +152,24 @@
 	table.fixed {
 		table-layout: fixed;
 	}
+	/* A fixed column cannot grow to fit its content, and the global
+	   `.grid-container th` / `td.actions` are `nowrap`, so a header or a row's
+	   buttons wider than the column overprinted the next one — in English the
+	   widths fit, in es/fr/de/pt-BR they did not. In a fixed table a header
+	   wraps onto a second line and the row's buttons onto a second row
+	   instead; the page sizes each width so the longest single word or badge
+	   in any locale still fits (frontend/docs/ui-patterns.md § Data tables;
+	   guard: tests-e2e/reactivity/layout-stability.spec.ts). */
+	table.fixed :global(th) {
+		white-space: normal;
+		vertical-align: bottom;
+	}
+	table.fixed :global(td.actions) {
+		white-space: normal;
+	}
+	table.fixed :global(td.actions > *) {
+		margin-block: 2px;
+	}
 	table.sticky-header thead {
 		position: sticky;
 		top: 0;

@@ -397,6 +397,97 @@ void main() {
     expect(lastStatus, 'approved');
   });
 
+  // The Overdue quick view spans statuses, so it and a status chip are
+  // mutually exclusive: the chip row shows exactly one of them selected.
+  group('Overdue chip', () {
+    bool selected(WidgetTester tester, String label) =>
+        tester.widget<FilterChip>(find.widgetWithText(FilterChip, label))
+            .selected;
+
+    testWidgets('tapping it selects Overdue, deselects All and asks for it',
+        (tester) async {
+      String? lastOverdue;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          lastOverdue = req.url.queryParameters['overdue'];
+          return _list([]);
+        }),
+      );
+
+      await tester.pumpWidget(_localized(const InvoicesScreen()));
+      await _pumpUntil(tester, find.text('No invoices found'));
+      expect(selected(tester, 'All'), isTrue);
+      expect(selected(tester, 'Overdue'), isFalse);
+
+      await tester.tap(find.widgetWithText(FilterChip, 'Overdue'));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(store.overdueOnly, isTrue);
+      expect(store.statusFilter, isNull);
+      expect(lastOverdue, 'true');
+      expect(selected(tester, 'Overdue'), isTrue);
+      expect(selected(tester, 'All'), isFalse,
+          reason: 'All under the Overdue view would claim the whole list');
+    });
+
+    testWidgets('a status chip leaves the Overdue view', (tester) async {
+      String? lastOverdue;
+      String? lastStatus;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          lastOverdue = req.url.queryParameters['overdue'];
+          lastStatus = req.url.queryParameters['status'];
+          return _list([]);
+        }),
+      );
+
+      await tester.pumpWidget(_localized(const InvoicesScreen()));
+      await _pumpUntil(tester, find.text('No invoices found'));
+      await tester.tap(find.widgetWithText(FilterChip, 'Overdue'));
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(store.overdueOnly, isTrue);
+
+      await tester.tap(find.widgetWithText(FilterChip, 'Approved'));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(store.overdueOnly, isFalse);
+      expect(store.statusFilter, 'approved');
+      expect(lastStatus, 'approved');
+      expect(lastOverdue, isNull);
+      expect(selected(tester, 'Approved'), isTrue);
+      expect(selected(tester, 'Overdue'), isFalse);
+    });
+
+    testWidgets('showOverdue() empties a search the user typed',
+        (tester) async {
+      String? lastSearch;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          lastSearch = req.url.queryParameters['search'];
+          return _list([]);
+        }),
+      );
+
+      await tester.pumpWidget(_localized(const InvoicesScreen()));
+      await _pumpUntil(tester, find.text('No invoices found'));
+      await tester.enterText(find.byType(SearchBar), 'acme');
+      // Past the 300ms debounce, so the query reached the store.
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(lastSearch, 'acme');
+
+      // The dashboard's Overdue card, from outside this screen.
+      store.showOverdue();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(store.searchQuery, isNull);
+      expect(lastSearch, isNull);
+      final box = tester.widget<SearchBar>(find.byType(SearchBar));
+      expect(box.controller?.text, isEmpty,
+          reason: 'the box must not show a query the list no longer applies');
+      expect(selected(tester, 'Overdue'), isTrue);
+    });
+  });
+
   testWidgets('typing in the search box drives the store search filter',
       (tester) async {
     String? lastSearch;

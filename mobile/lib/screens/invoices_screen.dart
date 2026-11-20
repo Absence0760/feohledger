@@ -111,14 +111,11 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       children: [
                         _filterChip(l.invoicesFilterAll, null, current),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: FilterChip(
-                            label: Text(l.invoicesFilterOverdue),
-                            selected: overdue,
-                            onSelected: (_) =>
-                                InvoiceStore.instance.setOverdueOnly(),
-                          ),
+                        _filterChip(
+                          l.invoicesFilterOverdue,
+                          _overdueChipValue,
+                          current,
+                          onSelected: InvoiceStore.instance.setOverdueOnly,
                         ),
                         _filterChip(l.invoicesFilterNew, 'new', current),
                         _filterChip(l.invoicesFilterPending, 'pending', current),
@@ -313,14 +310,23 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
   /// never a real status, so no status chip matches it.
   static const _overdueChipValue = '__overdue__';
 
-  Widget _filterChip(String label, String? value, String? current) {
-    final selected = current == value;
+  /// One chip of the row. A status chip selects [value] as the status
+  /// filter; a quick view (Overdue) passes its own [onSelected] and a
+  /// sentinel [value] that [current] holds while it is active.
+  Widget _filterChip(
+    String label,
+    String? value,
+    String? current, {
+    VoidCallback? onSelected,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: FilterChip(
         label: Text(label),
-        selected: selected,
-        onSelected: (_) => InvoiceStore.instance.setStatusFilter(value),
+        selected: current == value,
+        onSelected: (_) => onSelected != null
+            ? onSelected()
+            : InvoiceStore.instance.setStatusFilter(value),
       ),
     );
   }

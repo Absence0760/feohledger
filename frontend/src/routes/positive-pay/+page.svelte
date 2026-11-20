@@ -455,20 +455,20 @@
 	   "Loading…" row, then re-sized against the real rows, so every column
 	   slid sideways as the data landed (tests-e2e/reactivity/
 	   layout-stability.spec.ts). The predictable columns get widths sized to
-	   their widest content; the text column(s) carry none and share the rest.
+	   their widest content in any locale; the text column(s) carry none and share the rest.
 	   Past the `min-width` the table scrolls inside its region
 	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
 	   `<th>` from `columns`, so the selectors go through `:global` under a
 	   page-owned wrapper (the /gl-accounts pattern). */
 	.ppay-table { min-width: 0; }
-	.ppay-table :global(table) { min-width: 1250px; }
+	.ppay-table :global(table) { min-width: 1350px; }
 	.ppay-table :global(th.col-type) { width: 150px; }
 	.ppay-table :global(th.col-format) { width: 150px; }
-	.ppay-table :global(th.col-count) { width: 90px; }
+	.ppay-table :global(th.col-count) { width: 110px; }
 	.ppay-table :global(th.col-amount) { width: 150px; }
 	.ppay-table :global(th.col-account) { width: 110px; }
 	.ppay-table :global(th.col-date) { width: 120px; }
-	.ppay-table :global(th.col-status) { width: 130px; }
+	.ppay-table :global(th.col-status) { width: 210px; }
 	.ppay-table :global(th.actions-col) { width: 140px; }
 
 	.filter-row {

@@ -226,7 +226,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**92 open: 62 (c) · 12 (a) · 18 (b)** — re-derived from the file, never carried
+**93 open: 63 (c) · 12 (a) · 18 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1410,6 +1410,20 @@ user-visible halves still open.
       reserve the late panels' space on /discounts and /tax; then move each
       into `LIST_PAGES`. **Trigger:** the next polish pass on any of those
       pages.
+- [ ] **(c) Six fixed list tables are sized to English.** Round 32 sized the
+      ten newer `fixed` tables (screening, bank changes, /requisitions,
+      /intake, /catalogs, /budgets, /recurring, /vendor-statements,
+      /positive-pay, /experiments) to their longest locale, and
+      `layout-stability.spec.ts` (`LOCALE_SIZED`) fails under `de` and `es` if
+      a header, badge or action cell there overflows its column. /invoices,
+      /payments, /exceptions, /vendors, /purchase-orders and /gl-accounts got
+      the same wrapping headers and action cells (DataTable's `fixed` styles)
+      but their badge and code columns were never measured against the other
+      locales, so a status badge such as "BEREIT ZUR PRÜFUNG" may still
+      overprint the next column. **Durable fix:** measure each of their
+      fixed widths against all six catalogues, re-size, and add the six hrefs
+      to `LOCALE_SIZED`. **Trigger:** the next change to any of those six
+      tables, or a locale overflow reported on one.
 - [ ] **(c) No scripted "first customer" release rehearsal.** The 2026-10-22
       walkthrough — sign up, connect QuickBooks, sync the chart and vendors,
       enter an invoice, approve it, push it, pay the bill in QuickBooks, watch

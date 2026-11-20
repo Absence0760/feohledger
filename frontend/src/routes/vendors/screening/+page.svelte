@@ -782,19 +782,19 @@
 	   "Loading…" row, then re-sized against the real rows, so every column
 	   slid sideways as the data landed (tests-e2e/reactivity/
 	   layout-stability.spec.ts). The predictable columns get widths sized to
-	   their widest content; the text column(s) carry none and share the rest.
+	   their widest content in any locale; the text column(s) carry none and share the rest.
 	   Past the `min-width` the table scrolls inside its region
 	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
 	   `<th>` from `columns`, so the selectors go through `:global` under a
 	   page-owned wrapper (the /gl-accounts pattern). */
 	.screening-table { min-width: 0; }
-	.screening-table :global(table) { min-width: 1100px; }
+	.screening-table :global(table) { min-width: 1130px; }
 	.screening-table :global(th.col-screening) { width: 210px; }
 	.screening-table :global(th.col-list) { width: 180px; }
 	.screening-table :global(th.col-provider) { width: 140px; }
-	.screening-table :global(th.col-score) { width: 100px; }
+	.screening-table :global(th.col-score) { width: 120px; }
 	.screening-table :global(th.col-date) { width: 130px; }
-	.screening-table :global(th.actions-col) { width: 120px; }
+	.screening-table :global(th.actions-col) { width: 130px; }
 
 	/* Page-specific styling; shared design-system CSS lives in app.css. */
 	.vendor-name {
