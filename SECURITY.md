@@ -20,7 +20,7 @@ GitHub's private vulnerability reporting workflow instead.
 
 If GitHub private reporting is unavailable for any reason, email the
 maintainer at the address listed on the repo owner's public profile:
-https://github.com/Absence0760
+https://github.com/jaredhowardza
 
 ### What to expect
 
