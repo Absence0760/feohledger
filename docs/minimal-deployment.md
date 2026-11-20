@@ -339,8 +339,10 @@ Caddy, must get a 200 with a non-empty body from
 (over a valid certificate), and `/api/public-config` must report signup as
 `.env` configures it, with a captcha site key while it is on — or the deploy
 fails (`deploy/README.md` § Deploys). The VM builds no SPA (`docs/decisions.md`
-§364); the release workflow publishes it to CloudFront afterwards and checks
-the edge. Flags: `--no-pull`, `--ref <sha>`, and `--backend-only`, which every
+§364); the release workflow publishes it to CloudFront afterwards, checks
+the edge, and last runs `deploy/smoke.sh` from the runner through public DNS
+(the apex, `api.` health, `smoke-check.<apex>` TLS and `public-config`), the
+check the on-VM one cannot make. Flags: `--no-pull`, `--ref <sha>`, and `--backend-only`, which every
 deploy now is and which is accepted for compatibility. Only one deploy runs at a time (a `flock`
 on `deploy/.deploy.lock`), and after the checkout the script re-runs the
 `deploy.sh` it just checked out, so a release that changes the deploy steps is
