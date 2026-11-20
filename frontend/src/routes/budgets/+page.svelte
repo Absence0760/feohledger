@@ -397,17 +397,17 @@
 	   "Loading…" row, then re-sized against the real rows, so every column
 	   slid sideways as the data landed (tests-e2e/reactivity/
 	   layout-stability.spec.ts). The predictable columns get widths sized to
-	   their widest content; the text column(s) carry none and share the rest.
+	   their widest content in any locale; the text column(s) carry none and share the rest.
 	   Past the `min-width` the table scrolls inside its region
 	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
 	   `<th>` from `columns`, so the selectors go through `:global` under a
 	   page-owned wrapper (the /gl-accounts pattern). */
 	.budget-table { min-width: 0; }
-	.budget-table :global(table) { min-width: 900px; }
+	.budget-table :global(table) { min-width: 920px; }
 	.budget-table :global(th.col-type) { width: 150px; }
 	.budget-table :global(th.col-period) { width: 130px; }
 	.budget-table :global(th.col-amount) { width: 160px; }
-	.budget-table :global(th.actions-col) { width: 120px; }
+	.budget-table :global(th.actions-col) { width: 140px; }
 
 	.filter-row {
 		display: flex;

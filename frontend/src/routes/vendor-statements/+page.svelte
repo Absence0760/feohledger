@@ -408,7 +408,11 @@
 							</RowLink>
 						</td>
 						<td class="muted">{formatDate(recon.statement_date)}</td>
-						<td class="muted">{recon.statement_reference ?? '—'}</td>
+						<!-- Vendor free text, often one unbroken token: clipped to the
+						     fixed column with the full value on hover. -->
+						<td class="muted ref-cell" title={recon.statement_reference ?? undefined}
+							>{recon.statement_reference ?? '—'}</td
+						>
 						<td class="right mono">
 							{#if discrepancyCount(recon) > 0}
 								<Badge tone="danger" variant="disc-badge">{discrepancyCount(recon)}</Badge>
@@ -470,19 +474,24 @@
 	   "Loading…" row, then re-sized against the real rows, so every column
 	   slid sideways as the data landed (tests-e2e/reactivity/
 	   layout-stability.spec.ts). The predictable columns get widths sized to
-	   their widest content; the text column(s) carry none and share the rest.
+	   their widest content in any locale; the text column(s) carry none and share the rest.
 	   Past the `min-width` the table scrolls inside its region
 	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
 	   `<th>` from `columns`, so the selectors go through `:global` under a
 	   page-owned wrapper (the /gl-accounts pattern). */
 	.recon-table { min-width: 0; }
-	.recon-table :global(table) { min-width: 1200px; }
-	.recon-table :global(th.col-date) { width: 130px; }
+	.recon-table :global(table) { min-width: 1250px; }
+	.recon-table :global(th.col-date) { width: 140px; }
 	.recon-table :global(th.col-ref) { width: 160px; }
-	.recon-table :global(th.col-count) { width: 130px; }
-	.recon-table :global(th.col-amount) { width: 150px; }
+	.recon-table :global(th.col-count) { width: 140px; }
+	.recon-table :global(th.col-amount) { width: 160px; }
 	.recon-table :global(th.col-status) { width: 150px; }
 	.recon-table :global(th.actions-col) { width: 140px; }
+	.ref-cell {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
 
 	.filter-row {
 		display: flex;

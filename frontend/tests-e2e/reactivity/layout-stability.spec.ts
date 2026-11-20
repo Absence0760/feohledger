@@ -236,6 +236,29 @@ const LIST_PAGES: ListPage[] = [
 ];
 
 /**
+ * The fixed tables whose widths are sized to the longest locale (round 32's
+ * conversions; frontend/docs/ui-patterns.md § Data tables). The six earlier
+ * fixed tables (/invoices, /payments, /exceptions, /vendors, /purchase-orders,
+ * /gl-accounts) were sized to English and are not yet held to it —
+ * docs/followups.md § "Six fixed list tables are sized to English".
+ */
+const LOCALE_SIZED = new Set([
+	'/vendors/screening',
+	'/vendors/change-requests',
+	'/requisitions',
+	'/intake',
+	'/catalogs',
+	'/budgets',
+	'/recurring',
+	'/vendor-statements',
+	'/positive-pay',
+	'/experiments'
+]);
+
+/** The locales whose strings run longest against the English widths. */
+const OVERFLOW_LOCALES = ['de', 'es'] as const;
+
+/**
  * Sidebar destinations deliberately outside the budget, each with its reason.
  * "Unmeasured list page" entries are list pages the budget does not cover yet
  * (docs/followups.md § "The layout-shift budget covers twenty-one pages"): moving
@@ -418,5 +441,91 @@ test.describe('list pages stay within the layout-shift budget', () => {
 				`layout shifts on ${href}: ${JSON.stringify(shifts.map((s) => [s.value.toFixed(3), s.sources]))}`
 			).toBeLessThan(CLS_BUDGET);
 		});
+	}
+});
+
+/**
+ * A fixed column cannot grow, so a header, a status badge or a row's buttons
+ * wider than it overprint the next column — measured in es/fr/de/pt-BR on the
+ * pages above after they were sized to English ("FECHA DEL ESTADO DE CUENTA"
+ * at ≈200px in a 130px column, the badge "En attente d’approbation" at
+ * ≈190px in 150px). Fixed headers and action cells now wrap; a badge does
+ * not, so its column is sized to the longest locale. Overflow is read on the
+ * cell: a `nowrap` badge is exactly as wide as its text, so only the `<td>`
+ * holding it shows the overflow.
+ */
+async function overflowingCells(table: Locator): Promise<string[]> {
+	return table.evaluate((t) => {
+		const cells = new Set<Element>();
+		for (const el of t.querySelectorAll('th, td.actions')) cells.add(el);
+		for (const el of t.querySelectorAll('td .badge')) {
+			const td = el.closest('td');
+			if (td) cells.add(td);
+		}
+		return [...cells]
+			.filter((el) => el.scrollWidth > el.clientWidth)
+			.map(
+				(el) =>
+					`${el.tagName.toLowerCase()}.${[...el.classList].join('.')} "${(el.textContent ?? '').replace(/\s+/g, ' ').trim()}" ${el.scrollWidth}px in ${el.clientWidth}px`
+			);
+	});
+}
+
+/** One pending bank change the caller may not approve: the row that carries
+ *  the separation-of-duties note above its buttons. */
+const REFUSED_CHANGE_REQUEST = {
+	id: '00000000-0000-4000-8000-000000000321',
+	vendor_id: '00000000-0000-4000-8000-000000000322',
+	vendor_name: 'Layout Fixture Supplies',
+	change_type: 'bank_details',
+	status: 'pending',
+	proposed_value: { bank_name: 'Fixture Bank', account_number_last4: '8888' },
+	requested_by_vendor_user_id: null,
+	requested_by_user_id: '00000000-0000-4000-8000-000000000323',
+	reviewed_by_user_id: null,
+	reviewed_at: null,
+	review_note: null,
+	created_at: '2026-11-01T09:00:00Z',
+	approve_refusal: {
+		code: 'vendor_change_self_requested',
+		message: 'You cannot approve a bank-detail change you requested.'
+	}
+};
+
+test.describe('fixed list tables fit their longest locale', () => {
+	for (const locale of OVERFLOW_LOCALES) {
+		for (const { href, fixedTable } of LIST_PAGES) {
+			if (!fixedTable || !LOCALE_SIZED.has(href)) continue;
+			test(`${href} (${locale}): no header, badge or action cell overflows its column`, async ({
+				page
+			}) => {
+				if (href === '/vendors/change-requests') {
+					// The refusal note is the widest thing an actions cell holds, and
+					// the shard's tenant need not have a request to refuse.
+					await page.route(
+						(url) => url.pathname === '/api/vendors/change-requests',
+						(route) =>
+							route.fulfill({
+								json: { items: [REFUSED_CHANGE_REQUEST], total: 1, page: 1, page_size: 25 }
+							})
+					);
+				}
+				await page.addInitScript((lc) => localStorage.setItem('feoh_locale', lc), locale);
+				await page.goto(href);
+				await expect(page.locator('html')).toHaveAttribute('lang', locale);
+
+				const table = page.locator(fixedTable).first();
+				await expect(table.locator('tbody tr').first()).toBeVisible();
+				// Settled: the "Loading…" row (the only empty row with a status
+				// region) has given way to data or a settled empty / error row.
+				await expect(table.locator('[data-testid="table-empty"] [role="status"]')).toHaveCount(0);
+				if (href === '/vendors/change-requests') {
+					await expect(table.locator('.sod-note')).toBeVisible();
+				}
+				await nextFrames(page);
+
+				expect(await overflowingCells(table), `cells wider than their column on ${href}`).toEqual([]);
+			});
+		}
 	}
 });

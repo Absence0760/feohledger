@@ -199,6 +199,25 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
   nowrap` plus a `title` with the full value. Reference: `/vendors`, whose
   widths are scoped under a page wrapper because `SortableHeader` renders the
   `<th>` from another component.
+- **Size fixed widths to the longest locale; fixed headers wrap.** A fixed
+  column cannot grow, so a width measured against English overprints the next
+  column in es/fr/de/pt-BR ("FECHA DEL ESTADO DE CUENTA" ran ≈200px in a 130px
+  column; the badge "En attente d’approbation" ≈190px in 150px). In a `fixed`
+  table DataTable lets each `<th>` wrap, so a header column needs only its
+  longest single *word* in any of the six catalogues
+  (`src/lib/i18n/locales/*.ts`). A `<Badge>` never wraps, so a status column
+  is sized to its longest badge label in any locale, plus the cell padding.
+  **Action columns wrap too:** in a `fixed` table `td.actions` is
+  `white-space: normal`, so when a row's buttons don't fit — another locale, or
+  the widest status's button set — they flow onto a second line rather than
+  out of the table. Size the actions column for the common case in English
+  and let the rest wrap; never widen it to the worst locale's full button row.
+  A note in an actions cell (the bank-change queue's separation-of-duties
+  refusal) is `display: block; white-space: normal`, above the buttons.
+  Guard: `tests-e2e/reactivity/layout-stability.spec.ts` opens each page in
+  its `LOCALE_SIZED` set under `de` and `es` and fails if a header, a
+  badge's cell or an action cell has `scrollWidth > clientWidth`; a new
+  fixed table joins that set.
 - **A list page's table is `fixed`.** Under `table-layout: auto` the columns
   are sized against the "Loading…" row and then re-sized against the real
   rows, so every column slides sideways as the data lands. /invoices,
