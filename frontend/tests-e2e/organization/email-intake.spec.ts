@@ -113,7 +113,9 @@ test.describe('/organization email intake', () => {
 		await page.goto('/organization?section=email-intake');
 
 		const card = panel(page);
-		const rotate = card.getByRole('button', { name: 'Rotate address for email intake' });
+		// Exact: a substring match would also find the armed "Confirm rotate
+		// address for email intake", and the unarmed name could never be gone.
+		const rotate = card.getByRole('button', { name: 'Rotate address for email intake', exact: true });
 
 		// First click ARMS only — it must not reach the endpoint. Watch for the
 		// POST so a regression that fires on the first click fails here rather

@@ -48,15 +48,15 @@ test('the status chips re-tally to the searched set', async ({ page }) => {
 
 	await page.goto('/invoices');
 
-	// Unsearched: the All chip reads the whole tenant.
+	// Unsearched: the All chip reads the whole tenant — a locale-grouped count
+	// (`formatCount`; the e2e browser runs in en-US).
 	const allChip = page.locator('.filter-chip', { hasText: /^All\s/ });
-	await expect(allChip).toContainText('1284');
+	await expect(allChip).toHaveText(/^All\s+1,284$/);
 
 	// Type a search → the counts endpoint is re-called WITH the term, and the
 	// chip re-tallies to the filtered set.
 	await page.getByLabel('Search invoices', { exact: true }).fill('globex');
 
-	await expect(allChip).toContainText('3');
-	await expect(allChip).not.toContainText('1284');
+	await expect(allChip).toHaveText(/^All\s+3$/);
 	expect(countsWithSearch).toBeGreaterThan(0);
 });
