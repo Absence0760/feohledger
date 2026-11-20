@@ -92,7 +92,7 @@ test.describe('/organization email intake', () => {
 		// No address to show, and — the point — no control that could only
 		// mint another token addressing nothing.
 		await expect(card.getByTestId('email-intake-address')).toHaveCount(0);
-		await expect(card.getByRole('button', { name: 'Rotate the email intake address' })).toHaveCount(
+		await expect(card.getByRole('button', { name: 'Rotate address for email intake' })).toHaveCount(
 			0
 		);
 	});
@@ -113,7 +113,9 @@ test.describe('/organization email intake', () => {
 		await page.goto('/organization?section=email-intake');
 
 		const card = panel(page);
-		const rotate = card.getByRole('button', { name: 'Rotate the email intake address' });
+		// Exact: a substring match would also find the armed "Confirm rotate
+		// address for email intake", and the unarmed name could never be gone.
+		const rotate = card.getByRole('button', { name: 'Rotate address for email intake', exact: true });
 
 		// First click ARMS only — it must not reach the endpoint. Watch for the
 		// POST so a regression that fires on the first click fails here rather
@@ -128,13 +130,22 @@ test.describe('/organization email intake', () => {
 		await expect(card.getByTestId('email-intake-rotate-warning')).toContainText(
 			'stops accepting email the moment you confirm'
 		);
-		await expect(rotate).toHaveText('Confirm rotate');
+		// Armed, the accessible name switches with the visible text (WCAG
+		// 2.5.3): a speech user says "Confirm rotate", and a screen reader
+		// hears the armed state. The unarmed name is gone.
+		const confirmRotate = card.getByRole('button', {
+			name: 'Confirm rotate address for email intake',
+			exact: true
+		});
+		await expect(confirmRotate).toHaveText('Confirm rotate');
+		await expect(confirmRotate).toHaveClass(/\barmed\b/);
+		await expect(rotate).toHaveCount(0);
 		await expect(card.getByTestId('email-intake-address')).toHaveText(CONFIGURED);
 		expect(rotatePosts).toBe(0);
 
 		// Second click commits, and the replacement is revealed with a copy
 		// affordance through the shared SecretReveal.
-		await rotate.click();
+		await confirmRotate.click();
 		const revealed = page.getByTestId('email-intake-address-rotated');
 		await expect(revealed).toBeVisible();
 		await expect(revealed).toHaveText(ROTATED);
@@ -157,7 +168,7 @@ test.describe('/organization email intake', () => {
 		await expect(card.getByRole('button', { name: 'Create intake address' })).toBeVisible();
 		// Nothing exists yet, so nothing can be invalidated — the destructive
 		// wording and the armed confirm belong to rotation only.
-		await expect(card.getByRole('button', { name: 'Rotate the email intake address' })).toHaveCount(
+		await expect(card.getByRole('button', { name: 'Rotate address for email intake' })).toHaveCount(
 			0
 		);
 	});
@@ -197,7 +208,7 @@ test.describe('/organization email intake', () => {
 		// load failure the reader cannot act on.
 		await expect(card.getByTestId('email-intake-admin-only')).toBeVisible();
 		await expect(card.getByTestId('email-intake-address')).toHaveCount(0);
-		await expect(card.getByRole('button', { name: 'Rotate the email intake address' })).toHaveCount(
+		await expect(card.getByRole('button', { name: 'Rotate address for email intake' })).toHaveCount(
 			0
 		);
 	});

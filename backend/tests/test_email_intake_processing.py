@@ -833,7 +833,9 @@ async def test_create_invoice_is_pending_zero_decimal_and_org_prefixed_key():
     assert invoice.status == InvoiceStatus.pending
     assert invoice.amount == Decimal("0")
     assert isinstance(invoice.amount, Decimal)
-    assert invoice.currency == "USD"
+    # Unknown until extraction reads the document, never a guessed USD
+    # (decisions §473).
+    assert invoice.currency is None
     assert invoice.uploaded_by_id is None
     assert invoice.organization_id == org_id
     assert invoice.entity_id == entity_id  # lands under the resolved entity

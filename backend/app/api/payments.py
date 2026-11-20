@@ -80,6 +80,9 @@ from app.services.currency_conversion import (
     reporting_amount_at_locked_rate,
     resolve_reporting_currency,
 )
+from app.services.discount_opportunities import (
+    capture_discount_offers as _capture_discount_offers,
+)
 from app.services.exception_lifecycle import record_decision
 from app.services.external_payment import (
     ExternalPaymentRefused,
@@ -110,6 +113,7 @@ from app.services.payment_adapters import (
     UnknownPaymentProviderError,
     get_payment_adapter,
 )
+from app.services.payment_adapters.base import PENDING_PAYMENT_STATUSES
 from app.services.payment_controls import (
     CFO_REASON_AMOUNT_NOT_EXPRESSIBLE,
     CFO_REASON_THRESHOLD_UNPARSEABLE,
@@ -131,6 +135,13 @@ from app.services.payment_controls import (
     settlement_accept_refusal,
 )
 from app.services.payment_execution_mode import resolve_execution_mode
+from app.services.payment_gates import (
+    INVOICE_LOCKED_DETAIL,
+    INVOICE_LOCKED_REASON,
+    PAYABLE_INVOICE_STATUSES,
+    PAYMENT_BLOCKING_EXCEPTION_TYPES,
+    SCHEDULABLE_INVOICE_STATUSES,
+)
 from app.services.payment_runs import (
     CARD_CLAIM_ONLY_METHOD,
     CURRENCY_CODE_PATTERN,
@@ -165,7 +176,6 @@ from app.services.payment_settlement_record import (
 )
 from app.services.provider_credentials import provider_config, settings_with_secrets
 from app.services.workflow_engine import (
-    VALID_TRANSITIONS,
     get_invoice_for_update,
     transition_invoice,
 )
@@ -191,120 +201,9 @@ PAYMENT_CFO_REQUIRED = "payment_cfo_required"
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
-# The invoice statuses a payment may be created against — i.e. an invoice that
-# has cleared AP approval and can directly transition to `payment_scheduled`.
-# `sent_to_erp` is excluded (mid-flight ERP push must reach `posted_in_erp`
-# first); `new`/`pending`/`ready_for_review`/`rejected`/`failed` are pre-approval
-# and must never have money scheduled against them. This is the single source of
-# truth shared by the queue, the run builder, and the standalone payment record,
-# so a payment can't be booked against an unapproved invoice on any path.
-PAYABLE_INVOICE_STATUSES = (
-    InvoiceStatus.approved.value,
-    InvoiceStatus.posted_in_erp.value,
-    InvoiceStatus.payment_scheduled.value,
-)
-
-# Of those, the ones that still need the `→ payment_scheduled` transition once a
-# payment settles. DERIVED from the state machine rather than restated, so it
-# can never name a status `validate_transition` would refuse: a payable status
-# is schedulable exactly when `payment_scheduled` is a legal successor.
-# (`payment_scheduled` itself is payable — a re-attempt — but is already there,
-# and drops out here because it isn't its own successor.) The three dispatch
-# legs used to spell this out as a literal that included `sent_to_erp`, which
-# `VALID_TRANSITIONS` does NOT allow — and the transition runs AFTER the
-# processor accepted the order, so the resulting 409 recorded a settled payment
-# as `failed`. `_execute_single_payment` now refuses a non-payable invoice
-# before the adapter call; this keeps the two facts from drifting apart again.
-SCHEDULABLE_INVOICE_STATUSES = tuple(
-    value
-    for value in PAYABLE_INVOICE_STATUSES
-    if InvoiceStatus.payment_scheduled in VALID_TRANSITIONS.get(InvoiceStatus(value), set())
-)
-
-# Exception classes that block an invoice from entering a payment run while
-# UNRESOLVED (`open`/`escalated`). Every one of them is an `error`-severity
-# financial-integrity flag that approval does NOT gate on — nothing in
-# `services/review.py` or `workflow_engine.py` reads warning severity — so
-# without this gate each could be approved straight past and paid:
-#
-#   duplicate            — the same invoice paid a second time
-#   fraud_flag           — bank-detail swap, rush payment, stat anomaly, an
-#                          altered/never-issued cheque from a Positive Pay return
-#   line_total_mismatch  — the header `amount` a run pays openly disagrees with
-#                          the invoice's own line items (the header is never
-#                          silently recomputed from them — see
-#                          `docs/line-total-reconciliation.md`), so paying it
-#                          would pay a total the lines don't support
-#   payment_reconciliation — the backstop reconciler gave up waiting on a
-#                          `submitted` payment past its max age and marked it
-#                          `failed`. `failed` is in
-#                          `LIVE_PAYMENT_TERMINAL_STATUSES`, so that row stops
-#                          holding the invoice's live-payment slot even though
-#                          real money may still be in flight at the rail. The
-#                          exception is what stops a fresh run paying the same
-#                          invoice a second time until a human has reconciled
-#                          the rail (see `services/payment_reconciler.py`).
-#   quality_hold         — the 4-way leg: the goods failed inspection, were only
-#                          partly accepted, or an inspection the match rule
-#                          requires is not on record. A four-way match exists so
-#                          that failed quality acceptance stops payment; paying
-#                          past it pays for goods the business refused.
-#   po_mismatch          — paying the invoice would pay more than its purchase
-#                          order supports: the cited PO doesn't exist, the
-#                          currencies differ (nothing could be compared), it
-#                          bills ABOVE the PO beyond the match rule's tolerance,
-#                          or it bills beyond the share of the PO actually
-#                          received. Only those raise one
-#                          (`invoice_warnings._refresh_po_match`): billing LESS
-#                          than the PO (a split / blanket PO invoiced delivery by
-#                          delivery), an in-tolerance variance and an
-#                          over-receipt on its own (decisions §67) stay warnings
-#                          on the invoice and never hold it. A refresh that no
-#                          longer finds the problem closes the row again. Same
-#                          rule as an ERP's price/quantity variance payment
-#                          block.
-#
-# Resolving/dismissing the exception is the human sign-off that clears it. The
-# same tuple also scopes segregation of duties on that sign-off
-# (`services/exception_lifecycle.segregation_refusal`): someone implicated in
-# creating the invoice may not clear a flag that blocks its payment, and on a
-# `po_mismatch` / `quality_hold` the invoice's approvers may not either
-# (decisions §420).
-#
-# Order is the precedence a row's `blocked_reason` reports when an invoice
-# carries several (`services/payment_runs.blocking_exception_types`).
-PAYMENT_BLOCKING_EXCEPTION_TYPES = (
-    "duplicate",
-    "fraud_flag",
-    "line_total_mismatch",
-    "payment_reconciliation",
-    "quality_hold",
-    "po_mismatch",
-)
-
-# The payment-blocking types that also refuse the ERP PUSH (decisions §286),
-# not just a payment run. Posting a bill records the liability in the ERP's own
-# books, and there a bookkeeper can pay it directly (QuickBooks "Mark as paid",
-# Bill Pay) without our run gate ever seeing it. So a flag that says the
-# liability itself is wrong has to stop the posting:
-#
-#   duplicate   the obligation is already booked; a second bill is a second
-#               liability for one debt.
-#   fraud_flag  the obligation may not exist, or not be owed to this payee.
-#
-# The other four say the liability is real and only its PAYMENT must wait —
-# a line-level discrepancy under an approved header amount, a rail that may
-# already hold an order, goods awaiting inspection, a bill over its PO or
-# receipt. Recording those in the ERP is correct accounting, and refusing it
-# would hide a genuine payable from the ledger. Order is the precedence the
-# refusal names when an invoice carries both.
-#
-# The one predicate is `services/payment_runs.blocking_exception_types`, and
-# clearing either type is the segregated sign-off of
-# `services/exception_lifecycle.segregation_refusal`, because both are members
-# of the tuple above (asserted below, so the two lists cannot drift apart).
-ERP_EXPORT_BLOCKING_EXCEPTION_TYPES = ("duplicate", "fraud_flag")
-assert set(ERP_EXPORT_BLOCKING_EXCEPTION_TYPES) <= set(PAYMENT_BLOCKING_EXCEPTION_TYPES)
+# The payable / schedulable invoice statuses, the payment- and ERP-export-blocking
+# exception types and the invoice-locked refusal are owned by
+# `services/payment_gates.py`, imported above.
 
 # Terminal payment states (no longer a LIVE claim on the invoice) are defined
 # once, beside the partial index that enforces them:
@@ -825,7 +724,7 @@ async def _payment_queue_rollup(
 
     Grouped by the invoice's own currency and rolled to the org reporting
     currency **in SQL** — the CASE expressions mirror
-    ``currency_conversion.reporting_amount_for_row`` exactly as ``api/dashboard``
+    ``currency_conversion.reporting_amount_for_row`` exactly as ``services/dashboard_metrics``
     does — so a paginated queue never loses its KPI-bar totals or its
     blocked / early-pay-savings banners to "just this page". ``selectable_only``
     excludes rows a payment run would refuse (the set "select all matching"
@@ -935,7 +834,8 @@ async def _payment_queue_rollup(
                 "total_savings": str(save.quantize(q2)),
             }
         )
-    by_currency.sort(key=lambda e: e["currency"])
+    # The unknown-currency group (`None`, decisions §473) sorts last.
+    by_currency.sort(key=lambda e: (e["currency"] is None, e["currency"] or ""))
     return {
         "total": total,
         "total_amount": str(total_amount.quantize(q2)),
@@ -1362,12 +1262,9 @@ async def payment_queue_ids(
     }
 
 
-#: Payment statuses whose money is committed but not yet settled — what
-#: `/summary` reports as `total_pending`. `pending_compliance` belongs here:
-#: the payment is authorized and waiting on a human, so leaving it out made
-#: held money appear in NEITHER KPI (not paid, not pending) — invisible in the
-#: one place a treasurer looks for "what is still out there".
-PENDING_PAYMENT_STATUSES = ("pending", "processing", "submitted", "pending_compliance")
+#: `PENDING_PAYMENT_STATUSES` (committed, not yet settled) lives beside the
+#: other payment-status sets in `services/payment_adapters/base`, so services
+#: such as the dashboard read it without importing this router.
 
 
 @router.get("/summary")
@@ -2291,16 +2188,6 @@ class InvoiceLockedError(Exception):
     `INVOICE_LOCKED_REASON`; the request paths (void, settlement acceptance,
     compliance release) answer `409` and change nothing."""
 
-
-#: `Payment.failure_reason` for a dispatch refused because the invoice row was
-#: locked past the bound. Retry-safe (`payment_runs._RETRY_SAFE_FAILURE_PREFIXES`).
-INVOICE_LOCKED_REASON = "invoice_locked"
-
-#: The 409 body every request path answers with for the same refusal.
-INVOICE_LOCKED_DETAIL = (
-    "invoice_locked: the invoice is being changed by another request — nothing "
-    "was sent to the processor; retry in a moment"
-)
 
 #: `Payment` columns that describe the ORDER sent to the processor. The FX leg
 #: writes them just before the adapter call (the corridor can change `method`,
@@ -4167,96 +4054,6 @@ async def _open_compliance_hold_exception(
     )
 
 
-async def _capture_discount_offers(
-    db: AsyncSession,
-    *,
-    org: Organization,
-    payment: Payment,
-    actor_id: uuid.UUID | None,
-    now: datetime,
-    invoice: Invoice | None = None,
-) -> None:
-    """Recognize `payment` settling its invoice at a discounted payoff and
-    capture any matching `accepted` `DiscountOffer` — the wiring
-    `discount_offers.mark_captured` was missing (issue #280): without a
-    caller, `captured_amount`/`captured_at` never got set and the
-    captured-savings KPI always read 0 even when discounts were genuinely
-    accepted and paid at the discounted amount.
-
-    Called from every path a `Payment` reaches `completed` — the synchronous
-    adapter/card leg (`_execute_single_payment`) and the async webhook-driven
-    completion (`payment_webhook`) — so a discount is recognized whether the
-    rail confirms instantly or days later. Both callers already hold the
-    `Invoice` and pass it in; `invoice=None` falls back to resolving it from
-    `payment.invoice_id` for any future caller that doesn't. No invoice found
-    is a no-op (nothing to match against). A payment BOOKED with a discount
-    (`Payment.discount_offer_id`, migration 0104) captures exactly that offer
-    for exactly `Payment.discount_amount`; one booked without falls back to the
-    exact-payoff match, which is how a discount taken the old way — through a
-    credit memo — is still recognized (see
-    `discount_capture.capture_offer_for_settled_payment`).
-
-    NOT called when the settlement verifier flagged a discrepancy — the
-    payoff match runs against OUR authorized amount, which a divergent
-    settlement has just contradicted. See the call site in `payment_webhook`.
-
-    Best-effort, like the vendor card-notify email below: this labels a
-    payment that already, definitely settled with a bookkeeping fact
-    (realized discount savings) — it must never be the reason a payment
-    that DID move money fails to record that it moved (or, on the webhook
-    path, the reason a webhook delivery 5xxs and gets needlessly retried).
-    The invoice lookup lives INSIDE the try for exactly that reason. A
-    failure here is logged (class only — no invoice/vendor PII) and
-    swallowed rather than propagated, mirroring `notify_vendor_of_card`'s
-    own safety net.
-    """
-    try:
-        if invoice is None:
-            inv_result = await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
-            invoice = inv_result.scalar_one_or_none()
-        if invoice is None:
-            return
-
-        from app.services.discount_capture import capture_offer_for_settled_payment
-
-        captured = await capture_offer_for_settled_payment(
-            db,
-            payment=payment,
-            invoice_currency=invoice.currency,
-            now=now,
-        )
-        if not captured:
-            return
-
-        from app.services.audit_dispatch import dispatch_audit
-
-        for offer in captured:
-            await dispatch_audit(
-                db,
-                correlation_id=payment.correlation_id or invoice.id,
-                organization_id=org.id,
-                actor_id=actor_id,
-                action="discount_offer.captured",
-                entity_type="discount_offer",
-                entity_id=offer.id,
-                details={
-                    "invoice_id": str(invoice.id),
-                    "payment_id": str(payment.id),
-                    "captured_amount": str(offer.captured_amount),
-                    "payment_amount": str(payment.amount),
-                },
-            )
-    except Exception as exc:  # noqa: BLE001
-        # Log the exception CLASS only, never the message (PII-out-of-logs
-        # invariant — mirrors payment_erp_sync.py's own discipline). Never
-        # `payment.invoice_id` either — best-effort but still no PII risk.
-        logger.warning(
-            "discount-offer capture failed for payment=%s: %s; payment settlement unaffected",
-            payment.id,
-            exc.__class__.__name__,
-        )
-
-
 async def _execute_single_payment(
     db: AsyncSession,
     *,
@@ -4334,6 +4131,22 @@ async def _execute_single_payment(
     if refusal is not None:
         payment.status = "failed"
         payment.failure_reason = refusal
+        payment.completed_at = now
+        return
+
+    # The org's home currency decides the FX leg and denominates every
+    # compliance threshold, on the card leg as well as the processor leg, so it
+    # is resolved once here, before either. A setting that is set but not a
+    # code is refused, never read as USD (decisions §473, amended): "EURO" paid
+    # a USD→EUR leg at a real FX lock. `international_payment_error:` keeps the
+    # refusal retry-safe — nothing has reached a processor yet.
+    from app.services.international_payments import HomeCurrencyInvalidError
+
+    try:
+        org_home_currency = resolve_home_currency(org.settings)
+    except HomeCurrencyInvalidError as exc:
+        payment.status = "failed"
+        payment.failure_reason = f"international_payment_error: {exc}"
         payment.completed_at = now
         return
 
@@ -4597,7 +4410,6 @@ async def _execute_single_payment(
     # No `or "USD"`: `dispatch_preflight` has already refused an invoice that
     # records no currency (`currency_unknown`), so a blank never reaches here.
     invoice_currency = normalize_currency_code(invoice.currency)
-    org_home_currency = resolve_home_currency(org.settings)
     has_intl_bank_fields = bool(
         vendor_bank and (vendor_bank.get("iban") or vendor_bank.get("swift_bic"))
     )

@@ -15,6 +15,7 @@ import 'package:feohledger_mobile/stores/notification_store.dart';
 import 'package:feohledger_mobile/stores/org_currency_store.dart';
 import 'package:feohledger_mobile/stores/org_settings_store.dart';
 import 'package:feohledger_mobile/stores/payment_queue_store.dart';
+import 'package:feohledger_mobile/stores/payment_store.dart';
 import 'package:feohledger_mobile/stores/vendor_store.dart';
 import 'package:feohledger_mobile/stores/workflow_store.dart';
 
@@ -89,6 +90,7 @@ class SessionManager {
     OrgCurrencyStore.instance.reset();
     OrgSettingsStore.instance.reset();
     PaymentQueueStore.instance.reset();
+    PaymentStore.instance.reset();
     VendorStore.instance.reset();
     WorkflowStore.instance.reset();
   }

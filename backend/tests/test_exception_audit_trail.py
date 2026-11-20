@@ -150,8 +150,8 @@ async def test_payment_blocking_flag_tracks_the_real_gate():
     `payment_blocking` has to follow automatically — a second hardcoded list
     would silently under-report which decisions unblocked money.
     """
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
     from app.services.exception_lifecycle import is_payment_blocking
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     for exception_type in PAYMENT_BLOCKING_EXCEPTION_TYPES:
         assert is_payment_blocking(exception_type) is True

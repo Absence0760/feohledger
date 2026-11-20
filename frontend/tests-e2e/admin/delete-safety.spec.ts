@@ -114,6 +114,7 @@ test.describe('/admin user-delete safety', () => {
 				vendor: 'Delete Safety Step Vendor',
 				invoice_number: `DSS-${Date.now()}`,
 				amount: 100,
+				currency: 'USD',
 				status: 'new'
 			}
 		});

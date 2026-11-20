@@ -49,6 +49,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
+from app.utils.currency_code import iso_currency_or_none
+
 #: What a placeholder holds, which is what the client needs to format it.
 #:
 #: ``money``    exact decimal digits; formatted with the warning's ``currency``
@@ -60,9 +62,12 @@ from typing import Literal
 #: ``text``     opaque — an identifier, a name, a sentence we cannot key
 ParamKind = Literal["text", "currency", "money", "number", "percent", "count", "date"]
 
-#: ISO 4217 fallback, matching `frontend/src/lib/utils/money.ts::DEFAULT_CURRENCY`
-#: and the `invoice.currency or "USD"` reads already in `invoice_warnings`.
-DEFAULT_CURRENCY = "USD"
+#: What a ``currency`` param carries when the invoice records no currency
+#: (NULL, blank or malformed — decisions §473): the empty string, which both
+#: clients' money formatters already render as bare digits with no symbol.
+#: Never a borrowed code: naming USD for an amount nobody recorded a currency
+#: for is the substitution §160/§196 forbid.
+UNKNOWN_CURRENCY = ""
 
 
 @dataclass(frozen=True)
@@ -305,6 +310,40 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
     # kind would format it with the invoice's code and assert the PO is in it.
     # `poTotal` is a `number` for the reason the self-correction figures below
     # are (decisions §197).
+    # Cumulative: the OTHER live invoices citing the PO plus this one bill
+    # past its total (`invoice_warnings._refresh_po_overbilling`, decisions
+    # §469). Its own type so the modal lists it beside the other
+    # findings rather than leaving it to the PO-match panel's issues.
+    WarningSpec(
+        "po_billed_beyond_total",
+        "po_overbilled",
+        "Other invoices already bill {billedAmount} {currency} against PO {poNumber}, "
+        "whose total is {poTotal} {currency} — this invoice takes it past that total",
+        {
+            "billedAmount": "money",
+            "poNumber": "text",
+            "poTotal": "money",
+            "currency": "currency",
+        },
+    ),
+    # Cumulative, receipt leg: the same siblings plus this invoice bill past
+    # the received slice of the PO (`po_total × received / ordered`), though
+    # each fits it alone (decisions §470). Same type, so it stops
+    # every unattended approval as the total leg does; past approval it is
+    # also the sentence of the payment-blocking `po_mismatch` it raises.
+    # `totalBilled` includes this invoice: received is never part of billed.
+    WarningSpec(
+        "po_billed_beyond_receipt",
+        "po_overbilled",
+        "Invoices on PO {poNumber} bill {totalBilled} {currency}, this one included; "
+        "goods worth {receivedValue} {currency} have been received",
+        {
+            "totalBilled": "money",
+            "poNumber": "text",
+            "receivedValue": "money",
+            "currency": "currency",
+        },
+    ),
     WarningSpec(
         "po_amount_variance_po_currency_unknown",
         "po_mismatch",
@@ -507,6 +546,26 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
             "spendLimit": "money",
             "currency": "currency",
         },
+    ),
+    # The invoice and the contract are in different currencies, or the invoice
+    # records none, so the cumulative spend was not measured against the limit
+    # (decisions §472): no rate is guessed to make the figures
+    # comparable. The codes are the finding, so both are `text`, as in
+    # `po_currency_mismatch`. Severity follows `not_to_exceed`, as the
+    # spend-limit codes' does.
+    WarningSpec(
+        "contract_currency_mismatch",
+        "contract_noncompliant",
+        "Invoice is in {invoiceCurrency} but contract {contractNumber} is in "
+        "{contractCurrency} — its spend limit was not checked",
+        {"invoiceCurrency": "text", "contractNumber": "text", "contractCurrency": "text"},
+    ),
+    WarningSpec(
+        "contract_currency_mismatch_invoice_currency_unknown",
+        "contract_noncompliant",
+        "The invoice records no valid currency, so the spend limit in "
+        "{contractCurrency} of contract {contractNumber} was not checked",
+        {"contractNumber": "text", "contractCurrency": "text"},
     ),
     WarningSpec(
         "contract_gl_not_allowed",
@@ -1019,7 +1078,7 @@ DIRECT_EXCEPTION_SPECS: tuple[WarningSpec, ...] = (
         "Positive Pay return: check {checkNumber} not on issued file",
         {"checkNumber": "text"},
     ),
-    # `api/vendors.flag_invoice_for_bank_change`.
+    # `services/vendor_bank_change.flag_invoice_for_bank_change`.
     WarningSpec(
         EXCEPTION_PREFIX + "vendor_bank_changed",
         "fraud_flag",
@@ -1380,8 +1439,7 @@ def _coerce(kind: ParamKind, value: object) -> str | int:
     if kind == "money":
         return _money(value)
     if kind == "currency":
-        code = str(value or "").strip().upper()
-        return code if len(code) == 3 else DEFAULT_CURRENCY
+        return iso_currency_or_none(value) or UNKNOWN_CURRENCY
     if kind == "date":
         if isinstance(value, (date, datetime)):
             return value.isoformat()

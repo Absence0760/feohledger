@@ -1,7 +1,7 @@
 """``get_vendor_spend`` tool — top-N vendor spend over a period.
 
 Wraps ``services.analytics.compute_supplier_concentration``. The committed-status
-set is lifted from ``app/api/analytics.py`` (imported, not duplicated). All sums
+set is ``services/open_ap_due.COMMITTED_STATUSES`` (imported, not duplicated). All sums
 are ``Numeric``/``Decimal``.
 
 Rolled into the org's reporting currency (not a naive SUM across currencies):
@@ -17,7 +17,7 @@ to select five columns of every committed invoice in the period and fold them
 in Python — a synchronous per-row loop inside an `async def` whose cost grew
 with the invoice table (`docs/decisions.md` §103, and
 `backend/docs/analytics.md` § Per-vendor spend is one query). The population
-stays this tool's own (`_COMMITTED_STATUSES`, not the AP surfaces'
+stays this tool's own (`COMMITTED_STATUSES`, not the AP surfaces'
 "everything but rejected"); only the grouping and the conversion are shared.
 
 It groups by `vendor_id` as well as name, because this tool RETURNS the id:
@@ -33,7 +33,6 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import _COMMITTED_STATUSES
 from app.models.invoice import Invoice
 from app.services.analytics import compute_supplier_concentration
 from app.services.assistant.tools._currency import resolve_org_currency
@@ -46,6 +45,7 @@ from app.services.currency_conversion import (
     vendor_currency_rollup_select,
     vendor_rollup_from_grouped_rows,
 )
+from app.services.open_ap_due import COMMITTED_STATUSES
 from app.tenant import apply_entity_scope
 from app.utils.dates import utc_today
 
@@ -91,7 +91,7 @@ async def get_vendor_spend(
 
     stmt = (
         vendor_currency_rollup_select(reporting_currency=currency, include_vendor_id=True)
-        .where(Invoice.status.in_(_COMMITTED_STATUSES))
+        .where(Invoice.status.in_(COMMITTED_STATUSES))
         .where(Invoice.invoice_date >= start)
     )
     stmt = apply_entity_scope(stmt, Invoice, entity_id)

@@ -12,16 +12,16 @@ import { QUEUE_BLOCKED_REASON_KEYS, queueBlockedReasonKey } from './paymentQueue
 
 const BACKEND = join(__dirname, '../../../../backend/app');
 const PAYMENT_RUNS_PY = readFileSync(join(BACKEND, 'services/payment_runs.py'), 'utf8');
-const PAYMENTS_PY = readFileSync(join(BACKEND, 'api/payments.py'), 'utf8');
+const PAYMENT_GATES_PY = readFileSync(join(BACKEND, 'services/payment_gates.py'), 'utf8');
 
 /** `REFUSAL_X = "code"` constants in `services/payment_runs.py`. */
 const refusalCodes = [...PAYMENT_RUNS_PY.matchAll(/^REFUSAL_[A-Z_]+ = "([a-z_]+)"$/gm)].map(
 	(m) => m[1]
 );
 
-/** The members of `PAYMENT_BLOCKING_EXCEPTION_TYPES` in `api/payments.py`. */
+/** The members of `PAYMENT_BLOCKING_EXCEPTION_TYPES` in `services/payment_gates.py`. */
 const blockingTypes = (() => {
-	const tuple = PAYMENTS_PY.match(/^PAYMENT_BLOCKING_EXCEPTION_TYPES = \(([^)]*)\)/m);
+	const tuple = PAYMENT_GATES_PY.match(/^PAYMENT_BLOCKING_EXCEPTION_TYPES = \(([^)]*)\)/m);
 	return tuple ? [...tuple[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]) : [];
 })();
 

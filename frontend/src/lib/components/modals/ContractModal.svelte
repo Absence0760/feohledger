@@ -20,6 +20,7 @@
 	import VendorPicker from '#lib/components/ui/VendorPicker.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import type { MoneyAmount } from '#lib/utils/money.ts';
 	import { isMoneyInput } from '#lib/utils/moneyInput.ts';
 	import {
@@ -454,7 +455,7 @@
 					</div>
 					<div>
 						<span class="spend-label">{m('contracts.modal.spend.invoices')}</span>
-						<span class="spend-value">{spend.invoice_count}</span>
+						<span class="spend-value">{formatCount(spend.invoice_count)}</span>
 					</div>
 					{#if spend.spend_limit !== null}
 						<div>
@@ -480,7 +481,7 @@
 			<div class="line-items-header">
 				<span class="line-items-title">{m('contracts.modal.lineItems')}</span>
 				{#if canEdit}
-					<button type="button" class="btn-add-line" onclick={addLine}>{m('contracts.modal.addLine')}</button>
+					<button type="button" class="btn-secondary" onclick={addLine}>{m('contracts.modal.addLine')}</button>
 				{/if}
 			</div>
 			{#if lineItems.length > 0}
@@ -522,13 +523,13 @@
 			<div class="document-section">
 				<span class="document-title">{m('contracts.modal.document.title')}</span>
 				{#if contract!.file_key}
-					<button type="button" class="btn-doc" onclick={downloadDocument}>{m('contracts.modal.document.view')}</button>
+					<button type="button" class="btn-secondary" onclick={downloadDocument}>{m('contracts.modal.document.view')}</button>
 				{:else}
 					<span class="document-empty">{m('contracts.modal.document.empty')}</span>
 				{/if}
 				{#if canEdit}
 					<input type="file" accept=".pdf,.png,.jpg,.jpeg,.tiff,.doc,.docx" bind:this={fileInput} onchange={handleUpload} hidden />
-					<button type="button" class="btn-doc-upload" disabled={uploading} onclick={() => fileInput?.click()}>
+					<button type="button" class="btn-secondary" disabled={uploading} onclick={() => fileInput?.click()}>
 						{uploading ? m('contracts.modal.document.uploading') : contract!.file_key ? m('contracts.modal.document.replace') : m('contracts.modal.document.upload')}
 					</button>
 				{/if}
@@ -554,8 +555,8 @@
 					</label>
 				</div>
 				<div class="sub-form-actions">
-					<button type="button" class="btn-cancel-sm" onclick={() => (showRenew = false)}>{m('contracts.modal.renew.cancel')}</button>
-					<button type="button" class="btn-primary-sm" disabled={busy || !renewEndDate} onclick={handleRenew}>
+					<button type="button" class="btn-cancel" onclick={() => (showRenew = false)}>{m('contracts.modal.renew.cancel')}</button>
+					<button type="button" class="btn-primary" disabled={busy || !renewEndDate} onclick={handleRenew}>
 						{busy ? m('contracts.modal.renew.renewing') : m('contracts.modal.renew.confirm')}
 					</button>
 				</div>
@@ -577,8 +578,8 @@
 					</label>
 				</div>
 				<div class="sub-form-actions">
-					<button type="button" class="btn-cancel-sm" onclick={() => (showCreatePo = false)}>{m('contracts.modal.createPo.cancel')}</button>
-					<button type="button" class="btn-primary-sm" disabled={busy} onclick={handleCreatePo}>
+					<button type="button" class="btn-cancel" onclick={() => (showCreatePo = false)}>{m('contracts.modal.createPo.cancel')}</button>
+					<button type="button" class="btn-primary" disabled={busy} onclick={handleCreatePo}>
 						{busy ? m('contracts.modal.createPo.creating') : m('contracts.modal.createPo.confirm')}
 					</button>
 				</div>
@@ -589,19 +590,19 @@
 		{#if !isCreate && canEdit}
 			<div class="lifecycle-actions">
 				{#if canActivate}
-					<button type="button" class="btn-lifecycle activate" disabled={busy} onclick={() => runLifecycle(() => activateContract(contract!.id), m('contracts.modal.toast.activated'), m('contracts.modal.toast.activateFailed'))}>{m('contracts.modal.lifecycle.activate')}</button>
+					<button type="button" class="btn-secondary" disabled={busy} onclick={() => runLifecycle(() => activateContract(contract!.id), m('contracts.modal.toast.activated'), m('contracts.modal.toast.activateFailed'))}>{m('contracts.modal.lifecycle.activate')}</button>
 				{/if}
 				{#if canTerminate}
-					<button type="button" class="btn-lifecycle terminate" disabled={busy} onclick={() => runLifecycle(() => terminateContract(contract!.id), m('contracts.modal.toast.terminated'), m('contracts.modal.toast.terminateFailed'))}>{m('contracts.modal.lifecycle.terminate')}</button>
+					<button type="button" class="btn-danger" disabled={busy} onclick={() => runLifecycle(() => terminateContract(contract!.id), m('contracts.modal.toast.terminated'), m('contracts.modal.toast.terminateFailed'))}>{m('contracts.modal.lifecycle.terminate')}</button>
 				{/if}
 				{#if canCancel}
-					<button type="button" class="btn-lifecycle cancel" disabled={busy} onclick={() => runLifecycle(() => cancelContract(contract!.id), m('contracts.modal.toast.cancelled'), m('contracts.modal.toast.cancelFailed'))}>{m('contracts.modal.lifecycle.cancel')}</button>
+					<button type="button" class="btn-danger" disabled={busy} onclick={() => runLifecycle(() => cancelContract(contract!.id), m('contracts.modal.toast.cancelled'), m('contracts.modal.toast.cancelFailed'))}>{m('contracts.modal.lifecycle.cancel')}</button>
 				{/if}
 				{#if canRenew}
-					<button type="button" class="btn-lifecycle" disabled={busy} onclick={() => { showRenew = !showRenew; showCreatePo = false; renewEndDate = end_date || ''; }}>{m('contracts.modal.lifecycle.renew')}</button>
+					<button type="button" class="btn-secondary" disabled={busy} onclick={() => { showRenew = !showRenew; showCreatePo = false; renewEndDate = end_date || ''; }}>{m('contracts.modal.lifecycle.renew')}</button>
 				{/if}
 				{#if canCreatePo}
-					<button type="button" class="btn-lifecycle" disabled={busy} onclick={() => { showCreatePo = !showCreatePo; showRenew = false; }}>{m('contracts.modal.lifecycle.createPo')}</button>
+					<button type="button" class="btn-secondary" disabled={busy} onclick={() => { showCreatePo = !showCreatePo; showRenew = false; }}>{m('contracts.modal.lifecycle.createPo')}</button>
 				{/if}
 			</div>
 		{/if}
@@ -609,7 +610,14 @@
 		<div class="modal-footer">
 			<button type="button" class="btn-cancel" onclick={onclose}>{m('contracts.modal.close')}</button>
 			{#if canEdit}
-				<button type="submit" class="btn-primary" disabled={saving}>
+				<!-- One lead per modal: while the Renew / Create PO sub-form is open,
+				     its confirm is the .btn-primary and Save steps back to secondary.
+				     `.btn-save` is an e2e hook with no CSS. -->
+				<button
+					type="submit"
+					class="btn-save {showRenew || showCreatePo ? 'btn-secondary' : 'btn-primary'}"
+					disabled={saving}
+				>
 					{saving ? m('contracts.modal.saving') : isCreate ? m('contracts.modal.create') : m('contracts.modal.save')}
 				</button>
 			{/if}
@@ -747,20 +755,6 @@
 		font-weight: 600;
 		color: var(--text);
 	}
-	.btn-add-line {
-		padding: 4px 10px;
-		border-radius: 5px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.78rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-add-line:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
 	.line-items-table {
 		width: 100%;
 		border-collapse: collapse;
@@ -826,24 +820,6 @@
 		font-size: 0.82rem;
 		color: var(--text-muted);
 	}
-	.btn-doc,
-	.btn-doc-upload {
-		padding: 5px 12px;
-		border-radius: 5px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-doc:hover,
-	.btn-doc-upload:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-doc-upload:disabled { opacity: 0.6; cursor: not-allowed; }
-
 	/* --- Sub-forms (renew / create-po) --- */
 	.sub-form {
 		margin-top: 16px;
@@ -888,29 +864,6 @@
 		gap: 8px;
 		margin-top: 10px;
 	}
-	.btn-cancel-sm {
-		padding: 5px 12px;
-		border-radius: 5px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-primary-sm {
-		padding: 5px 12px;
-		border-radius: 5px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.8rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-primary-sm:disabled { opacity: 0.6; cursor: not-allowed; }
-
 	/* --- Lifecycle actions --- */
 	.lifecycle-actions {
 		display: flex;
@@ -920,21 +873,4 @@
 		padding-top: 12px;
 		border-top: 1px solid var(--border);
 	}
-	.btn-lifecycle {
-		padding: 6px 14px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		transition: border-color 0.15s;
-	}
-	.btn-lifecycle:hover { border-color: var(--accent); color: var(--accent); }
-	.btn-lifecycle:disabled { opacity: 0.6; cursor: not-allowed; }
-	.btn-lifecycle.activate:hover { border-color: var(--success); color: var(--success); }
-	.btn-lifecycle.terminate:hover,
-	.btn-lifecycle.cancel:hover { border-color: var(--danger); color: var(--danger); }
 </style>

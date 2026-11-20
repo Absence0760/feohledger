@@ -226,6 +226,28 @@ env:
   # well under 1 KB on the per-chunk ceiling, so the next catalogue growth
   # binds it again: the trigger named above for `refusal.*` (~10 KB of ja main
   # now) should be taken before then, not the ceiling raised.
+  # 2026-11-19 — no ceiling change; the trigger above fired. Round 25's new
+  # keys took the ja main catalogue past the 100 KB per-chunk budget, so the
+  # `refusal.*` sentences (235 keys, ~10 KB gzipped per locale) became their
+  # own `refusal` slice. A refusal can follow any API call, so no route gates
+  # it: it is PRELOADED with the main catalogue at startup, and the registry
+  # shows the server's English sentence until it lands (frontend/docs/i18n.md
+  # § Catalogue slices). Measured locally with #736's audit slice merged in:
+  # gated 459 KB (shell 209, heaviest route 98 /help/guides/[id], main 92,
+  # refusal 10, audit 6, settings 28, help 10, portal 6, marketing 4),
+  # largest chunk 92 (the ja main catalogue), 8 KB of headroom. The next
+  # split when that runs low: `erpRefusal.*` (~4 KB, read only through
+  # api/erpRefusals.ts::erpRefusalText) can join the refusal slice once that
+  # function resolves keys the way codedRefusalText does.
+  # 2026-11-19 — no ceiling change; that split, taken. The 73 `erpRefusal.*`
+  # sentences moved to the preloaded `refusal` slice (prefix `erpRefusal.`),
+  # and erpRefusalText now reads through the shared resolvedOnly()
+  # (api/resolvedOnly.ts), so before the slice lands it is null and the
+  # caller shows the server's sentence or last_error. Measured locally:
+  # gated 456 KB of 480 (shell 206, heaviest route 98 /help/guides/[id],
+  # main 89, refusal 14, audit 6, settings 28, help 10, portal 6,
+  # marketing 4), largest chunk 89 KB (the ja main catalogue, 89,869 bytes
+  # gzipped by gzip -6), 11 KB of per-chunk headroom.
   MAX_TOTAL_KB: 480
   MAX_LARGEST_CHUNK_KB: 100
 

@@ -5,6 +5,7 @@ import json
 
 import httpx
 
+from app.services import pdf_reader
 from app.services.extraction_adapters.base import (
     ExtractedLineItem,
     ExtractionAdapter,
@@ -46,12 +47,10 @@ class OpenAIVisionAdapter(ExtractionAdapter):
 
         page_images: list[bytes] = []
         if is_pdf:
-            from app.services.extraction_adapters.ollama import OllamaAdapter
-
-            pdf_text = OllamaAdapter._extract_pdf_text(file_bytes)
+            pdf_text = await pdf_reader.pdf_text(file_bytes)
             if not pdf_text:
                 # Scanned PDF — convert ALL pages to images
-                page_images = OllamaAdapter._pdf_to_images(file_bytes)
+                page_images = await pdf_reader.rasterize_pages(file_bytes)
                 if page_images:
                     mime_type = "image/png"
 

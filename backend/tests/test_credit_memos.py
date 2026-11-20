@@ -416,6 +416,50 @@ async def test_create_with_invoice_currency_mismatch_409(realdb):
     assert "currency" in resp.json()["detail"]["message"].lower()
 
 
+@pytest.mark.parametrize("stored", [None, "", "   ", "US"])
+async def test_a_credit_onto_an_unknown_currency_invoice_is_refused(realdb, stored):
+    """An invoice that records no usable currency (NULL, blank, whitespace-only
+    or malformed — decisions §473) takes no credit, on either application path
+    and whether or not the caller names a currency: its 500.00 balance is in no
+    stated currency, so a EUR credit cannot be proved to match it, and applying
+    one would later force the invoice to EUR to pay it. Neither picker offers
+    it, and nothing is written."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id, name="No Currency Vendor")
+    invoice_id = await _add_invoice(
+        mk, org_id, vendor_id=vendor_id, number="INV-NOCUR", currency=stored
+    )
+    body = {
+        "memo_number": "CM-NOCUR",
+        "vendor_id": vendor_id,
+        "invoice_id": invoice_id,
+        "amount": "50.00",
+    }
+    async with realdb.client(key="a", role="ap_manager") as c:
+        inherited = await c.post("/api/credit-memos", json=body)
+        named = await c.post("/api/credit-memos", json={**body, "currency": "EUR"})
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-OPEN", amount="50.00")
+        applied = await c.post(
+            f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": invoice_id}
+        )
+        create_picker = await _listed(c, "/api/credit-memos/eligible-invoices", vendor_id=vendor_id)
+        apply_picker = await _listed(c, f"/api/credit-memos/{memo_id}/eligible-invoices")
+
+    for resp in (inherited, named, applied):
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"]["code"] == "credit_memo_invoice_currency_unknown"
+    assert invoice_id not in create_picker
+    assert invoice_id not in apply_picker
+    async with mk() as s:
+        memos = (await s.execute(select(CreditMemo))).scalars().all()
+        assert [(m.memo_number, m.status, m.invoice_id) for m in memos] == [
+            ("CM-OPEN", "open", None)
+        ]
+        invoice = await s.get(Invoice, uuid.UUID(invoice_id))
+        assert invoice.currency == stored
+
+
 async def test_apply_invoice_without_vendor_refused(realdb):
     """An invoice with no resolved vendor cannot be credited — fail-closed.
 
@@ -1807,6 +1851,7 @@ async def _refusal_matrix(realdb) -> tuple[str, dict[str, str]]:
         "LOWER": await _add_target(
             mk, org_id, number="EL-LOWER", vendor_id=vendor_id, currency="usd"
         ),
+        # Refused on both paths: a blank code is an unknown currency (§473).
         "BLANK": await _add_target(mk, org_id, number="EL-BLANK", vendor_id=vendor_id, currency=""),
         "EXACT": await _add_target(
             mk, org_id, number="EL-EXACT", vendor_id=vendor_id, amount="100.00"
@@ -1888,7 +1933,6 @@ async def test_the_apply_picker_offers_exactly_what_apply_accepts(realdb):
     assert {label_of[i] for i in offered} == {
         "OK",
         "LOWER",
-        "BLANK",
         "EXACT",
         "SCHEDULED",
         "REJECTED",
@@ -1934,7 +1978,6 @@ async def test_the_create_picker_offers_exactly_what_a_linked_create_accepts(rea
     assert {label_of[i] for i in offered} == {
         "OK",
         "LOWER",
-        "BLANK",
         "EXACT",
         "EUR",
         "SCHEDULED",

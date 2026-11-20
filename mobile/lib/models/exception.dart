@@ -23,13 +23,6 @@ enum ApExceptionStatus {
     );
   }
 
-  String get label => switch (this) {
-    ApExceptionStatus.open => 'Open',
-    ApExceptionStatus.escalated => 'Escalated',
-    ApExceptionStatus.resolved => 'Resolved',
-    ApExceptionStatus.dismissed => 'Dismissed',
-  };
-
   /// Only open / escalated exceptions can be acted on — resolved and dismissed
   /// are terminal (the backend 409s a resolve from any other status).
   bool get isActionable =>
@@ -52,11 +45,6 @@ enum ApExceptionSeverity {
     );
   }
 
-  String get label => switch (this) {
-    ApExceptionSeverity.error => 'Error',
-    ApExceptionSeverity.warning => 'Warning',
-    ApExceptionSeverity.info => 'Info',
-  };
 }
 
 class ApException {

@@ -69,10 +69,11 @@ const BASELINE: Record<string, number> = {
 	// `.you-badge` is also an e2e hook, and a status pill's metrics would push
 	// the name it sits beside around.
 	'lib/components/admin/UsersPanel.svelte': 2,
-	// The status pill carries `data-testid="chat-status"` (which `Badge` takes
-	// no arbitrary attributes for) and the mention tag wraps its own remove
-	// button — a flex container with a child control, not a text pill.
-	'lib/components/chat/SupplierChatThread.svelte': 3,
+	// The status pill moved onto `Badge` in round 25 (its e2e hooks went to a
+	// wrapper span). The one keep is the composer's mention tag, which wraps
+	// its own remove button: a flex container with a child control, not a
+	// text pill.
+	'lib/components/chat/SupplierChatThread.svelte': 1,
 	// Summary-row COUNTS, read as a group at their own denser metrics.
 	'lib/components/modals/PositivePayModal.svelte': 3,
 	'lib/components/modals/VendorStatementReconModal.svelte': 3,
@@ -176,7 +177,15 @@ const CONVERTED = [
 	'routes/organization/+page.svelte',
 	'routes/purchase-orders/+page.svelte',
 	'routes/vendors/change-requests/+page.svelte',
-	'routes/workflows/+page.svelte'
+	'routes/workflows/+page.svelte',
+	// The supplier portal's status pills (round 25). They were never counted
+	// here: `.status` / `.s-paid` are not badge-shaped names and set a tinted
+	// border instead of a colour, so the scan could not see them. Their tones
+	// now live beside the phase label maps (`types/portalStatus.ts`) and the
+	// shared PO map (`types/purchaseOrder.ts`).
+	'routes/portal/invoices/+page.svelte',
+	'routes/portal/payments/+page.svelte',
+	'routes/portal/purchase-orders/+page.svelte'
 ];
 
 const counts = countByFile(findHandRolledBadgeRules(sources));

@@ -320,14 +320,4 @@
 		color: var(--text-muted);
 	}
 
-	.btn-cancel {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
 </style>

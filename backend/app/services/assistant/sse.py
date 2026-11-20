@@ -76,11 +76,6 @@ def sse_text_delta(text: str) -> str:
     return _frame("delta", {"text": text})
 
 
-def sse_text_deltas(answer: str) -> list[str]:
-    """``event: delta`` frames for the assembled answer, in order (chunked)."""
-    return [_frame("delta", {"text": chunk}) for chunk in iter_answer_chunks(answer)]
-
-
 def sse_done(
     *,
     conversation_id: uuid.UUID,

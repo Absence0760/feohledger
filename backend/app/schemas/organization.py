@@ -63,11 +63,6 @@ class InvoiceDefaults(BaseModel):
     default_cost_center: str = ""
 
 
-class OrganizationSettings(BaseModel):
-    company: CompanyProfile = Field(default_factory=CompanyProfile)
-    invoice_defaults: InvoiceDefaults = Field(default_factory=InvoiceDefaults)
-
-
 class BrandConfig(BaseModel):
     """Per-tenant white-label branding (stored under `settings.brand`).
 

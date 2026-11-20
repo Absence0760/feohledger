@@ -31,14 +31,6 @@ class OfferSource(StrEnum):
     financing = "financing"
 
 
-class OfferStatus(StrEnum):
-    offered = "offered"
-    accepted = "accepted"
-    captured = "captured"
-    declined = "declined"
-    expired = "expired"
-
-
 class DiscountTier(BaseModel):
     """One rung of a sliding-scale offer: pay within `days` for `percent` off."""
 
@@ -180,13 +172,6 @@ class DiscountOfferResponse(BaseModel):
         )
 
 
-class DiscountOfferListResponse(BaseModel):
-    items: list[DiscountOfferResponse]
-    total: int
-    page: int
-    page_size: int
-
-
 class DiscountROIResponse(BaseModel):
     """Annualized-return analysis for one early-payment opportunity.
 
@@ -234,8 +219,9 @@ class OptimizerRecommendation(BaseModel):
     # offer's own `base_amount`, so it is the OFFER's currency, not the
     # response-level `currency` the totals are summed in. Stated per row
     # because the two differ exactly when `unconvertible` is set, and a client
-    # that cannot name a figure's currency has to render it bare.
-    currency: str = "USD"
+    # that cannot name a figure's currency has to render it bare. `None` when
+    # the offer's own code is missing or malformed (always `unconvertible`).
+    currency: str | None = None
     selected: bool  # True if it fits within the cash budget
     cumulative_outlay: MoneyAmount  # running cash committed through this rank
     # This offer's money is in a currency the totals are NOT in, so it is

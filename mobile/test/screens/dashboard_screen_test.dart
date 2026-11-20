@@ -12,6 +12,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/dashboard_screen.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/dashboard_store.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
 import 'package:feohledger_mobile/widgets/load_error_state.dart';
 import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
@@ -53,7 +54,11 @@ Map<String, dynamic> _dashboardJson({
   int unconverted = 0,
   int agingUnconverted = 0,
   int upcomingUnconverted = 0,
+  // `overdue_*` / `due_soon_*` — the whole-book counts. Omitted by default,
+  // modelling a backend predating them, which the legacy assertions pin.
+  Map<String, dynamic>? due,
 }) => {
+  ...?due,
   'total_invoices': totalInvoices,
   'total_amount': totalAmount,
   if (reportingCurrency != null)
@@ -690,6 +695,154 @@ void main() {
 
       expect(find.byType(PartialConversionNote), findsNothing);
       expect(find.textContaining('face value'), findsNothing);
+    });
+  });
+
+  group('overdue and due soon', () {
+    // Ten upcoming rows — the server's cap — while fifteen invoices are
+    // overdue and two fall due this week.
+    final tenRows = List<Map<String, dynamic>>.generate(
+      10,
+      (i) => {'amount': 10, 'is_overdue': true},
+    );
+    final due = <String, dynamic>{
+      'overdue_count': 15,
+      'overdue_total': [
+        {'currency': 'EUR', 'amount': 1000, 'count': 1},
+        {'currency': 'USD', 'amount': 2120, 'count': 14},
+      ],
+      'due_soon_count': 2,
+      'due_soon_total': [
+        {'currency': 'USD', 'amount': 2000, 'count': 2},
+      ],
+    };
+
+    testWidgets('Overdue reads the whole-book count per currency, and '
+        'Upcoming means due soon, not the capped list', (tester) async {
+      final semantics = tester.ensureSemantics();
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async =>
+              _json(_dashboardJson(upcomingPayments: tenRows, due: due)),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      final overdueMoney =
+          '${formatMoneyCompact(1000, currency: 'EUR')} · '
+          '${formatMoneyCompact(2120, currency: 'USD')}';
+      expect(find.text('Overdue'), findsOneWidget);
+      expect(find.text('15'), findsOneWidget);
+      expect(find.text(overdueMoney), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Overdue: 15, $overdueMoney'),
+        findsOneWidget,
+      );
+
+      // Upcoming: the two due this week, in their own currency — not the ten
+      // capped rows, and not the reporting rollup of them.
+      // Each card in the row is its own announcement (KpiCard is a semantics
+      // container; the two used to merge into one node).
+      final soonMoney = formatMoneyCompact(2000, currency: 'USD');
+      expect(
+        find.bySemanticsLabel('Upcoming: 2, $soonMoney'),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel('For Review: 3'), findsOneWidget);
+      expect(find.text('10'), findsNothing);
+      semantics.dispose();
+    });
+
+    testWidgets('nothing overdue reads 0 with no money line', (tester) async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _json(
+            _dashboardJson(
+              due: {
+                'overdue_count': 0,
+                'overdue_total': <Object>[],
+                'due_soon_count': 0,
+                'due_soon_total': <Object>[],
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      final card = find.widgetWithText(KpiCard, 'Overdue');
+      expect(card, findsOneWidget);
+      expect(tester.widget<KpiCard>(card).value, '0');
+      expect(tester.widget<KpiCard>(card).subtitle, isNull);
+    });
+
+    testWidgets('a payload without the counts shows no Overdue figure', (
+      tester,
+    ) async {
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => _json(_dashboardJson())),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      // Absent, never a `0` nobody reported.
+      expect(find.text('Overdue'), findsNothing);
+      expect(find.byType(KpiCard), findsNWidgets(4));
+    });
+
+    testWidgets('the offline cache keeps the counts', (tester) async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async =>
+              _json(_dashboardJson(upcomingPayments: tenRows, due: due)),
+        ),
+      );
+      await store.fetch();
+
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => throw Exception('offline')),
+      );
+      await store.fetch();
+
+      expect(store.fromCache, isTrue);
+      expect(store.data!.overdue!.count, 15);
+      expect(
+        store.data!.overdue!.byCurrency.map((c) => (c.currency, c.amount)),
+        [('EUR', 1000.0), ('USD', 2120.0)],
+      );
+      expect(store.data!.dueSoon!.count, 2);
+    });
+
+    testWidgets('a currency-less group renders without a symbol', (
+      tester,
+    ) async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _json(
+            _dashboardJson(
+              due: {
+                'overdue_count': 1,
+                'overdue_total': [
+                  {'currency': null, 'amount': 500, 'count': 1},
+                ],
+                'due_soon_count': 0,
+                'due_soon_total': <Object>[],
+              },
+            ),
+          ),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      final card = find.widgetWithText(KpiCard, 'Overdue');
+      expect(tester.widget<KpiCard>(card).subtitle, formatMoneyCompact(500));
     });
   });
 }

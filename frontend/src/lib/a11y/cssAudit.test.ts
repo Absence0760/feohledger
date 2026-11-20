@@ -120,6 +120,19 @@ describe('collectAssignedTokens', () => {
 	it('does not treat a var() *reference* as an assignment', () => {
 		expect(collectAssignedTokens('.a{ color: var(--accent, red) }')).toEqual([]);
 	});
+
+	it('finds a token script assigns through style.setProperty', () => {
+		expect(
+			collectAssignedTokens("root.style.setProperty('--bulk-bar-reserve', `${h}px`);")
+		).toEqual(['--bulk-bar-reserve']);
+		expect(collectAssignedTokens('el.style.setProperty("--x-y", v)')).toEqual(['--x-y']);
+	});
+
+	it('does not treat removeProperty or getPropertyValue as an assignment', () => {
+		expect(collectAssignedTokens("s.removeProperty('--gone'); s.getPropertyValue('--read')")).toEqual(
+			[]
+		);
+	});
 });
 
 describe('resolveColorValue', () => {

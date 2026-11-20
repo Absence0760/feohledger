@@ -616,8 +616,8 @@ async def generate_cards(
 
     refuse_record_only(org)
 
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
     from app.config import settings as app_settings
+    from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 
     # Refuse the whole batch up front when the configured provider names no
     # registered adapter. `issue_card_for_invoice` would refuse each invoice
@@ -645,12 +645,12 @@ async def generate_cards(
     # invoice holds the locks for one provider call, not the whole batch, and
     # makes each card durable as soon as the provider has issued it. See
     # `card_issuance.lock_invoices_for_mint`, decisions §265.
-    from app.api.payments import INVOICE_LOCKED_DETAIL
     from app.services.card_issuance import (
         CARD_SKIP_LOCK_TIMEOUT,
         card_skip,
         lock_invoices_for_mint,
     )
+    from app.services.payment_gates import INVOICE_LOCKED_DETAIL
     from app.utils.db_locks import LockWaitTimeout
 
     cards: list[VirtualCard] = []
@@ -837,6 +837,14 @@ async def _mint_one_locked(
     net = (await net_payable_amounts(db, [inv]))[inv.id]
     if net <= 0:
         return card_skip(inv.id, ci.CARD_SKIP_NOTHING_OWED)
+
+    # The compliance thresholds are denominated in the org's home currency; a
+    # setting that is set but not a code is refused, never read as USD
+    # (decisions §473, amended), the same rule as the payment dispatch.
+    from app.services.international_payments import home_currency_is_malformed
+
+    if home_currency_is_malformed(org.settings):
+        return card_skip(inv.id, ci.CARD_SKIP_HOME_CURRENCY_INVALID)
 
     # Compliance gate: mirrors execute_payment_run's virtual_card leg. No
     # screenable vendor (no vendor_id, or the row was deleted) → skip rather

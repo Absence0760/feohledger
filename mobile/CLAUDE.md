@@ -71,6 +71,15 @@ The shape: `screens/` (one per route) · `stores/` (ChangeNotifier state) ·
 `widgets/` (the shared widget library) · `models/` · `services/` (API client).
 Guard rail 10 — put code in the directory its siblings already establish, and
 build screens from the widget library rather than duplicating markup.
+A list screen backed by a store builds its body with `AsyncListBody`
+(`lib/widgets/async_list_body.dart`), never a hand-rolled spinner → error →
+empty → `RefreshIndicator` chain; `test/screens/async_list_body_adoption_test.dart`
+enforces it outside an allowlist of not-yet-converted screens. Its
+`hasError` is the store's **fetch** failure only (`loadError`): a store whose
+actions can fail keeps them in a separate `actionError`, or a refused resolve
+raises "couldn't refresh" over a live list. Slots and wording:
+`docs/project-structure.md` (`async_list_body.dart`).
+
 ## Architecture patterns
 
 - **ChangeNotifier singletons** for stores — `AuthStore.instance`, `InvoiceStore.instance`, etc.
@@ -289,8 +298,14 @@ Follow these conventions on every new screen/widget:
   approvals swipe-approve.
 - **Colour contrast ≥4.5:1.** Status/payment badges render the text in a
   *darkened* variant (`.shade700`/`.shade800`/`.shade900`) of the accent over
-  the 0.15-alpha tint — the full-saturation hue fails AA. Muted greys use
-  `grey.shade700` (not `shade500`/`shade600`, which fail at 11-14px).
+  the 0.15-alpha tint — the full-saturation hue fails AA. A new status chip
+  is a `StatusPill` (`lib/widgets/status_pill.dart`) with one of its fixed
+  `StatusTone`s, never another hand-built pill: each tone's pair is computed
+  in `test/widgets/status_pill_test.dart`. Muted text uses
+  `Theme.of(context).colorScheme.onSurfaceVariant` (it tracks light / dark;
+  a fixed grey does not), never `grey.shade500`/`shade600`. Compute any
+  hand-picked pair: the amber stale banner's `amber.shade900` on
+  `amber.shade50` was 2.6:1; it is `brown.shade700` (8.8:1).
 - **Decorative icons** (the `BrandMark` widget, placeholder camera glyph, aging dots) are
   wrapped in `ExcludeSemantics` so they aren't announced.
 - **Tap targets ≥48dp** — use `IconButton` defaults; don't shrink hit areas.
@@ -309,7 +324,9 @@ await expectLater(tester, meetsGuideline(textContrastGuideline));
 ```
 
 plus `find.bySemanticsLabel(...)` to confirm icon buttons expose labels. Covers
-the invoice list tile, KPI card, status badge, login screen, the capture action,
+the invoice list tile, KPI card (alone, and two side by side in a list `Row`,
+which must stay two announcements: a label-only `Semantics` is not a node
+boundary, so `KpiCard` is `container: true`), status badge, login screen, the capture action,
 the approvals approve/reject affordances (an allowed row beside a refused
 one, plus the could-not-check notice), the invoice detail's Approve / Reject
 bar (allowed and refused verdicts; Approve is `green.shade800` under its white

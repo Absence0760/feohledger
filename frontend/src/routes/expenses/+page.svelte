@@ -1,5 +1,6 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import type {
 		Expense,
 		ExpenseStatus,
@@ -97,9 +98,11 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk'));
 	// Policy CRUD + report/pre-approval REJECT = admin | ap_manager.
@@ -468,7 +471,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('expenses.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
+					m('expenses.toast.selectedTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -585,9 +588,6 @@
 	// The failed state renders `ui/LoadError` (with a Retry) in the table's
 	// place. The search term reaches the server, so once the fetch settles the
 	// plain empty message is a true statement about the whole filtered set.
-	let expensesEmptyMessage = $derived(
-		expenseStore.loading ? m('expenses.loading') : m('expenses.empty')
-	);
 
 	const reportsSequence = createRequestSequencer();
 
@@ -1314,7 +1314,8 @@
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={expenseStore.all.length === 0}
-			empty={expensesEmptyMessage}
+			loading={expenseStore.loading}
+			empty={m('expenses.empty')}
 		>
 			{#snippet header()}
 				<tr>
@@ -1400,23 +1401,22 @@
 		</DataTable>
 		{/if}
 
-		{#if expenseStore.hasMore && !expenseStore.errored}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={() => expenseStore.loadMore()} disabled={expenseStore.loading}>
-					{expenseStore.loading ? m('expenses.loading') : m('expenses.loadMore', { shown: expenseStore.all.length, total: expenseStore.total })}
-				</button>
-			</div>
-		{:else if expenseStore.total > 0 && !expenseStore.errored}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('expenses.showingAll', { total: expenseStore.total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={expenseStore.all.length}
+			total={expenseStore.total}
+			hasMore={expenseStore.hasMore}
+			loading={expenseStore.loading}
+			errored={expenseStore.errored}
+			onloadmore={() => expenseStore.loadMore()}
+			moreKey="expenses.loadMore"
+			allKey="expenses.showingAll"
+		/>
 	{:else if tab === 'reports'}
 		<!-- ===================== Reports tab ===================== -->
 		{#if activeReport}
 			<div class="report-detail">
 				<div class="report-detail-head">
-					<button class="btn-back" onclick={closeReport}>{m('expenses.reports.back')}</button>
+					<button type="button" class="btn-ghost" onclick={closeReport}>{m('expenses.reports.back')}</button>
 					<div class="report-title-block">
 						<h2>{activeReport.report_number}</h2>
 						<Badge tone={EXPENSE_REPORT_STATUS_TONES[activeReport.status as ExpenseReportStatus]} variant={activeReport.status}>{reportStatusLabel(activeReport.status)}</Badge>
@@ -1434,7 +1434,7 @@
 							<button class="btn-primary" disabled aria-describedby="approve-refusal">{m('expenses.reports.approve')}</button>
 						{/if}
 						{#if isAllowed(activeReport.actions?.reject)}
-							<button class="btn-secondary danger" disabled={reportBusy} onclick={() => (showReject = true)}>{m('expenses.reports.reject')}</button>
+							<button class="btn-danger" disabled={reportBusy} onclick={() => (showReject = true)}>{m('expenses.reports.reject')}</button>
 						{/if}
 					</div>
 				</div>
@@ -1460,7 +1460,7 @@
 							bind:value={rejectReason}
 							aria-label={m('expenses.reports.rejectAria')}
 						/>
-						<button class="btn-secondary danger" disabled={reportBusy} onclick={rejectActiveReport}>{m('expenses.reports.confirmReject')}</button>
+						<button class="btn-danger armed" disabled={reportBusy} onclick={rejectActiveReport}>{m('expenses.reports.confirmReject')}</button>
 						<button class="btn-secondary" disabled={reportBusy} onclick={() => { showReject = false; rejectReason = ''; }}>{m('expenses.reports.cancel')}</button>
 					</div>
 				{/if}
@@ -1591,7 +1591,8 @@
 					{ label: m('expenses.reports.col.total'), class: 'right' }
 				]}
 				isEmpty={reports.length === 0}
-				empty={reportsLoading ? m('expenses.loading') : m('expenses.reports.empty')}
+				loading={reportsLoading}
+				empty={m('expenses.reports.empty')}
 			>
 				{#snippet body()}
 					{#each reports as r (r.id)}
@@ -1608,26 +1609,15 @@
 					{/each}
 				{/snippet}
 			</DataTable>
-			{#if reportsHasMore}
-				<div class="load-more-row">
-					<button
-						class="btn-load-more"
-						onclick={() => loadReports({ append: true })}
-						disabled={reportsLoadingMore}
-					>
-						{reportsLoadingMore
-							? m('common.loading')
-							: m('expenses.reports.loadMore', {
-									shown: reports.length,
-									total: reportsTotal
-								})}
-					</button>
-				</div>
-			{:else if reportsTotal > 0}
-				<div class="load-more-row">
-					<span class="load-more-end">{m('expenses.reports.showingAll', { total: reportsTotal })}</span>
-				</div>
-			{/if}
+			<LoadMoreFooter
+				shown={reports.length}
+				total={reportsTotal}
+				hasMore={reportsHasMore}
+				loading={reportsLoadingMore}
+				onloadmore={() => loadReports({ append: true })}
+				moreKey="expenses.reports.loadMore"
+				allKey="expenses.reports.showingAll"
+			/>
 		{/if}
 	{:else if tab === 'policies'}
 		<!-- ===================== Policies tab ===================== -->
@@ -1650,7 +1640,8 @@
 				{ label: '', class: 'actions-col' }
 			]}
 			isEmpty={policies.length === 0}
-			empty={policiesLoading ? m('expenses.loading') : m('expenses.policies.empty')}
+			loading={policiesLoading}
+			empty={m('expenses.policies.empty')}
 		>
 			{#snippet body()}
 				{#each policies as p (p.id)}
@@ -1714,7 +1705,8 @@
 				{ label: '', class: 'actions-col' }
 			]}
 			isEmpty={preapprovals.length === 0}
-			empty={preapprovalsLoading ? m('expenses.loading') : m('expenses.preapprovals.empty')}
+			loading={preapprovalsLoading}
+			empty={m('expenses.preapprovals.empty')}
 		>
 			{#snippet body()}
 				{#each preapprovals as pa (pa.id)}
@@ -1794,7 +1786,8 @@
 				{ label: '', class: 'actions-col' }
 			]}
 			isEmpty={cardTxns.length === 0}
-			empty={cardsLoading ? m('expenses.loading') : m('expenses.cards.empty')}
+			loading={cardsLoading}
+			empty={m('expenses.cards.empty')}
 		>
 			{#snippet body()}
 				{#each cardTxns as txn (txn.id)}
@@ -1857,23 +1850,15 @@
 				{/each}
 			{/snippet}
 		</DataTable>
-		{#if cardsHasMore}
-			<div class="load-more-row">
-				<button
-					class="btn-load-more"
-					onclick={() => loadCardTxns({ append: true })}
-					disabled={cardsLoadingMore}
-				>
-					{cardsLoadingMore
-						? m('common.loading')
-						: m('expenses.cards.loadMore', { shown: cardTxns.length, total: cardsTotal })}
-				</button>
-			</div>
-		{:else if cardsTotal > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('expenses.cards.showingAll', { total: cardsTotal })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={cardTxns.length}
+			total={cardsTotal}
+			hasMore={cardsHasMore}
+			loading={cardsLoadingMore}
+			onloadmore={() => loadCardTxns({ append: true })}
+			moreKey="expenses.cards.loadMore"
+			allKey="expenses.cards.showingAll"
+		/>
 		{/if}
 	{/if}
 	</div>
@@ -1890,7 +1875,7 @@
 	>
 		{#snippet actions()}
 			{#if allSelected && !selectedAllMatching && expenseStore.total > expenseStore.all.length}
-				<button class="bulk-action-btn secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
+				<button type="button" class="btn-secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
 					{selectingAllMatching
 						? m('common.loading')
 						: m('common.selectAllMatching', { total: expenseStore.total })}
@@ -1904,7 +1889,7 @@
 					<option value={g.id}>{g.code} — {g.name}</option>
 				{/each}
 			</select>
-			<button class="bulk-action-btn" disabled={bulkBusy} onclick={applyBulkGl}>
+			<button type="button" class="btn-primary" disabled={bulkBusy} onclick={applyBulkGl}>
 				{bulkBusy ? m('expenses.bulk.applying') : m('expenses.bulk.glCode', { n: selected.size })}
 			</button>
 		{/snippet}
@@ -1991,7 +1976,7 @@
 	<Modal open ariaLabel={m('expenses.match.aria')} title={m('expenses.match.title')} width="sm" onclose={closeMatchPicker}>
 		<div class="match-picker">
 			{#if matchLoading}
-				<p class="muted">{m('expenses.match.loading')}</p>
+				<LoadingState label={m('expenses.match.loading')} />
 			{:else if matchSuggestions.length === 0}
 				<p class="muted">{m('expenses.match.empty')}</p>
 			{:else}
@@ -2024,22 +2009,6 @@
 		align-items: center;
 		gap: 12px;
 		flex-wrap: wrap;
-	}
-
-	.btn-secondary {
-		padding: 8px 14px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.88rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-secondary:hover {
-		border-color: var(--accent);
-		color: var(--accent);
 	}
 
 	/* The last card import's refused rows (decisions §377). */
@@ -2101,33 +2070,6 @@
 		font-size: 0.82rem;
 	}
 
-	.bulk-action-btn {
-		padding: 6px 14px;
-		border-radius: 6px;
-		border: 1px solid var(--accent-strong);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.bulk-action-btn:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-
-	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-
-	.bulk-action-btn.secondary {
-		background: transparent;
-		color: var(--accent-strong);
-	}
-
 	.bulk-all-matching-note {
 		font-size: 0.82rem;
 		color: var(--text-muted);
@@ -2167,18 +2109,6 @@
 		color: var(--text-muted);
 		max-width: 32ch;
 	}
-	.btn-back {
-		border: none;
-		background: none;
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-		padding: 4px 0;
-	}
-	.btn-back:hover {
-		color: var(--accent);
-	}
 	.attach-hint {
 		margin: 6px 0 12px;
 		font-size: 0.8rem;
@@ -2205,12 +2135,6 @@
 		font-family: inherit;
 		font-size: 0.85rem;
 		min-width: 280px;
-	}
-
-	/* Danger variant of the secondary button (report reject). */
-	.btn-secondary.danger:hover {
-		border-color: var(--danger);
-		color: var(--danger);
 	}
 
 	/* Inline blocking-violation panel above the report detail. */

@@ -153,7 +153,8 @@ export const messages = {
 	'org.chat.webhook.saving': 'Wird gespeichert…',
 	'org.chat.webhook.remove': 'Webhook entfernen',
 	'org.chat.webhook.confirmRemove': 'Entfernen bestätigen',
-	'org.chat.webhook.removeAria': 'Eingehende Chat-Webhook-URL entfernen',
+	'org.chat.webhook.removeAria': 'Webhook entfernen: eingehende Chat-Webhook-URL',
+	'org.chat.webhook.confirmRemoveAria': 'Entfernen bestätigen: eingehende Chat-Webhook-URL',
 	'org.chat.webhook.rotateHint':
 		'Das Ersetzen wirkt sofort und ohne Übergangsfenster — wir senden an genau eine URL, die alte aktiv zu lassen würde also weiter dorthin senden. Lösche den alten Webhook zusätzlich beim Chat-Anbieter: nur dort kann er widerrufen werden.',
 	'org.chat.webhook.toast.saved': 'Chat-Webhook gespeichert',
@@ -187,6 +188,7 @@ export const messages = {
 	'org.emailIntake.rotateConfirm': 'Wechsel bestätigen',
 	'org.emailIntake.rotating': 'Wird gewechselt…',
 	'org.emailIntake.rotateAria': 'E-Mail-Eingangsadresse wechseln',
+	'org.emailIntake.rotateConfirmAria': 'Wechsel bestätigen: E-Mail-Eingangsadresse',
 	'org.emailIntake.rotateWarning':
 		'Der Wechsel ersetzt diese Adresse sofort. Die aktuelle Adresse nimmt in dem Moment, in dem Sie bestätigen, keine E-Mails mehr an — was ein Lieferant danach sendet, wird verworfen, ohne Unzustellbarkeitsmeldung und ohne Rechnung. Geben Sie allen Lieferanten die neue Adresse, bevor sie das nächste Mal abrechnen.',
 	'org.emailIntake.rotated.aria': 'Neue E-Mail-Eingangsadresse',
@@ -969,7 +971,6 @@ export const messages = {
 	'admin.partner.join.generate': 'Verknüpfungscode generieren',
 	'admin.partner.join.copy': 'Kopieren',
 	'admin.partner.join.expiresIn': 'Läuft in {minutes} Min. ab',
-	'admin.partner.loading': 'Wird geladen…',
 	'admin.partner.loadFailed': 'Partner-Übersicht konnte nicht geladen werden.',
 	'admin.partner.notPartner':
 		'Dieser Arbeitsbereich verwaltet noch keine Untermandanten. Sobald ein Mandant als Partner mit diesem Arbeitsbereich verknüpft ist, erscheinen seine Untermandanten hier.',

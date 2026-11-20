@@ -553,6 +553,107 @@ leg short-received escalates instead of being approved.
 Covered by `backend/tests/test_po_match_exception_reconciliation.py` § A
 multi-PO split and `backend/tests/test_exception_agents_multi_po_split.py`.
 
+### Billing past the PO across invoices
+
+The matcher compares ONE invoice with the whole PO, so two invoices that each
+fit pass it: a supplier's PO flip (which bills the whole total under no invoice
+number, so duplicate detection has nothing to match) followed by the same
+order billed again through the portal, email or AP keying.
+`invoice_warnings._refresh_po_overbilling` closes that gap. On a single-PO
+match whose total is trustworthy and in the invoice's own currency, it sums the
+OTHER invoices billing the PO, in every status but `rejected`, in that
+currency: one whose last match resolved to this PO (`po_match->>'po_id'`), one
+a multi-PO split linked to it (`split_po_ids`, counted at its whole amount),
+and one not matched to any PO yet that cites the PO's number within the PO's
+entity (either side unstamped spans entities) and names the PO's vendor or no
+vendor. Another vendor's invoice citing the same number is not counted. When
+those plus this invoice exceed the PO total by more than the match rule's
+tolerance, it adds `po_billed_beyond_total` (type `po_overbilled`, severity
+`warning`), naming what the others already bill, the PO total and the
+normalised currency code.
+
+- **Not a hold, but no unattended approval.** Credit memos, corrective
+  re-bills, and a sibling rejected or reopened after this refresh all move the
+  sum without re-running it on this invoice, so a payment-blocking row would go
+  stale both ways. Instead `po_match_hold_refusal` answers `po_overbilled`
+  while the warning stands, so extraction's auto-approve and `/complete`'s
+  floor send the invoice to review, and an exception agent's approval unwinds
+  and escalates (see [Before an unattended approval](#before-an-unattended-approval)). A person reads it at
+  approval, as with the other findings.
+- **Its own type**, not `po_mismatch`: the invoice modal shows `po_mismatch`
+  warnings through the PO-match panel's own `issues`, which this cross-invoice
+  finding is not one of. `refresh_po_match_only` rebuilds it with the match.
+- **Skipped** for a multi-PO split (its amount cannot be attributed to one
+  leg), and for a cancelled, unissued, unvouched or other-currency PO, which
+  each raise their own finding. A rejected invoice is neither checked nor
+  counted. It bills nothing while rejected. Once reopened to `new` it counts
+  again, but only in a refresh run after that: the reopened invoice's own
+  (`new` gets no match until it is submitted) or a sibling's next one. A
+  sibling already refreshed keeps its earlier answer until then.
+
+Reasoning: `docs/decisions.md` §469.
+
+#### And past what has been received
+
+The receipt leg has the same blind spot: it compares ONE invoice with the
+received slice of the PO (`received_value`, `po_total × received / ordered`),
+so with 400.00 of a 1000.00 PO received, two invoices of 400.00 each fit it.
+On a SHORT receipt the same refresh measures the same siblings plus this
+invoice against `received_value` at the same tolerance, and when they exceed
+it adds `po_billed_beyond_receipt` (type `po_overbilled`, severity `warning`),
+naming what every live bill on the PO comes to, this one included
+(`totalBilled`), the received value (to the cent; the comparison uses the
+exact share, so 3 of 7 units of 1000.00 is a limit of exactly 450.00 at 5 %)
+and the currency code.
+
+- **One finding at most.** Past the PO total, only `po_billed_beyond_total` is
+  written: no receipt could cure that bill.
+- **Not when this invoice alone bills beyond receipt.** The matcher's own
+  `billed_beyond_receipt` has already raised the payment-blocking
+  `po_mismatch` for that.
+- **Not on a full receipt** (`received_value` is unset; the received slice is
+  the whole PO, which the total check measured).
+- **Same type, same consequences:** no unattended approval while it stands
+  (`po_match_hold_refusal` answers `po_overbilled`), the exception-agent
+  unwind, and a rebuild by `refresh_po_match_only`. Recording a goods receipt
+  re-matches every invoice citing the PO in the same transaction, so a
+  delivery that covers the bills drops the finding at once, and cancelling a
+  receipt raises it.
+- **A warning, not a hold, before approval**, for §469's staleness reason,
+  and one more: the finding cannot say which of the bills is the excess one,
+  so every bill on the PO carries it, and a hold would stop the legitimate
+  first bill with the second.
+- **A hold past approval, when new or worse.** A receipt cancelled after both
+  bills were approved (§262 allows it) reaches them only through the
+  re-match, and nobody reads the warning again. So on an invoice outside
+  `PRE_APPROVAL_STATUSES` the finding also raises the payment-blocking
+  `po_mismatch`, with the warning's own sentence, when it is new or worse than
+  the one the invoice carried into the refresh
+  (`_beyond_receipt_worsened`: none before, less received, more billed,
+  another PO, or an unreadable figure). A finding unchanged since the
+  approver read it raises nothing, so their sign-off needs no second one.
+  Once raised, the hold is kept found while the finding stands
+  (`_open_po_mismatch_hold`), so one row survives any number of refreshes.
+  It closes like every PO-match hold, on the refresh that no longer finds it,
+  through `_close_cleared_po_exceptions` and therefore `receipts_clear_hold`:
+  a covering receipt typed in by someone implicated in the invoice, or by an
+  approver, leaves it for a person. A new run refuses the invoice; a draft
+  run's payment is refused at dispatch, NACHA export or the paid-elsewhere
+  close-out (`dispatch_preflight`, `invoice_blocked:po_mismatch`); a file
+  already exported has left with the customer's upload, and the hold only
+  puts the invoice in the queue.
+- **An implicated receipt stops unattended approval.** While any live
+  hand-entered receipt on the matched PO was recorded by someone implicated
+  in the invoice or by nobody known (`receipts_clear_hold`),
+  `po_match_hold_refusal` answers `po_receipt_implicated`: such a receipt can
+  make the per-invoice and cumulative receipt findings vanish. The org's
+  `settings.exceptions.require_segregation: false` lifts it.
+- **The total leg gets no post-approval hold.** A PO total rarely moves after
+  approval, and §469's warning already covers that leg.
+
+Receipts are still valued pro rata across the PO's lines, not per line; see
+`docs/followups.md`. Reasoning: `docs/decisions.md` §470.
+
 ### Recording a goods receipt
 
 `POST /api/goods-receipts` (`services/goods_receipts.py`) is the one in-app
@@ -670,8 +771,10 @@ sends the invoice to `ready_for_review` instead, recorded as
 of one that the stamp itself would undo (`"po_match_hold_cleared_by_approver"`):
 the caller cleared the hold while not its approver, and the §422 re-judge would
 raise it again straight after stamping them. Neither door can leave an invoice
-`approved` with a PO-match hold open. An invoice with no PO reference has no
-such row, and the floor behaves as before.
+`approved` with a PO-match hold open. So do the cumulative over-billing
+warnings above, past the total or past what was received, which raise no row:
+`"po_overbilled"` (decisions §469, §470). An
+invoice with no PO reference has no such row, and the floor behaves as before.
 
 ### In the Review Step
 Reviewers see the match status:
@@ -683,7 +786,7 @@ Reviewers see the match status:
 ### Before Payment
 An unresolved (`open` / `escalated`) `po_mismatch` or `quality_hold` exception
 blocks payment — both are members of
-`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so the run builder refuses the
+`services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so the run builder refuses the
 invoice, the payment queue marks the row blocked (reason code `po_mismatch` /
 `quality_hold`), dispatch refuses a payment whose invoice picked one up after the
 run was built, and `/retry-failed`, `POST /api/payments` and

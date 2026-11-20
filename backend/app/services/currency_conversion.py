@@ -46,7 +46,11 @@ from sqlalchemy import ColumnElement, and_, case, func, not_, or_, select
 from app.config import settings
 from app.models.virtual_card import VirtualCard
 from app.services.fx_adapters import FXAdapter, FXRate
-from app.services.international_payments import configured_home_currency
+from app.services.international_payments import (
+    configured_home_currency,
+    home_currency_is_malformed,
+)
+from app.utils.currency_code import iso_currency_or_none
 
 _MONEY_QUANT = Decimal("0.01")
 _RATE_QUANT = Decimal("0.00000001")
@@ -56,31 +60,63 @@ def _quantize_money(value: Decimal) -> Decimal:
     return value.quantize(_MONEY_QUANT, rounding=ROUND_HALF_UP)
 
 
+def _row_currency(value: object) -> str | None:
+    """The row's own currency code, or ``None`` when it records none.
+
+    NULL, blank, whitespace-only and malformed codes are all unknown, judged by
+    ``payment_runs.payable_currency_code`` (the predicate the run builder and the
+    payment queue use). An unknown currency is never read as the reporting
+    currency: that would count a code-less amount as converted at 1:1, the
+    substitution decisions §160/§196/§473 forbid. Every rollup puts such a row
+    in its own ``None`` group and counts it in ``unconverted``.
+    """
+    from app.services.payment_runs import payable_currency_code
+
+    return payable_currency_code(value) if isinstance(value, str) else None
+
+
+#: A rung that is set but malformed (see `resolve_reporting_currency`).
+_MALFORMED = object()
+
+
 def resolve_reporting_currency(org_settings: dict | None) -> str:
     """Resolve the org's reporting (base) currency from its settings.
 
-    See the module docstring for the resolution order. Always returns an
-    uppercase 3-letter code; never raises (a misconfigured org degrades to
-    the platform default rather than 500-ing a dashboard).
+    See the module docstring for the resolution order. Never raises (a
+    misconfigured org must not 500 a dashboard). Each rung follows the one
+    rule the payment path uses (decisions §473, amended): an UNSET rung
+    (absent, ``None``, blank) falls through to the next; a SET rung returns its
+    code normalised; a set rung that is not a three-letter code returns ``""``
+    — a currency nothing is denominated in, so every amount reads as
+    unconverted and every threshold as inexpressible (fail closed), never a
+    garbled code passed on, and never a fall-through to a currency the org did
+    not choose.
     """
-    s = org_settings or {}
-    candidates = [
+    s = org_settings if isinstance(org_settings, dict) else {}
+    invoice_defaults = s.get("invoice_defaults")
+    # Rung 2 goes through `international_payments`, the one owner of this
+    # setting (the four readers normalising it four ways is what let a
+    # trailing space route every domestic payment internationally).
+    # `configured_home_currency`, not `resolve_home_currency`: the latter
+    # substitutes the platform default for an unset value and would
+    # short-circuit rungs 3 and 4, which an absent setting must fall through
+    # to. See `tests/test_payment_home_currency.py`.
+    if home_currency_is_malformed(s):
+        home_rung: object = _MALFORMED
+    else:
+        home_rung = configured_home_currency(s)
+    rungs: list[object] = [
         s.get("reporting_currency"),
-        # Rung 2 goes through `international_payments`, the one owner of this
-        # setting — this module was the fourth site to reach into the settings
-        # JSON for it, and the four readers normalising it four ways is what
-        # let a trailing space route every domestic payment internationally.
-        # `configured_home_currency`, not `resolve_home_currency`: the latter
-        # substitutes the platform default for an unset value and would
-        # short-circuit rungs 3 and 4, which an absent setting must fall
-        # through to. See `tests/test_payment_home_currency.py`.
-        configured_home_currency(s),
-        (s.get("invoice_defaults") or {}).get("currency"),
+        home_rung,
+        invoice_defaults.get("currency") if isinstance(invoice_defaults, dict) else None,
         settings.reporting_currency_default,
     ]
-    for c in candidates:
-        if isinstance(c, str) and c.strip():
-            return c.strip().upper()
+    for raw in rungs:
+        if raw is _MALFORMED:
+            return ""
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            continue
+        return iso_currency_or_none(raw) or ""
     return "USD"
 
 
@@ -187,7 +223,9 @@ def _lock_is_self_consistent(invoice, *, target_currency: str) -> bool:
     rate = invoice.reporting_fx_rate
     if rate is None or rate <= 0:
         return False
-    src = (invoice.currency or target_currency).upper()
+    src = _row_currency(invoice.currency)
+    if src is None:
+        return False
     if not _lock_pair_matches(
         invoice, src=src, target_currency=target_currency, rate=Decimal(str(rate))
     ):
@@ -225,11 +263,31 @@ async def materialize_reporting_amount(
     an amount correction always fixes the reporting number even while the FX
     provider is unreachable.
 
-    Returns True if it (re)materialized or re-scaled, False if it left an
-    already-current lock untouched (idempotent no-op).
+    **An invoice with no known currency is never locked.** There is no pair
+    to fetch a rate for, and a 1:1 lock would let every later rollup read the
+    code-less amount as already converted. Any lock the row carries (one
+    written before decisions §473, when the blank read as the reporting
+    currency) is cleared instead, so the rollups count the row as
+    ``unconverted``.
+
+    Returns True if it (re)materialized, re-scaled or cleared a lock, False if
+    it left the row untouched (idempotent no-op).
     """
     tgt = reporting_currency.upper()
-    src = (invoice.currency or tgt).upper()
+    src = _row_currency(invoice.currency)
+    if src is None:
+        lock_fields = (
+            "reporting_currency",
+            "reporting_amount",
+            "reporting_fx_rate",
+            "reporting_source_currency",
+            "reporting_fx_locked_at",
+        )
+        if all(getattr(invoice, f, None) is None for f in lock_fields):
+            return False
+        for f in lock_fields:
+            setattr(invoice, f, None)
+        return True
 
     never_locked = (
         invoice.reporting_amount is None
@@ -295,10 +353,16 @@ def reporting_amount_for_row(
         flagged `unconverted=True` so the caller can surface "N rows pending
         conversion" rather than silently mixing currencies.
 
+    A row with no known currency (`_row_currency` is ``None``) is always
+    ``unconverted`` at face value, whatever lock it carries: a lock on such a
+    row was made up (decisions §473).
+
     Returns `(reporting_amount, unconverted)`.
     """
     tgt = reporting_currency.upper()
-    cur = (currency or tgt).upper()
+    cur = _row_currency(currency)
+    if cur is None:
+        return _quantize_money(Decimal(str(amount))), True
 
     if (
         persisted_reporting_amount is not None
@@ -470,7 +534,9 @@ def payment_reporting_amount_sql(
         payment_source_amount.isnot(None),
         func.upper(func.btrim(func.coalesce(payment_source_currency, ""))) == tgt,
     )
-    invoice_leg = func.upper(func.btrim(func.coalesce(invoice_currency, tgt))) == tgt
+    # An invoice with no known currency is NOT the reporting currency
+    # (decisions §473): its payment amount is in a currency nobody recorded.
+    invoice_leg = func.coalesce(invoice_currency_key_sql(invoice_currency) == tgt, False)
     return PaymentReportingAmountSql(
         amount=case(
             (home_leg, payment_source_amount),
@@ -483,6 +549,20 @@ def payment_reporting_amount_sql(
             or_(~home_leg, payment_source_amount == payment_amount),
         ),
     )
+
+
+def invoice_currency_key_sql(currency: ColumnElement) -> ColumnElement:
+    """SQL twin of `_row_currency`: the trimmed, upper-cased code, or ``NULL``
+    when the row records none (NULL, blank, whitespace-only or malformed).
+
+    Same trim set and pattern as ``payment_runs.payable_currency_code`` and
+    ``api/payments._queue_currency_unknown``, so a rollup and the run builder
+    agree on which rows have a currency.
+    """
+    from app.services.payment_runs import CURRENCY_CODE_PATTERN, CURRENCY_TRIM_CHARS
+
+    trimmed = func.btrim(currency, CURRENCY_TRIM_CHARS)
+    return case((trimmed.op("~")(CURRENCY_CODE_PATTERN), func.upper(trimmed)), else_=None)
 
 
 @dataclass(frozen=True)
@@ -532,11 +612,17 @@ def invoice_reporting_amount_sql(
     CASE and be counted as converted. `reporting_amount_for_row` requires both
     columns, and this must not diverge from it.
 
+    A row with no known currency (`invoice_currency_key_sql` is ``NULL``) groups
+    under a ``NULL`` key, adds its face value and is always ``unconverted``,
+    whatever lock it carries — never counted as the reporting currency
+    (decisions §473).
+
     Pure: builds SQLAlchemy expressions, touches no session and no clock.
     """
     tgt = (reporting_currency or "USD").strip().upper()
-    currency_key = func.upper(func.coalesce(currency, tgt))
+    currency_key = invoice_currency_key_sql(currency)
     has_lock = and_(
+        currency_key.isnot(None),
         persisted_reporting_amount.isnot(None),
         persisted_reporting_currency.isnot(None),
         func.upper(persisted_reporting_currency) == tgt,
@@ -544,13 +630,18 @@ def invoice_reporting_amount_sql(
     return InvoiceReportingAmountSql(
         currency_key=currency_key,
         amount=case((has_lock, persisted_reporting_amount), else_=amount),
-        unconverted=case((and_(not_(has_lock), currency_key != tgt), 1), else_=0),
+        unconverted=case(
+            (currency_key.is_(None), 1),
+            (and_(not_(has_lock), currency_key != tgt), 1),
+            else_=0,
+        ),
     )
 
 
 @dataclass(frozen=True)
 class CurrencyBreakdownEntry:
-    currency: str
+    #: ``None`` is the group of rows that record no currency (decisions §473).
+    currency: str | None
     original_amount: Decimal
     reporting_amount: Decimal
     count: int
@@ -590,7 +681,7 @@ def rollup_to_reporting_currency(
 
     for r in rows:
         amount = Decimal(str(r.get("amount") or 0))
-        currency = (r.get("currency") or tgt).upper()
+        currency = _row_currency(r.get("currency"))
         rep_amt, is_unconverted = reporting_amount_for_row(
             amount=amount,
             currency=currency,
@@ -704,7 +795,9 @@ def vendor_rollup_to_reporting_currency(
                 vendor=vendor,
                 amount=rollup.total_reporting_amount,
                 invoice_count=rollup.total_count,
-                currencies=sorted({e.currency for e in rollup.by_currency}),
+                # The unknown-currency group has no code to list; it is
+                # counted in `unconverted_count` instead.
+                currencies=sorted({e.currency for e in rollup.by_currency if e.currency}),
                 unconverted_count=rollup.unconverted_count,
                 vendor_id=vendor_id,
             )
@@ -762,7 +855,9 @@ def vendor_rollup_from_grouped_rows(
                 vendor=vendor,
                 amount=rollup.total_reporting_amount,
                 invoice_count=rollup.total_count,
-                currencies=sorted({e.currency for e in rollup.by_currency}),
+                # The unknown-currency group has no code to list; it is
+                # counted in `unconverted_count` instead.
+                currencies=sorted({e.currency for e in rollup.by_currency if e.currency}),
                 unconverted_count=rollup.unconverted_count,
                 vendor_id=vendor_id,
             )
@@ -913,7 +1008,7 @@ def rollup_from_grouped_rows(
     tgt = reporting_currency.upper()
     by_currency = [
         CurrencyBreakdownEntry(
-            currency=(g["currency"] or tgt).upper(),
+            currency=_row_currency(g["currency"]),
             original_amount=_quantize_money(Decimal(str(g["original_amount"] or 0))),
             reporting_amount=_quantize_money(Decimal(str(g["reporting_amount"] or 0))),
             count=int(g["count"] or 0),
@@ -996,8 +1091,14 @@ async def compute_unrealized_fx_gain_loss(
 
     # Group open foreign exposure by currency.
     by_cur: dict[str, dict] = {}
+    unknown_currency = 0
     for inv in open_invoices:
-        cur = (inv.get("currency") or tgt).upper()
+        cur = _row_currency(inv.get("currency"))
+        if cur is None:
+            # No known currency: no pair to mark to market and no booked
+            # figure (decisions §473). Counted, never valued.
+            unknown_currency += 1
+            continue
         if cur == tgt:
             continue
         amount = Decimal(str(inv.get("amount") or 0))
@@ -1022,7 +1123,7 @@ async def compute_unrealized_fx_gain_loss(
 
     entries: list[UnrealizedFXEntry] = []
     total = Decimal("0")
-    unconverted_total = 0
+    unconverted_total = unknown_currency
     for cur, b in by_cur.items():
         unconverted_total += b["unconverted"]
         if b["open_original"] == 0 and b["booked_reporting"] == 0:

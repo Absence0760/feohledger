@@ -81,16 +81,19 @@ describe('supplier-portal paged lists', () => {
 				expect(src).toContain('isCurrentRequest(token)');
 			});
 
-			it('renders BOTH footer branches, "showing all" only behind total > 0', () => {
+			it('renders the shared Load-more footer with its own messages', () => {
 				const src = RAW[path];
-				expect(src, 'no Load-more control').toContain(`m('${ns}.loadMore'`);
-				expect(src, 'no end-of-list footer').toContain(`m('${ns}.showingAll'`);
-				expect(src).toContain('class="btn-load-more"');
-				// `total` counts the whole filtered set, so claiming "showing all" while
-				// rows are still unfetched asserts that rows nobody loaded don't exist.
-				expect(src, '"showing all" is not gated on the has-more branch').toMatch(
-					/\{:else if total > 0\}/
+				// `ui/LoadMoreFooter.svelte` renders both branches, "showing all" only
+				// behind total > 0 (`total` counts the whole filtered set, so claiming
+				// it while rows are unfetched asserts that rows nobody loaded don't
+				// exist); `lib/utils/pagedListFooter.test.ts` pins that it is the one copy.
+				expect(src, 'no Load-more footer').toContain('<LoadMoreFooter');
+				expect(src).toContain(`moreKey="${ns}.loadMore"`);
+				expect(src).toContain(`allKey="${ns}.showingAll"`);
+				expect(src, 'the portal footer reads the portal catalogue').toContain(
+					'loadingKey="portal.common.loading"'
 				);
+				expect(src, 'the footer is not wired to the page total').toMatch(/^\s*\{total\}$/m);
 			});
 		});
 	}

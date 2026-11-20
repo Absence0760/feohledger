@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Payment, PaymentMethod, PaymentStatus } from '#lib/types/payment.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { queueBlockedReasonKey } from '#lib/types/paymentQueue.ts';
 	import {
 		PAYMENT_STATUSES,
@@ -95,6 +96,7 @@
 	} from '#lib/types/cardRebate.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
@@ -102,6 +104,7 @@
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { kpiDisplayValue } from '#lib/utils/kpiValue.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let RUNS_COLUMNS = $derived([
 		{ label: m('payments.col.run') },
@@ -332,7 +335,8 @@
 	// then contradict the "N of M" footer. `total_amount` on `/queue` covers
 	// every payable row; on `/queue/ids` only the selectable (unblocked) ones.
 	interface QueueCurrencySlice {
-		currency: string;
+		/** `null` groups the invoices that record no currency (decisions §473). */
+		currency: string | null;
 		count: number;
 		total_amount: string;
 		total_savings: string;
@@ -602,7 +606,7 @@
 			createRunError = '';
 			if (res.truncated) {
 				toast(
-					m('payments.queue.selectAllTruncated', { shown: res.ids.length, total: res.total }),
+					m('payments.queue.selectAllTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -1339,13 +1343,6 @@
 	// first visit blamed filters nobody had set. A failed load renders
 	// `<LoadError>` instead of the table (see the template).
 	let historyFiltered = $derived(search.trim() !== '' || activeStatus !== 'all');
-	let historyEmptyMessage = $derived(
-		paymentStore.loading
-			? m('common.loading')
-			: historyFiltered
-				? m('payments.history.empty')
-				: m('payments.history.empty.fresh')
-	);
 
 	function retryHistory() {
 		paymentStore.fetch(buildParams()).catch(() => {}); // noqa: raw-fetch-in-component — store method; routes through api.get
@@ -2255,7 +2252,8 @@
 					</span>
 					{#if allQueueSelected && !selectedAllQueueMatching && queueSelectableTotal > selectableQueue.length}
 						<button
-							class="btn-select-all-matching"
+							type="button"
+							class="btn-secondary"
 							data-testid="queue-select-all-matching"
 							disabled={selectingAllQueue}
 							onclick={selectAllQueueMatching}
@@ -2271,7 +2269,7 @@
 					{/if}
 					{#if !showReview}
 						<button
-							class="btn-pay"
+							class="btn-primary"
 							disabled={mixedCurrencySelection}
 							title={mixedCurrencySelection ? m('payments.queue.mixedCurrencyBlocked') : ''}
 							onclick={() => (showReview = true)}
@@ -2279,7 +2277,7 @@
 							{m('payments.queue.reviewAndPay')}
 						</button>
 					{/if}
-					<button class="btn-clear" onclick={clearQueueSelection}>{m('common.clear')}</button>
+					<button type="button" class="btn-cancel btn-clear" onclick={clearQueueSelection}>{m('common.clear')}</button>
 				</div>
 			</div>
 		{/if}
@@ -2374,7 +2372,8 @@
 				<div class="review-footer">
 					<span class="review-total">{m('payments.queue.total', { amount: formatGroups(selectedGroups) })}</span>
 					<button
-						class="btn-execute"
+						type="button"
+						class="btn-primary btn-execute"
 						disabled={creatingRun || mixedCurrencySelection}
 						title={mixedCurrencySelection ? m('payments.queue.mixedCurrencyBlocked') : ''}
 						onclick={createDraftRun}
@@ -2416,7 +2415,8 @@
 		<DataTable
 			fixed
 			isEmpty={queue.length === 0}
-			empty={queueLoading ? m('common.loading') : m('payments.queue.empty')}
+			loading={queueLoading}
+			empty={m('payments.queue.empty')}
 			colspan={8 + (canCompareRoutes() ? 1 : 0) + (canRecordOutside() ? 1 : 0)}
 		>
 			{#snippet header()}
@@ -2589,19 +2589,15 @@
 		</DataTable>
 		</div>
 
-		{#if hasMoreQueue}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={loadMoreQueue} disabled={queueLoadingMore}>
-					{queueLoadingMore
-						? m('common.loading')
-						: m('payments.queue.loadMore', { shown: queue.length, total: queueTotal })}
-				</button>
-			</div>
-		{:else if queueTotal > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('payments.queue.showingAll', { total: queueTotal })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={queue.length}
+			total={queueTotal}
+			hasMore={hasMoreQueue}
+			loading={queueLoadingMore}
+			onloadmore={loadMoreQueue}
+			moreKey="payments.queue.loadMore"
+			allKey="payments.queue.showingAll"
+		/>
 		{/if}
 
 	{:else if activeTab === 'history'}
@@ -2620,7 +2616,10 @@
 		<DataTable
 			fixed
 			isEmpty={paymentStore.all.length === 0}
-			empty={historyEmptyMessage}
+			loading={paymentStore.loading}
+			filtered={historyFiltered}
+			emptyFiltered={m('payments.history.empty')}
+			empty={m('payments.history.empty.fresh')}
 			colspan={8}
 		>
 			{#snippet header()}
@@ -2743,21 +2742,15 @@
 		</DataTable>
 		</div>
 
-		{#if paymentStore.hasMore}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={() => paymentStore.loadMore()} disabled={paymentStore.loading}>
-					{paymentStore.loading
-						? m('common.loading')
-						: m('payments.history.loadMore', { shown: paymentStore.all.length, total: paymentStore.total })}
-				</button>
-			</div>
-		{:else if paymentStore.total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end"
-					>{m('payments.history.showingAll', { total: paymentStore.total })}</span
-				>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={paymentStore.all.length}
+			total={paymentStore.total}
+			hasMore={paymentStore.hasMore}
+			loading={paymentStore.loading}
+			onloadmore={() => paymentStore.loadMore()}
+			moreKey="payments.history.loadMore"
+			allKey="payments.history.showingAll"
+		/>
 		{/if}
 
 	{:else if activeTab === 'runs'}
@@ -2775,7 +2768,8 @@
 			fixed
 			columns={RUNS_COLUMNS}
 			isEmpty={runs.length === 0}
-			empty={runsLoading ? m('common.loading') : m('payments.runs.empty')}
+			loading={runsLoading}
+			empty={m('payments.runs.empty')}
 			colspan={7}
 		>
 			{#snippet body()}
@@ -2893,7 +2887,8 @@
 			fixed
 			columns={REBATES_COLUMNS}
 			isEmpty={rebates.length === 0}
-			empty={loadingRebates ? m('payments.rebates.loading') : m('payments.rebates.empty')}
+			loading={loadingRebates}
+			empty={m('payments.rebates.empty')}
 			colspan={6}
 		>
 			{#snippet body()}
@@ -2945,22 +2940,16 @@
 		{/if}
 		</div>
 
-		{#if hasMoreRebates}
-			<div class="load-more-row">
-				<button
-					class="btn-load-more"
-					onclick={loadMoreRebates}
-					disabled={loadingMoreRebates}
-					data-testid="load-more-rebates"
-				>
-					{loadingMoreRebates ? m('common.loading') : m('payments.rebates.loadMore', { shown: rebates.length, total: rebateCount })}
-				</button>
-			</div>
-		{:else if rebateCount > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('payments.rebates.showingAll', { total: rebateCount })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={rebates.length}
+			total={rebateCount}
+			hasMore={hasMoreRebates}
+			loading={loadingMoreRebates}
+			onloadmore={loadMoreRebates}
+			moreKey="payments.rebates.loadMore"
+			allKey="payments.rebates.showingAll"
+			testId="load-more-rebates"
+		/>
 
 		{#if rebateCount > 0 && rebateListCurrency}
 			<!-- The WHOLE filtered set's total, off the envelope — never a sum of
@@ -3005,7 +2994,8 @@
 			fixed
 			columns={CARDS_COLUMNS}
 			isEmpty={cards.length === 0}
-			empty={loadingCards ? m('payments.cards.loading') : m('payments.cards.empty')}
+			loading={loadingCards}
+			empty={m('payments.cards.empty')}
 			colspan={8}
 		>
 			{#snippet body()}
@@ -3041,17 +3031,15 @@
 		{/if}
 		</div>
 
-		{#if hasMoreCards}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={loadMoreCards} disabled={loadingMoreCards}>
-					{loadingMoreCards ? m('common.loading') : m('payments.cards.loadMore', { shown: cards.length, total: cardsTotal })}
-				</button>
-			</div>
-		{:else if cardsTotal > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('payments.cards.showingAll', { total: cardsTotal })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={cards.length}
+			total={cardsTotal}
+			hasMore={hasMoreCards}
+			loading={loadingMoreCards}
+			onloadmore={loadMoreCards}
+			moreKey="payments.cards.loadMore"
+			allKey="payments.cards.showingAll"
+		/>
 	{/if}
 	</div>
 </PageHeader>
@@ -3353,7 +3341,7 @@
 					</button>
 					<button
 						type="submit"
-						class="btn-danger"
+						class="btn-danger armed"
 						data-testid="void-confirm"
 						disabled={voiding}
 					>
@@ -3412,7 +3400,7 @@
 					{m('common.cancel')}
 				</button>
 				{#if complianceMode === 'release'}
-					<button type="submit" class="btn-pay" disabled={complianceBusy}>
+					<button type="submit" class="btn-primary" disabled={complianceBusy}>
 						{complianceBusy
 							? m('payments.compliance.release.busy')
 							: m('payments.compliance.release.confirm')}
@@ -3420,7 +3408,7 @@
 				{:else}
 					<button
 						type="submit"
-						class="btn-danger"
+						class="btn-danger armed"
 						disabled={complianceBusy}
 					>
 						{complianceBusy
@@ -3500,7 +3488,7 @@
 				</button>
 				<button
 					type="submit"
-					class="btn-danger"
+					class="btn-danger armed"
 					data-testid="settlement-confirm"
 					disabled={settlementBusy}
 				>
@@ -3583,7 +3571,7 @@
 				</button>
 				<button
 					type="button"
-					class="btn-pay"
+					class="btn-primary"
 					data-testid="erp-sync-confirm"
 					disabled={erpSyncBusy}
 					onclick={commitErpSync}
@@ -3655,7 +3643,7 @@
 		</div>
 
 		{#if quoteBusy}
-			<p class="state" data-testid="quotes-loading">{m('common.loading')}</p>
+			<LoadingState testId="quotes-loading" />
 		{:else if quoteError}
 			<!-- Persistent, not a toast. The 409 body names each provider's own
 			     machine reason, which is what tells an operator whether the corridor
@@ -4011,29 +3999,6 @@
 		font-weight: 600;
 	}
 
-	.btn-select-all-matching {
-		padding: 4px 10px;
-		border-radius: 4px;
-		border: 1px solid var(--accent);
-		background: transparent;
-		color: var(--accent);
-		font-size: 0.8rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.btn-select-all-matching:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-
-	.btn-select-all-matching:not(:disabled):hover {
-		background: var(--accent-strong);
-		color: #fff;
-	}
-
 	.pay-bar-all-matching {
 		font-size: 0.8rem;
 		color: var(--text-muted);
@@ -4097,27 +4062,6 @@
 		font-size: 0.7rem;
 		font-weight: 400;
 		color: inherit;
-	}
-
-	.btn-pay {
-		padding: 6px 16px;
-		border-radius: 4px;
-		border: none;
-		background: var(--success-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-pay:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-pay:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	/* A queue row the backend would refuse: readable, visibly inert, never
@@ -4235,21 +4179,6 @@
 		line-height: 1.4;
 	}
 
-	.btn-clear {
-		padding: 6px 12px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.82rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-clear:hover {
-		color: var(--text);
-	}
-
 	/* --- Review panel --- */
 
 	.review-panel {
@@ -4306,27 +4235,6 @@
 		font-size: 0.9rem;
 		font-weight: 700;
 		color: var(--text);
-	}
-
-	.btn-execute {
-		padding: 8px 20px;
-		border-radius: 6px;
-		border: none;
-		background: var(--success-strong);
-		color: #fff;
-		font-size: 0.88rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-execute:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-execute:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	/* --- Record-only mode + record-outside dialog (issue #517) --- */
@@ -4398,27 +4306,6 @@
 		background: color-mix(in srgb, var(--danger) 8%, transparent);
 		border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
 		border-radius: 4px;
-	}
-
-	.btn-danger {
-		padding: 8px 18px;
-		border-radius: 4px;
-		border: 1px solid var(--danger-strong);
-		background: var(--danger-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-danger:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-
-	.btn-danger:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	.rebate-grid {

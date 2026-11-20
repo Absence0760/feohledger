@@ -19,9 +19,10 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    # All pnpm work happens in the frontend workspace — there's no root
-    # package.json / pnpm-lock.yaml, so the cache + install steps below
-    # have to be scoped to ``frontend/``.
+    # All pnpm work happens in the frontend workspace: the root
+    # package.json only holds dispatch scripts (no dependencies) and
+    # tools/ is Python, so the cache + install steps below are scoped
+    # to ``frontend/``.
     defaults:
       run:
         working-directory: frontend
@@ -51,8 +52,16 @@ jobs:
           # --audit-level=moderate ignores low/info findings (typically
           # noise from dev-only deps with no real exposure). The exit
           # code is non-zero when issues are found at >= the level.
-          pnpm audit --audit-level=moderate --json > audit.json
+          #
+          # The verdict comes from the plain-text run, not the --json one:
+          # before pnpm 10.29 (the repo pins 10.12.4) `--json` exits 1 on
+          # ANY finding, ignoring both --audit-level and
+          # `pnpm.auditConfig.ignoreGhsas`, so an ignored low advisory
+          # opened #728. The JSON run only supplies the issue body. Once
+          # packageManager is >= 10.29 the two exit codes agree.
+          pnpm audit --audit-level=moderate > /dev/null
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          pnpm audit --audit-level=moderate --json > audit.json
           if [ -s audit.json ]; then
             echo "## pnpm audit findings (moderate or higher)" > audit-summary.md
             echo "" >> audit-summary.md

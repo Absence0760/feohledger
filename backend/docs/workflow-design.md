@@ -637,7 +637,9 @@ The invoice is **immutable** in the later half of the lifecycle. PATCH and DELET
 `models.invoice` and `schemas.invoice`) and every named grouping of it:
 `IN_REVIEW_STATUSES` (new / pending / ready_for_review), `PRE_APPROVAL_STATUSES`
 (+ rejected), `OPEN_AP_STATUSES` (approved → payment_scheduled),
-`APPROVED_OR_BEYOND_STATUSES` (+ paid, done) and `POST_APPROVAL_LOCKED_STATUSES`
+`SETTLED_STATUSES` (paid, done), `APPROVED_OR_BEYOND_STATUSES` (open AP +
+settled), `PAYABLE_STATUSES` (approved, posted_in_erp, payment_scheduled: what
+a payment may be booked against) and `POST_APPROVAL_LOCKED_STATUSES`
 (approved-or-beyond minus approved). `failed` is in none of the approval
 groups, since it is reachable both before and after approval. Import the set;
 never list its members again. The copies this replaced had drifted — the
@@ -646,7 +648,11 @@ statistical-anomaly and LLM-anomaly fraud baselines dropped `sending_to_erp`,
 `sent_to_erp` and `done`, so a vendor whose history had finished had no
 baseline at all (issue #575). `tests/test_invoice_status_groups.py` derives
 each group from `VALID_TRANSITIONS` and fails on a literal restatement anywhere
-under `app/`.
+under `app/`, two-member settled pairs included; it holds a hand-listed
+`PaymentStatus` terminal set to `payment_adapters/base.TERMINAL_STATUSES` the
+same way. Its `_AWAITING_REPOINT` allowance names the few restatements still
+waiting to be repointed, and fails once one of them is gone, so it only
+shrinks.
 
 Two readings of these sets are deliberate and are recorded in
 `docs/decisions.md` §308. The budget's realised spend adds `failed` back, but

@@ -226,8 +226,8 @@ async def test_the_shipped_registry_has_no_auto_resolving_blocking_resolver(real
     the gate yet. If a real resolver lands for a payment-blocking type, this
     fails and its author is pointed at the gate it now runs behind."""
     import app.services.exception_agents.resolvers  # noqa: F401  — populates the registry
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
     from app.services.exception_agents.registry import get_resolver
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     live = [
         t

@@ -66,8 +66,9 @@ def _mk_db(*results):
 
 
 # The dashboard makes queries in this order — pinning here so the
-# test layout stays sane. Don't change the order without updating the
-# endpoint AND the comments below.
+# test layout stays sane. The queries live in `services/dashboard_metrics`, one
+# function per section, and `api/dashboard.get_dashboard` awaits the sections in
+# this order. Don't change the order without updating both AND the list below.
 #
 # Aging bands, the monthly-trend buckets, the currency rollup and the top-vendor
 # tile are now aggregated in SQL (GROUP BY), so those result rows are already
@@ -82,6 +83,9 @@ def _mk_db(*results):
 #   5.  aging rows (bucket, sum, sum_rep) — SQL-bucketed → .all()
 #   6.  trend rows (month, count, sum, sum_rep) — SQL group → .all()
 #   7.  upcoming payment rows (+ currency/reporting cols)  → .all()
+#   7b. overdue / due-soon per currency   → .all() → (ccy, n_overdue, sum, n_soon, sum)
+#       (`services/open_ap_due`'s predicate — pinned against Postgres in
+#       `test_dashboard_aggregates.py` § 5)
 #   7a. touchless counts                  → .one() → (touchless, decided)
 #       (`services/touchless.touchless_counts_select` — the per-invoice
 #       classification is SQL over the audit trail, so it is pinned against
@@ -117,6 +121,7 @@ def _full_results(
     aging=(),
     trend=(),
     upcoming=(),
+    due=(),
     touchless=(0, 0),
     paid=Decimal("0"),
     pending=Decimal("0"),
@@ -136,6 +141,7 @@ def _full_results(
         _r(all_=list(aging)),
         _r(all_=list(trend)),
         _r(all_=list(upcoming)),
+        _r(all_=list(due)),
         _r(one=touchless),
         _r(scalar=paid),
         _r(scalar=pending),

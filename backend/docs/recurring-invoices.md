@@ -47,8 +47,9 @@ tenant-scoped + `EntityMixin` + `TimestampMixin`). Money is exact: `amount` is
 
 The status / cadence string constants live on the model
 (`STATUS_ACTIVE`/`_PAUSED`/`_ENDED`, `CADENCE_MONTHLY`/`_QUARTERLY`/`_ANNUAL`);
-the Pydantic `Cadence` / `TemplateStatus` `StrEnum`s in
-`app/schemas/recurring_invoice.py` mirror them on the wire.
+the Pydantic `Cadence` `StrEnum` in `app/schemas/recurring_invoice.py` mirrors
+the cadences on the wire. `status` is a plain string there: the lifecycle
+endpoints, not the request body, are what move it.
 
 ## Idempotency (the generation guard)
 

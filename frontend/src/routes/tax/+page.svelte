@@ -27,6 +27,7 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// `POST /api/tax/vendors/{id}/{w9,tin-verify}` and `POST /api/tax/1099/file`
 	// are all `require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)` — a CFO can read this
@@ -488,9 +489,9 @@
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={filteredRows.length === 0}
-			empty={report.rows.length === 0
-				? m('tax.empty.noVendors')
-				: m('tax.empty.noMatch')}
+			filtered={report.rows.length > 0}
+			emptyFiltered={m('tax.empty.noMatch')}
+			empty={m('tax.empty.noVendors')}
 		>
 			{#snippet body()}
 				{#each filteredRows as r (r.vendor_id)}
@@ -522,7 +523,7 @@
 								<Badge tone="danger" variant="chip-warn">{m('tax.chip.missing')}</Badge>
 							{/if}
 						</td>
-						<td class="right mono">{r.payment_count}</td>
+						<td class="right mono">{formatCount(r.payment_count)}</td>
 						<td class="right mono ytd-reportable">
 							<span class:over={r.over_threshold}>
 								<Money amount={r.ytd_paid} currency={reportCurrency} />
@@ -886,34 +887,5 @@
 
 	.modal-warn.armed {
 		font-weight: 600;
-	}
-
-	.btn-danger {
-		padding: 8px 18px;
-		border-radius: 4px;
-		border: 1px solid var(--danger-strong);
-		background: transparent;
-		color: var(--danger-strong);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	/* Armed = the second, committing click — filled instead of outlined, the
-	   same "unarmed vs armed" visual escalation `RunDetailModal`'s
-	   `.btn-execute.armed` uses. */
-	.btn-danger.armed {
-		background: var(--danger-strong);
-		color: #fff;
-	}
-
-	.btn-danger:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-
-	.btn-danger:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 </style>

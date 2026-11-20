@@ -601,8 +601,12 @@ async def _approved_preapproval_amount(db: AsyncSession, expense: Expense) -> De
                 ).where(
                     ExpensePreapproval.status == PreapprovalStatus.approved,
                     ExpensePreapproval.requester_user_id == owner,
-                    func.upper(func.coalesce(ExpensePreapproval.currency, "USD"))
-                    == normalize_currency(expense.currency),
+                    # "" (no usable code on the expense) matches no
+                    # pre-approval, and a pre-approval with no currency (NULL)
+                    # is unknown, never USD: NULL compares as no match, so a
+                    # currency-less pre-approval covers nothing (§473).
+                    func.upper(func.btrim(ExpensePreapproval.currency))
+                    == (normalize_currency(expense.currency) or ""),
                     or_(*conditions),
                 )
             )
@@ -622,20 +626,21 @@ async def _refresh_policy_violations(db: AsyncSession, expense: Expense, org: Or
     thresholds are read in when the policy itself names none — without it the
     engine would compare a foreign-currency expense to a bare threshold number.
 
-    Best-effort: any failure leaves the stored value untouched and never breaks
-    the surrounding write (the violations are advisory)."""
-    try:
-        policies = await _active_policies(db, expense.entity_id)
-        covered = await _approved_preapproval_amount(db, expense)
-        violations = evaluate_expense(
-            expense,
-            policies,
-            approved_preapproval_amount=covered,
-            default_threshold_currency=resolve_reporting_currency(org.settings),
-        )
-        expense.policy_violations = violations or None
-    except Exception:  # pragma: no cover — advisory, never break the write
-        pass
+    A failure propagates and fails the surrounding write. It used to be
+    swallowed, leaving the stored flags describing the expense as it was before
+    the edit: an approver reading those badges then saw no violation on a line
+    that now breaks policy. Report submission re-runs the same engine with no
+    catch, so a write that "succeeded" here would only fail later, further from
+    its cause (and a database error has already poisoned the transaction)."""
+    policies = await _active_policies(db, expense.entity_id)
+    covered = await _approved_preapproval_amount(db, expense)
+    violations = evaluate_expense(
+        expense,
+        policies,
+        approved_preapproval_amount=covered,
+        default_threshold_currency=resolve_reporting_currency(org.settings),
+    )
+    expense.policy_violations = violations or None
 
 
 # ---------------------------------------------------------------------------
@@ -1874,7 +1879,9 @@ async def submit_report(
         entity_id=report.id,
         details={
             "total": str(report.total_amount),
-            "currency": normalize_currency(report.currency),
+            # As stored: an audit row records what the report carried, even a
+            # malformed legacy code the normaliser would read as unknown.
+            "currency": report.currency,
             "reporting_total": (
                 str(report.reporting_amount) if report.reporting_amount is not None else None
             ),
@@ -1935,7 +1942,9 @@ async def approve_report(
         entity_id=report.id,
         details={
             "total": str(report.total_amount),
-            "currency": normalize_currency(report.currency),
+            # As stored: an audit row records what the report carried, even a
+            # malformed legacy code the normaliser would read as unknown.
+            "currency": report.currency,
             # The exact figure the CFO gate compared, so an auditor can replay
             # the decision without re-deriving an FX rate.
             "gate_total": str(gate_total) if gate_total is not None else None,

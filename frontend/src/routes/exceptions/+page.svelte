@@ -3,6 +3,7 @@
 	import { page as pageStore } from '$app/state';
 	import { afterNavigate, replaceState } from '$app/navigation';
 	import { api } from '#lib/api.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -33,8 +34,7 @@
 	import AgentDashboard from '#lib/components/exceptions/AgentDashboard.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { formatMoney, type MoneyAmount } from '#lib/utils/money.ts';
-	import { formatDate, timeAgo } from '#lib/utils/time.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { formatDate, formatDueIn, timeAgo } from '#lib/utils/time.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -65,6 +65,7 @@
 	import { localToday } from '#lib/types/paymentExecution.ts';
 	import RecordPaymentFields from '#lib/components/payments/RecordPaymentFields.svelte';
 	import ErpPaymentSplit from '#lib/components/payments/ErpPaymentSplit.svelte';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	interface ExceptionItem {
 		id: string;
@@ -902,7 +903,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('exceptions.toast.selectAllTruncated', { shown: res.ids.length, total: res.total }),
+					m('exceptions.toast.selectAllTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -948,17 +949,7 @@
 	};
 
 	function dueLabel(exc: ExceptionItem): string {
-		if (!exc.due_at) return '—';
-		const due = new Date(exc.due_at).getTime();
-		if (Number.isNaN(due)) return '—';
-		const hours = Math.round((due - Date.now()) / 3600000);
-		const fmt = new Intl.RelativeTimeFormat(getActiveFormatLocale(), {
-			numeric: 'always',
-			style: 'short'
-		});
-		return Math.abs(hours) < 24
-			? fmt.format(hours, 'hour')
-			: fmt.format(Math.round(hours / 24), 'day');
+		return formatDueIn(exc.due_at);
 	}
 
 	let COLUMNS = $derived([
@@ -1071,13 +1062,6 @@
 	// finding none read as an all-clear on the whole queue. Only the
 	// unfiltered Open view has earned that sentence — a type or severity chip,
 	// or a search term, falls back to the neutral "No exceptions found."
-	let emptyMessage = $derived(
-		loading
-			? m('common.loading')
-			: statusFilter === 'open' && !typeFilter && severityFilter === 'all' && !appliedSearch
-					? m('exceptions.empty.open')
-					: m('exceptions.empty.other')
-	);
 </script>
 
 <PageHeader title={m('exceptions.title')}>
@@ -1152,7 +1136,7 @@
 	>
 		{#snippet actions()}
 			{#if allSelected && !selectedAllMatching && total > selectableIds.size}
-				<button class="bulk-action-btn" disabled={selectingAllMatching} onclick={selectAllMatching}>
+				<button type="button" class="btn-secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
 					{selectingAllMatching
 						? m('common.loading')
 						: m('common.selectAllMatching', { total })}
@@ -1160,7 +1144,7 @@
 			{:else if selectedAllMatching}
 				<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 			{/if}
-			<button class="bulk-action-btn" onclick={openBulkResolve}>
+			<button type="button" class="btn-primary" onclick={openBulkResolve}>
 				{m('exceptions.bulk.resolve', { n: selectedIds.size })}
 			</button>
 		{/snippet}
@@ -1186,7 +1170,16 @@
 		/>
 	{:else}
 	<div class="exc-table">
-	<DataTable columns={COLUMNS} isEmpty={exceptions.length === 0} empty={emptyMessage} colspan={11} fixed>
+	<DataTable
+		columns={COLUMNS}
+		isEmpty={exceptions.length === 0}
+		{loading}
+		filtered={!(statusFilter === 'open' && !typeFilter && severityFilter === 'all' && !appliedSearch)}
+		emptyFiltered={m('exceptions.empty.other')}
+		empty={m('exceptions.empty.open')}
+		colspan={11}
+		fixed
+	>
 		{#snippet header()}
 			<tr>
 				<!-- This page passes its own `header` snippet, so it owns `scope`
@@ -1324,17 +1317,15 @@
 	</div>
 	{/if}
 
-	{#if hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMoreExceptions} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('exceptions.loadMore', { shown: exceptions.length, total })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('exceptions.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={exceptions.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		onloadmore={loadMoreExceptions}
+		moreKey="exceptions.loadMore"
+		allKey="exceptions.showingAll"
+	/>
 	</div>
 	{/if}
 </PageHeader>
@@ -1498,7 +1489,7 @@
 				</button>
 				<button
 					type="button"
-					class="btn-warning"
+					class="btn-secondary"
 					disabled={saving ||
 						!resolutionText.trim() ||
 						!isAllowed(resolveTarget.decision_refusals?.escalate)}
@@ -1566,7 +1557,7 @@
 			</button>
 			<button
 				type="button"
-				class="btn-warning"
+				class="btn-secondary"
 				disabled={saving || !resolutionText.trim()}
 				onclick={() => commitBulkResolve('escalate')}
 			>
@@ -1608,30 +1599,6 @@
 
 	.title-row h2 {
 		margin: 0;
-	}
-
-	/* --- Bulk-bar action --- */
-
-	.bulk-action-btn {
-		padding: 6px 14px;
-		border-radius: 4px;
-		border: 1px solid var(--accent-strong);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.bulk-action-btn:hover {
-		filter: brightness(1.1);
-	}
-
-	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: default;
-		filter: none;
 	}
 
 	.bulk-all-matching-note {
@@ -1835,42 +1802,5 @@
 		outline: none;
 		border-color: var(--accent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
-	}
-
-	.btn-secondary {
-		padding: 8px 14px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
-	.btn-warning {
-		padding: 8px 14px;
-		border-radius: 4px;
-		border: 1px solid var(--warning);
-		background: var(--surface);
-		color: var(--warning);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-warning:hover:not(:disabled) {
-		background: color-mix(in srgb, var(--warning) 10%, transparent);
-	}
-
-	.btn-secondary:disabled,
-	.btn-warning:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 </style>

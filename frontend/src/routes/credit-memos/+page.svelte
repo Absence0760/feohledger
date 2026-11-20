@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { untrack } from 'svelte';
@@ -610,13 +611,6 @@
 	 * the tenant has open ones.
 	 */
 	// (A failed fetch never reaches this line: `LoadError` replaces the table.)
-	let emptyMessage = $derived(
-		loading
-			? m('common.loading')
-			: filtered
-				? m('creditMemos.empty.filtered')
-				: m('creditMemos.empty')
-	);
 
 	// Only the true zero-data case gets the illustrated onboarding block: a
 	// filter that matched nothing keeps the plain in-table line, since "create
@@ -671,7 +665,14 @@
 			testId="credit-memos-load-error"
 		/>
 	{:else}
-		<DataTable isEmpty={memos.length === 0} empty={emptyMessage} colspan={8}>
+		<DataTable
+			isEmpty={memos.length === 0}
+			{loading}
+			{filtered}
+			emptyFiltered={m('creditMemos.empty.filtered')}
+			empty={m('creditMemos.empty')}
+			colspan={8}
+		>
 			{#snippet header()}
 				<tr>
 					<SortableHeader
@@ -760,19 +761,16 @@
 		</DataTable>
 	{/if}
 
-	{#if errored}
-		<!-- No footer under a failed load: its counts describe rows not shown. -->
-	{:else if hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMoreMemos} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('creditMemos.loadMore', { shown: memos.length, total })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('creditMemos.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={memos.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		{errored}
+		onloadmore={loadMoreMemos}
+		moreKey="creditMemos.loadMore"
+		allKey="creditMemos.showingAll"
+	/>
 </PageHeader>
 
 <Modal

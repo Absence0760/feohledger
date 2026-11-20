@@ -156,7 +156,8 @@ export const enSettings = {
 	'org.chat.webhook.saving': 'Saving…',
 	'org.chat.webhook.remove': 'Remove webhook',
 	'org.chat.webhook.confirmRemove': 'Confirm remove',
-	'org.chat.webhook.removeAria': 'Remove the chat incoming-webhook URL',
+	'org.chat.webhook.removeAria': 'Remove webhook: the chat incoming-webhook URL',
+	'org.chat.webhook.confirmRemoveAria': 'Confirm remove: the chat incoming-webhook URL',
 	'org.chat.webhook.rotateHint':
 		'Replacing takes effect immediately with no overlap — we post to one URL, so keeping the old one live would keep posting to it. Delete the old webhook at your chat provider too: only they can revoke it.',
 	'org.chat.webhook.toast.saved': 'Chat webhook saved',
@@ -189,7 +190,8 @@ export const enSettings = {
 	'org.emailIntake.rotate': 'Rotate address',
 	'org.emailIntake.rotateConfirm': 'Confirm rotate',
 	'org.emailIntake.rotating': 'Rotating…',
-	'org.emailIntake.rotateAria': 'Rotate the email intake address',
+	'org.emailIntake.rotateAria': 'Rotate address for email intake',
+	'org.emailIntake.rotateConfirmAria': 'Confirm rotate address for email intake',
 	'org.emailIntake.rotateWarning':
 		'Rotating replaces this address immediately. The current address stops accepting email the moment you confirm — anything a vendor sends to it afterwards is dropped, with no bounce and no invoice. Give every vendor the new address before they next bill you.',
 	'org.emailIntake.rotated.aria': 'New email intake address',
@@ -986,7 +988,6 @@ export const enSettings = {
 	'admin.partner.join.generate': 'Generate link code',
 	'admin.partner.join.copy': 'Copy',
 	'admin.partner.join.expiresIn': 'Expires in {minutes} min',
-	'admin.partner.loading': 'Loading…',
 	'admin.partner.loadFailed': 'Failed to load partner overview.',
 	'admin.partner.notPartner':
 		'This workspace does not administer any child tenants yet. When a tenant is linked to this workspace as a partner, its children appear here.',

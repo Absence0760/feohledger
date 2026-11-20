@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formatRatioPercent } from '#lib/utils/percent.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	// Autonomous-exception-agent dashboard: resolution rate, escalation rate,
 	// accuracy (placeholder), plus the recent decision log. Read-only surface over
 	// GET /api/exceptions/agent-stats + /agent-decisions (admin/ap_manager-gated).
@@ -9,6 +10,7 @@
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import {
 		getAgentStats,
@@ -33,6 +35,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 
 	const PAGE_SIZE = 20;
 
@@ -273,8 +276,11 @@
 	// The three action chips ARE the three action labels, so they read the same
 	// keys the badge does — a chip saying one thing and the rows it filters
 	// another is the drift one shared map removes.
+	// FilterChips keys are strings; the "All" chip stands for no filter
+	// (`actionFilter === null`), which no `action_taken` value can collide with.
+	const ALL_ACTIONS = '';
 	const ACTION_CHIPS = $derived([
-		{ key: null, label: m('common.all') },
+		{ key: ALL_ACTIONS, label: m('common.all') },
 		{ key: 'auto_resolved', label: m('exceptions.agents.action.autoResolved') },
 		{ key: 'escalated', label: m('exceptions.agents.action.escalated') },
 		{ key: 'no_action', label: m('exceptions.agents.action.noAction') }
@@ -342,7 +348,7 @@
 			{/if}
 		</div>
 	{:else if loading}
-		<p class="dash-loading">{m('exceptions.agents.loading')}</p>
+		<LoadingState label={m('exceptions.agents.loading')} />
 	{/if}
 
 	<section class="log-section" data-testid="agent-run-panel">
@@ -351,7 +357,7 @@
 				<h2>{m('exceptions.agents.run.heading')}</h2>
 				<HelpTip term="exception-agent" />
 			</div>
-			<button class="filter-chip" onclick={loadCandidates} disabled={candidatesLoading}>
+			<button type="button" class="btn-secondary" onclick={loadCandidates} disabled={candidatesLoading}>
 				{candidatesLoading
 					? m('exceptions.agents.run.refreshing')
 					: m('exceptions.agents.run.refresh')}
@@ -366,11 +372,10 @@
 		<DataTable
 			columns={RUN_COLUMNS}
 			isEmpty={candidates.length === 0}
-			empty={candidatesLoading
-				? m('exceptions.agents.run.empty.loading')
-				: candidatesErrored
-					? m('exceptions.agents.run.empty.errored')
-					: m('exceptions.agents.run.empty.none')}
+			loading={candidatesLoading}
+			errored={candidatesErrored}
+			emptyErrored={m('exceptions.agents.run.empty.errored')}
+			empty={m('exceptions.agents.run.empty.none')}
 			colspan={6}
 		>
 			{#snippet body()}
@@ -421,18 +426,12 @@
 	<section class="log-section" data-testid="agent-decision-log">
 		<header class="log-head">
 			<h2>{m('exceptions.agents.log.heading')}</h2>
-			<nav class="filters" aria-label={m('exceptions.agents.log.filterAria')}>
-				{#each ACTION_CHIPS as chip (chip.key ?? 'all')}
-					<button
-						class="filter-chip"
-						class:active={actionFilter === chip.key}
-						aria-pressed={actionFilter === chip.key}
-						onclick={() => setActionFilter(chip.key)}
-					>
-						{chip.label}
-					</button>
-				{/each}
-			</nav>
+			<FilterChips
+				ariaLabel={m('exceptions.agents.log.filterAria')}
+				chips={ACTION_CHIPS}
+				active={actionFilter ?? ALL_ACTIONS}
+				onchange={(key) => setActionFilter(key === ALL_ACTIONS ? null : key)}
+			/>
 		</header>
 
 		<DataTable
@@ -463,19 +462,15 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
-					{loadingMore
-						? m('common.loading')
-						: m('exceptions.agents.loadMore', { shown: decisions.length, total })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('exceptions.agents.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={decisions.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={loadMore}
+			moreKey="exceptions.agents.loadMore"
+			allKey="exceptions.agents.showingAll"
+		/>
 	</section>
 </div>
 
@@ -591,11 +586,6 @@
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
-	}
-
-	.dash-loading {
-		color: var(--text-muted);
-		font-size: 0.9rem;
 	}
 
 	.accuracy-card {

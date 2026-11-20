@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Reconciliation, ReconStatus } from '#lib/types/vendorStatementRecon.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import {
 		RECON_STATUSES,
 		reconStatusLabelKey,
@@ -382,11 +383,10 @@
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={!loading && recons.length === 0}
-			empty={loading
-				? m('common.loading')
-				: statusFilter !== 'all' || appliedSearch
-					? m('vendorStatements.empty')
-					: m('vendorStatements.emptyNone')}
+			{loading}
+			filtered={statusFilter !== 'all' || !!appliedSearch}
+			emptyFiltered={m('vendorStatements.empty')}
+			empty={m('vendorStatements.emptyNone')}
 			colspan={8}
 		>
 			{#snippet body()}
@@ -441,17 +441,16 @@
 		</DataTable>
 	{/if}
 
-	{#if hasMore && !loadError}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('vendorStatements.loadMore', { shown: recons.length, total })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('vendorStatements.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={recons.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		errored={loadError}
+		onloadmore={() => load({ append: true })}
+		moreKey="vendorStatements.loadMore"
+		allKey="vendorStatements.showingAll"
+	/>
 </PageHeader>
 
 {#if showCreate}

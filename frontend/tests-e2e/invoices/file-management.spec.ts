@@ -146,7 +146,12 @@ test.describe('/invoices — Invoice detail file management', () => {
 		const invoiceNumber = `E2E-FILEMGMT-CLERK-${Date.now()}`;
 		const create = await page.request.post(`${API_BASE}/api/invoices`, {
 			headers: await authedTenantHeaders(page),
-			data: { vendor: 'E2E File Mgmt Vendor', invoice_number: invoiceNumber, amount: '12.00' }
+			data: {
+				vendor: 'E2E File Mgmt Vendor',
+				invoice_number: invoiceNumber,
+				amount: '12.00',
+				currency: 'USD'
+			}
 		});
 		expect(create.status()).toBe(201);
 		const invoiceId = ((await create.json()) as { id: string }).id;
@@ -182,7 +187,12 @@ test.describe('/invoices — Invoice detail file management', () => {
 		const invoiceNumber = `E2E-FILEMGMT-LOCKED-${Date.now()}`;
 		const create = await page.request.post(`${API_BASE}/api/invoices`, {
 			headers,
-			data: { vendor: 'E2E Locked Vendor', invoice_number: invoiceNumber, amount: '55.00' }
+			data: {
+				vendor: 'E2E Locked Vendor',
+				invoice_number: invoiceNumber,
+				amount: '55.00',
+				currency: 'USD'
+			}
 		});
 		expect(create.status()).toBe(201);
 		const invoiceId = ((await create.json()) as { id: string }).id;
@@ -221,7 +231,12 @@ test.describe('/invoices — Invoice detail file management', () => {
 		// Create a fresh invoice directly (no UI needed for this probe).
 		const create = await page.request.post(`${API_BASE}/api/invoices`, {
 			headers,
-			data: { vendor: 'E2E Done Vendor', invoice_number: invoiceNumber, amount: '77.00' }
+			data: {
+				vendor: 'E2E Done Vendor',
+				invoice_number: invoiceNumber,
+				amount: '77.00',
+				currency: 'USD'
+			}
 		});
 		expect(create.status()).toBe(201);
 		const created = (await create.json()) as { id: string };

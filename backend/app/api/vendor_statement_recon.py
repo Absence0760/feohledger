@@ -45,7 +45,8 @@ from app.api.deps import (
 from app.api.refusals import statement_currency
 from app.config import settings
 from app.database import get_control_db
-from app.models.invoice import Invoice, InvoiceStatus
+from app.models.invoice import Invoice
+from app.models.invoice_status import SETTLED_STATUSES
 from app.models.organization import Organization
 from app.models.user import User
 from app.models.vendor import Vendor
@@ -100,7 +101,7 @@ _WRITE_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER)
 
 # Ledger candidates exclude invoices that are already settled — a paid/done
 # invoice can't be on a supplier's open-items statement.
-_LEDGER_EXCLUDED_STATUSES = (InvoiceStatus.paid, InvoiceStatus.done)
+_LEDGER_EXCLUDED_STATUSES = SETTLED_STATUSES
 
 # The two line classes that are "actionable" — a clerk must clear them before
 # the run is `resolved` and they're what `close-readiness` sums.

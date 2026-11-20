@@ -30,8 +30,9 @@ When an ingested file is a **structured** e-invoice — UBL 2.1 (PEPPOL BIS
 Billing 3.0), standalone UN/CEFACT CII, or a Factur-X / ZUGFeRD hybrid PDF/A-3 —
 it is parsed deterministically instead of going through a vision model.
 
-- **Auto-detect on ingest.** `extraction.run_extraction` calls
-  `_detect_structured_format(file_bytes, file_key)` right after the S3 fetch
+- **Auto-detect on ingest.** `extraction.run_extraction` runs
+  `_detect_structured_format(file_bytes, file_key)` on a worker thread
+  (`asyncio.to_thread`; it may open a PDF) right after the S3 fetch
   (the single choke point both upload and email intake reach). A structured file
   overrides the org's configured adapter with the `einvoice` adapter and passes
   the real mime (XML vs PDF) into `adapter.extract`. A plain scanned PDF (no
@@ -126,6 +127,14 @@ cd backend && .venv/bin/pip install -e ".[dev]"
 ```
 
 PyMuPDF is included in the project dependencies (`pyproject.toml`).
+
+Every read goes through `app/services/pdf_reader.py`, the one module that opens
+a PDF with PyMuPDF. Adapters `await pdf_reader.pdf_text(...)` for the text layer
+and `await pdf_reader.rasterize_pages(...)` for the page images (with the
+auto-rotate pass above); both run on a worker thread, because rendering a
+20-page scan at 200 dpi on the event loop would stall every other request on
+the worker. `tests/test_pdf_render_offloaded.py` refuses a `pymupdf.open`
+anywhere else and a coroutine calling one of the sync cores directly.
 
 ## Extraction Flow
 
@@ -519,7 +528,7 @@ default priors-only pass to size how many priors the chart rejected.
 
 Each persisted change writes an `invoice.gl_recoded` audit-log row with `{old_gl, new_gl, source, bulk_run_at}` so the activity is traceable on the invoice's history.
 
-Frontend: "Bulk Re-code GL" toolbar button on `/invoices` (admin-only) opens a preview-then-apply modal in `frontend/src/lib/components/BulkRecodeGLModal.svelte`.
+Frontend: "Bulk Re-code GL" toolbar button on `/invoices` (admin-only) opens a preview-then-apply modal in `frontend/src/lib/components/modals/BulkRecodeGLModal.svelte`.
 
 ## ExtractionResult Structure
 
@@ -1049,7 +1058,7 @@ The disclosure problem was real too: `matches_to_warning` put the matched invoic
 
 A NULL `entity_id` on either side means *unstamped* (a pre-multi-entity row, or a single-entity tenant), **not** "some other entity" — so single-entity tenants, the overwhelming majority, see no change at all. When both a same-entity and a cross-entity match exist, the headline is built from the same-entity one (the viewer can act on that and needs the identifiers) with a bare count of the cross-entity ones appended.
 
-The `duplicate` Exception is in `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so a cross-entity hit still blocks the payment run until a human clears it. That is intended: a suspected intra-group double-bill wants the human sign-off, and the clearing path is unchanged.
+The `duplicate` Exception is in `services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so a cross-entity hit still blocks the payment run until a human clears it. That is intended: a suspected intra-group double-bill wants the human sign-off, and the clearing path is unchanged.
 
 ### Threshold rationale
 

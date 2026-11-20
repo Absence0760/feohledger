@@ -182,7 +182,8 @@ def export_invoice_register(invoices: Iterable) -> str:
                 getattr(inv, "invoice_number", "") or "",
                 getattr(inv, "vendor_name", "") or "",
                 _fmt_money(getattr(inv, "amount", None)),
-                getattr(inv, "currency", "") or "USD",
+                # Blank when the invoice records no currency: never a guessed USD.
+                getattr(inv, "currency", "") or "",
                 status or "",
                 _fmt_date(getattr(inv, "invoice_date", None)),
                 _fmt_date(getattr(inv, "due_date", None)),
@@ -324,7 +325,7 @@ def export_aging_snapshot(aging_buckets: dict, *, snapshot_date: date | None = N
     Header matches the dashboard `aging` dict keys.
 
     `reporting_currency` and `unconverted_count` close the row. Both callers
-    (`api/analytics._aging_snapshot_buckets`) hand over bands already converted
+    (`ap_commitments.aging_snapshot_buckets`) hand over bands already converted
     into the org's reporting currency, and a CSV has no page to carry the
     caveat a foreign invoice with no locked rate needs — it is summed at FACE
     value, exactly like `export_vendor_spend`'s rows, so the count is what tells

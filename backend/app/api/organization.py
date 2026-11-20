@@ -15,7 +15,7 @@ from app.api.deps import (
     require_entitlement,
     require_roles,
 )
-from app.api.refusals import credential_block_unopenable_detail
+from app.api.refusals import coded_refusal, credential_block_unopenable_detail
 from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
@@ -189,6 +189,11 @@ async def get_fraud_rule_defaults(
     return DEFAULT_FRAUD_RULES
 
 
+#: `PATCH /api/organization` with a `payments.home_currency` that is not a
+#: three-letter code (decisions §473, amended).
+HOME_CURRENCY_SETTING_INVALID = "organization_home_currency_invalid"
+
+
 def _validate_settings_patch(incoming: dict) -> None:
     """Reject the specific type-confusion holes a careless PATCH can sneak
     through for the well-known settings sub-keys this endpoint understands.
@@ -205,6 +210,10 @@ def _validate_settings_patch(incoming: dict) -> None:
       Every currency formatter downstream (`<Money>`, the reporting rollups)
       assumes this; a stray int or a 2-char typo would corrupt every
       invoice created under the default from then on.
+    * `payments.home_currency` — three ASCII letters, uppercased in place, or
+      blank / null for unset; anything else is the coded 422
+      `organization_home_currency_invalid` (a malformed value refuses every
+      payment, decisions §473).
     * `payments.cfo_approval_above` — must be numeric (int/float, not `bool`
       — `bool` is a `int` subclass in Python and would otherwise sneak past a
       bare `isinstance(x, (int, float))` check) when present. It gates the
@@ -251,6 +260,27 @@ def _validate_settings_patch(incoming: dict) -> None:
                 status_code=422,
                 detail=f"payments.nacha has invalid fields: {', '.join(problems)}.",
             )
+    if isinstance(payments_cfg, dict) and "home_currency" in payments_cfg:
+        # Read by the payment path for the FX leg and every compliance
+        # threshold. A malformed value used to read as USD silently; it now
+        # refuses payment (decisions §473, amended), so it is refused here, on
+        # write, where the admin can see it. Blank or null means "unset" (the
+        # platform default applies) and is stored as null.
+        raw_home = payments_cfg["home_currency"]
+        if raw_home is None or (isinstance(raw_home, str) and not raw_home.strip()):
+            payments_cfg["home_currency"] = None
+        else:
+            home = iso_currency_or_none(raw_home)
+            if home is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=coded_refusal(
+                        HOME_CURRENCY_SETTING_INVALID,
+                        "The home currency must be a three-letter currency code such as "
+                        "USD or EUR.",
+                    ),
+                )
+            payments_cfg["home_currency"] = home
     if isinstance(payments_cfg, dict) and "cfo_approval_above" in payments_cfg:
         threshold = payments_cfg["cfo_approval_above"]
         if threshold is not None and (

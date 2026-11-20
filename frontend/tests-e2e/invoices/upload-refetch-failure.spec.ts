@@ -1,4 +1,4 @@
-import { deleteInvoicesWhere, expect, test } from '../fixtures/helpers';
+import { deleteInvoicesWhere, expect, tenantPsql, test } from '../fixtures/helpers';
 
 /**
  * /invoices — the Upload button must recover when the post-upload REFETCH fails.
@@ -26,12 +26,21 @@ test.describe('/invoices upload recovery', () => {
 	// The upload really happens (that is the point — the failure is downstream of
 	// it), so the row it creates is cleaned up here rather than left behind.
 	let uploadedId: string | null = null;
-	test.afterEach(() => {
+	test.afterEach(async () => {
 		if (!uploadedId) return;
-		// The upload really runs extraction, so this invoice has line items and an
-		// extraction result as well as its workflow rows — `deleteInvoicesWhere`
-		// owns the full child graph rather than this spec tracking a subset.
-		deleteInvoicesWhere(`id='${uploadedId}'`);
+		const id = uploadedId;
+		// The upload really runs extraction, in the backend's own worker, which
+		// keeps writing the invoice's children (workflow steps, line items, the
+		// extraction result) until it lands the invoice in review or failed.
+		// Deleting under it raced those inserts: a step written between the
+		// helper's step and instance deletes broke the instance delete's FK. So
+		// wait for the worker to finish with the invoice first.
+		await expect
+			.poll(() => tenantPsql(`SELECT status FROM invoices WHERE id='${id}'`).trim())
+			.not.toMatch(/^(new|pending)$/);
+		// `deleteInvoicesWhere` owns the full child graph rather than this spec
+		// tracking a subset.
+		deleteInvoicesWhere(`id='${id}'`);
 		uploadedId = null;
 	});
 

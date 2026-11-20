@@ -1,3 +1,5 @@
+import 'package:feohledger_mobile/models/payment_queue.dart';
+
 enum PaymentMethod {
   ach('ach'),
   wire('wire'),
@@ -26,12 +28,6 @@ enum PaymentMethod {
   static PaymentMethod fromString(String s) =>
       tryFromString(s) ?? PaymentMethod.ach;
 
-  String get label => switch (this) {
-    PaymentMethod.ach => 'ACH',
-    PaymentMethod.wire => 'Wire',
-    PaymentMethod.check => 'Check',
-    PaymentMethod.virtualCard => 'Virtual Card',
-  };
 }
 
 enum PaymentStatus {
@@ -55,23 +51,26 @@ enum PaymentStatus {
 class Payment {
   final String id;
   final String invoiceId;
-  final double amount;
 
-  /// What [amount] — the AUTHORIZED figure — is denominated in. `payments` has
-  /// no currency column; a payment settles in its invoice's currency, and
+  /// The AUTHORIZED figure, exactly as served ([moneyToDisplay]): money is a
+  /// display string on the device, never a `double` it could do arithmetic on.
+  final String amountDisplay;
+
+  /// What [amountDisplay] is denominated in. `payments` has no currency
+  /// column; a payment settles in its invoice's currency, and
   /// `PaymentResponse.currency` joins it through for exactly this reason.
   /// `null` means the invoice carries no code or none was joined, and is NOT
   /// a licence to substitute a default (`docs/decisions.md` §79/§82).
   final String? currency;
 
   /// The accepted early-payment discount this payment TAKES, already deducted
-  /// from [amount] (`PaymentResponse.discount_amount`, migration 0104). `null`
-  /// when the payment moves the full net — never a zero standing in for "no
-  /// discount". Never add it back to [amount] on-device: [amount] is what was
+  /// from [amountDisplay] (`PaymentResponse.discount_amount`, migration 0104).
+  /// `null` when the payment moves the full net — never a zero standing in for
+  /// "no discount". Never added back on-device: the amount is what was
   /// authorized and what settlement is verified against. The offer's id
   /// (`discount_offer_id`) is deliberately not parsed: no mobile screen links
   /// to a discount offer.
-  final double? discountAmount;
+  final String? discountAmountDisplay;
 
   final PaymentMethod method;
   final PaymentStatus status;
@@ -81,9 +80,9 @@ class Payment {
   Payment({
     required this.id,
     required this.invoiceId,
-    required this.amount,
+    required this.amountDisplay,
     this.currency,
-    this.discountAmount,
+    this.discountAmountDisplay,
     required this.method,
     required this.status,
     this.reference,
@@ -91,18 +90,32 @@ class Payment {
   });
 
   factory Payment.fromJson(Map<String, dynamic> json) {
+    final discount = json['discount_amount'];
     return Payment(
       id: json['id'] as String,
       invoiceId: json['invoice_id'] as String,
-      amount: (json['amount'] as num).toDouble(),
+      amountDisplay: moneyToDisplay(json['amount']),
       currency: json['currency'] as String?,
-      discountAmount: (json['discount_amount'] as num?)?.toDouble(),
+      discountAmountDisplay: discount == null ? null : moneyToDisplay(discount),
       method: PaymentMethod.fromString(json['method'] as String),
       status: PaymentStatus.fromString(json['status'] as String),
       reference: json['reference'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
     );
   }
+
+  /// The offline-cache shape: [Payment.fromJson] reads it back unchanged.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'invoice_id': invoiceId,
+        'amount': amountDisplay,
+        'currency': currency,
+        'discount_amount': discountAmountDisplay,
+        'method': method.value,
+        'status': status.value,
+        'reference': reference,
+        'created_at': createdAt.toIso8601String(),
+      };
 }
 
 class DashboardData {
@@ -126,6 +139,19 @@ class DashboardData {
   final List<MonthlyTrend> trends;
   final UpcomingPayments upcoming;
 
+  /// Open AP past its due date, over the WHOLE book (`overdue_count` /
+  /// `overdue_total`), counted in SQL by the same predicate the web's /cfo
+  /// overdue card reads. Never derived from `upcoming_payments`, which the
+  /// server caps at ten rows. `null` against a backend (or an offline cache)
+  /// predating the fields: the screen then shows no Overdue figure rather
+  /// than a `0` nobody reported.
+  final DueRollup? overdue;
+
+  /// The same population, due today through seven days out (`due_soon_count`
+  /// / `due_soon_total`) — what the Upcoming card means. `null` as above, in
+  /// which case Upcoming falls back to the capped list it used to read.
+  final DueRollup? dueSoon;
+
   /// What every money figure on this payload is denominated in, straight from
   /// `reporting.reporting_currency` — the server's own answer, so no client
   /// resolution is involved and there is nothing to disagree with it about.
@@ -148,6 +174,8 @@ class DashboardData {
     required this.aging,
     required this.trends,
     required this.upcoming,
+    this.overdue,
+    this.dueSoon,
     this.reportingCurrency,
     this.unconvertedCount = 0,
   });
@@ -197,6 +225,14 @@ class DashboardData {
                 ?.toDouble() ??
             0,
         unconvertedCount: unconvertedCountOf(json['upcoming_unconverted_count']),
+      ),
+      overdue: DueRollup.fromJsonOrNull(
+        json['overdue_count'],
+        json['overdue_total'],
+      ),
+      dueSoon: DueRollup.fromJsonOrNull(
+        json['due_soon_count'],
+        json['due_soon_total'],
       ),
       reportingCurrency: reporting['reporting_currency'] as String?,
       unconvertedCount: unconvertedCountOf(reporting['unconverted_count']),
@@ -314,6 +350,59 @@ class UpcomingPayments {
       unconvertedCount: unconvertedCountOf(json['unconverted_count']),
     );
   }
+}
+
+/// A count of invoices and their FACE amount per currency — the dashboard's
+/// `overdue_*` and `due_soon_*` pairs.
+///
+/// Per currency, never one converted total: the backend groups on each
+/// invoice's own code, so `€1.2K · $3.4K` is what the figure is. The money is
+/// summed on the server; nothing here adds amounts across currencies.
+class DueRollup {
+  final int count;
+  final List<DueByCurrency> byCurrency;
+
+  const DueRollup({required this.count, this.byCurrency = const []});
+
+  /// `null` when the payload carries no count — a backend or cached copy
+  /// predating the field, which must not read as "nothing overdue".
+  static DueRollup? fromJsonOrNull(Object? count, Object? totals) {
+    if (count is! num) return null;
+    return DueRollup(
+      count: count.toInt(),
+      byCurrency: totals is List
+          ? totals
+                .whereType<Map<String, dynamic>>()
+                .map(DueByCurrency.fromJson)
+                .toList()
+          : const [],
+    );
+  }
+
+  /// The wire shape [fromJsonOrNull] reads, for the offline cache.
+  List<Map<String, dynamic>> totalsToJson() => byCurrency
+      .map((c) => {'currency': c.currency, 'amount': c.amount, 'count': c.count})
+      .toList();
+}
+
+class DueByCurrency {
+  /// The invoices' own code; `null` for invoices recording none, whose figure
+  /// renders without a symbol rather than a guessed one.
+  final String? currency;
+  final double amount;
+  final int count;
+
+  const DueByCurrency({
+    required this.currency,
+    required this.amount,
+    required this.count,
+  });
+
+  factory DueByCurrency.fromJson(Map<String, dynamic> json) => DueByCurrency(
+    currency: json['currency'] as String?,
+    amount: (json['amount'] as num?)?.toDouble() ?? 0,
+    count: (json['count'] as num?)?.toInt() ?? 0,
+  );
 }
 
 /// A row COUNT off a rollup payload's `unconverted_count`, never money.

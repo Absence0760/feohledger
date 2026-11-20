@@ -74,14 +74,16 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import NamedTuple
 
-from sqlalchemy import and_, case, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.bank_reconciliation import BankStatement, BankTransaction
 from app.models.invoice import Invoice
 from app.models.payment import Payment
 from app.services.numeric_bounds import STATEMENT_NUMERIC, fits_numeric
+from app.services.payment_runs import CURRENCY_TRIM_CHARS
 from app.services.vendor_matching import _normalize, _similarity
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.dates import parse_ambiguous_date
 
 logger = logging.getLogger(__name__)
@@ -160,6 +162,21 @@ EXPECTED_TO_CLEAR_STATUSES = ("completed", "submitted", "processing")
 AMOUNT_MATCH_TOLERANCE = Decimal("0.01")
 
 
+def reconciliation_currency(value: object) -> str:
+    """The currency label a reconciliation compares on.
+
+    ``""`` only when no currency was stated: that is *unknown*, and the
+    comparisons here skip the currency check rather than manufacture a
+    mismatch out of missing data. A stated value goes through the one ISO 4217
+    rule (``utils/currency_code``). One that fails it is NOT unknown: it keeps
+    its own trimmed text, which equals no real code, so it reads as a currency
+    mismatch (fail closed) instead of silently waiving the check.
+    """
+    if value is None or not str(value).strip():
+        return ""
+    return iso_currency_or_none(value) or str(value).strip()
+
+
 def settlement_amount_and_currency(payment, invoice_currency: str | None) -> tuple[Decimal, str]:
     """What the bank account was actually debited for this payment.
 
@@ -177,9 +194,13 @@ def settlement_amount_and_currency(payment, invoice_currency: str | None) -> tup
     """
     source_amount = getattr(payment, "source_amount", None)
     source_currency = getattr(payment, "source_currency", None)
-    if source_amount is not None and source_currency not in (None, ""):
-        return Decimal(source_amount), str(source_currency).upper()
-    return Decimal(payment.amount), (invoice_currency or "").strip().upper()
+    # `reconciliation_currency`, not `not in (None, "")`: a whitespace-only
+    # stamp is no currency either, and reading it as one skipped the currency
+    # check on an FX leg (fail open). It now falls back to the invoice-currency
+    # figure, which a home-currency bank line does not match (fail closed).
+    if source_amount is not None and reconciliation_currency(source_currency):
+        return Decimal(source_amount), reconciliation_currency(source_currency)
+    return Decimal(payment.amount), reconciliation_currency(invoice_currency)
 
 
 def settlement_amount_sql():
@@ -188,7 +209,7 @@ def settlement_amount_sql():
     Kept adjacent to the Python definition so an aggregate over the whole set
     and a per-row response can't disagree about what the bank debited. The
     predicate is written to be *structurally* identical to the Python one —
-    including the empty-string case — rather than merely equivalent for the
+    including the blank (whitespace-only) case — rather than merely equivalent for the
     values `services.international_payments` happens to write today.
     """
     return case(
@@ -196,7 +217,8 @@ def settlement_amount_sql():
             and_(
                 Payment.source_amount.is_not(None),
                 Payment.source_currency.is_not(None),
-                Payment.source_currency != "",
+                # Mirrors `reconciliation_currency`'s blank test (trimmed).
+                func.btrim(Payment.source_currency, CURRENCY_TRIM_CHARS) != "",
             ),
             Payment.source_amount,
         ),
@@ -225,8 +247,8 @@ def classify_discrepancy(
     signal of the remaining two. An unknown currency on either side skips the
     currency check only — missing data must not manufacture a discrepancy.
     """
-    bank_ccy = (bank_currency or "").strip().upper()
-    pay_ccy = (payment_currency or "").strip().upper()
+    bank_ccy = reconciliation_currency(bank_currency)
+    pay_ccy = reconciliation_currency(payment_currency)
     if bank_ccy and pay_ccy and bank_ccy != pay_ccy:
         return MATCH_METHOD_CURRENCY_MISMATCH
     if is_amount_mismatch(bank_amount, payment_amount):
@@ -608,7 +630,7 @@ async def _load_invoice_facts(
     rows = (await db.execute(select(Invoice).where(Invoice.id.in_(missing)))).scalars().all()
     found = {
         inv.id: _InvoiceFacts(
-            currency=(inv.currency or "").strip().upper(),
+            currency=reconciliation_currency(inv.currency),
             vendor_name=inv.vendor_name,
         )
         for inv in rows
@@ -634,7 +656,7 @@ def _settles_as(
     settled_amount, settled_currency = settlement_amount_and_currency(payment, facts.currency)
     if settled_amount != amount:
         return False
-    bank_currency = (currency or "").strip().upper()
+    bank_currency = reconciliation_currency(currency)
     return not settled_currency or not bank_currency or settled_currency == bank_currency
 
 

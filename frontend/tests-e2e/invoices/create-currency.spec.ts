@@ -32,6 +32,11 @@ test('the create-invoice currency seeds from the org, uppercases, and refuses a 
 
 	const currency = modal.getByTestId('invoice-currency');
 	await expect(currency).toHaveValue('GBP');
+	// Marked required like Vendor / Invoice # / Amount, visually and to AT.
+	await expect(
+		modal.locator('label', { hasText: 'Currency' }).locator('em.required')
+	).toHaveText('*');
+	await expect(currency).toHaveAttribute('required', '');
 
 	await currency.fill('pln');
 	await expect(currency).toHaveValue('PLN');
@@ -47,7 +52,16 @@ test('the create-invoice currency seeds from the org, uppercases, and refuses a 
 	await modal.locator('label', { hasText: 'Vendor' }).locator('input').fill('E2E Ccy Vendor');
 	await modal.locator('label', { hasText: 'Invoice #' }).locator('input').fill('E2E-CCY-1');
 	await modal.locator('label', { hasText: 'Amount' }).locator('input').fill('10.00');
-	await modal.getByRole('button', { name: 'Create' }).click();
+	// Every other required field is filled, so the blank currency alone keeps
+	// Create disabled — and nothing reaches the backend.
+	const create = modal.getByRole('button', { name: 'Create', exact: true });
+	await expect(create).toBeDisabled();
 	await expect(modal).toBeVisible();
+	expect(posted).toBe(false);
+
+	// A valid code re-enables it: the currency was the only thing missing.
+	await currency.fill('GBP');
+	await expect(create).toBeEnabled();
+	await expect(currency).not.toHaveAttribute('aria-invalid', 'true');
 	expect(posted).toBe(false);
 });

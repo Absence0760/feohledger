@@ -2,6 +2,7 @@
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { formatDate } from '#lib/utils/time.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
@@ -15,7 +16,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import {
@@ -74,13 +75,6 @@
 	// Revoke is disabled until it settles.
 	let confirmRevokeId = $state<string | null>(null);
 	let revokingId = $state<string | null>(null);
-
-	/** A request count in the in-app locale. A bare `toLocaleString()` follows
-	 *  the BROWSER's locale, so a German reader of the English UI (or the
-	 *  reverse) got the other language's digit grouping. */
-	function formatCount(n: number): string {
-		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
-	}
 
 	// Per-key usage view.
 	let usageKey = $state<ApiKey | null>(null);
@@ -209,7 +203,7 @@
 	{/if}
 
 	{#if loading}
-		<p class="state" data-testid="api-keys-loading">{m('admin.apiKeys.loading')}</p>
+		<LoadingState label={m('admin.apiKeys.loading')} testId="api-keys-loading" />
 	{:else if error}
 		<LoadError message={error} onretry={load} testId="api-keys-error" />
 	{:else}
@@ -347,7 +341,7 @@
 		>
 			<h2>{m('admin.apiKeys.usage.heading', { name: usageKey.name })}</h2>
 			{#if usageLoading}
-				<p class="state" data-testid="usage-loading">{m('admin.apiKeys.usage.loading')}</p>
+				<LoadingState label={m('admin.apiKeys.usage.loading')} testId="usage-loading" />
 			{:else if usageError}
 				<LoadError
 					message={usageError}

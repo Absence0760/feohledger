@@ -55,7 +55,7 @@ async def _make_paid_vendor(
     year: int,
     eligible: bool = True,
     w9: bool = True,
-    currency: str = "USD",
+    currency: str | None = "USD",
 ) -> uuid.UUID:
     """Vendor + invoice + completed payment in the target year.
 
@@ -187,6 +187,32 @@ async def test_1099_report_labels_totals_with_org_reporting_currency(realdb):
         assert dash.json()["currency"] == "EUR"
     finally:
         await _set_reporting_currency(realdb, org_id, None)
+
+
+async def test_1099_report_leaves_out_a_payment_on_an_unknown_currency_invoice(realdb):
+    """A completed 700.00 payment on an invoice that records no currency
+    (decisions §473) is in no stated currency, so `payment_reporting_amount_sql`
+    cannot express it in USD: it is absent from the USD 1099 figure and counted
+    as unconverted, never added at face value beside the 2500.00 USD one."""
+    await _make_paid_vendor(realdb, "a", name="Contractor", amount="2500.00", year=2026)
+    await _make_paid_vendor(
+        realdb, "a", name="NoCurrency", amount="700.00", year=2026, currency=None
+    )
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.get("/api/tax/1099-report", params={"year": 2026})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["currency"] == "USD"
+    assert body["total_reportable"] == "2500.00"
+    assert body["unconverted_payment_count"] == 1
+    usd_row = next(r for r in body["rows"] if r["vendor_name"] == "Contractor")
+    unknown_row = next(r for r in body["rows"] if r["vendor_name"] == "NoCurrency")
+    assert usd_row["ytd_paid"] == "2500.00"
+    assert usd_row["unconverted_payment_count"] == 0
+    assert Decimal(unknown_row["ytd_paid"]) == 0
+    assert unknown_row["unconverted_payment_count"] == 1
 
 
 async def test_1099_report_excludes_other_year_payments(realdb):

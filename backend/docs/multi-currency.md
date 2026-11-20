@@ -191,8 +191,44 @@ Surfaced in:
   uses so the two can't disagree for the consolidated row — and
   `reporting_total_spend` / `reporting_total_spend_unconverted_count` beside the
   naive `total_spend`, the same population and rollup as `/cfo`'s
-  `reporting_spend`. `open_po_amount` has no counterpart: `PurchaseOrder` carries
-  no currency, so it is served, and rendered, with none.
+  `reporting_spend`. Open POs are not converted: `PurchaseOrder` has carried its
+  own `currency` since migration 0099, so each row serves them per PO currency
+  (`open_po_by_currency`, a PO whose code is unknown in a `null` group) with
+  `open_po_unverifiable_count` for a PO whose total cannot be verified; the
+  legacy `open_po_amount` is still the bare sum, served and rendered with no
+  code.
+
+### An invoice whose currency is unknown
+
+An invoice records "currency unknown" as NULL (decisions §473); a legacy blank,
+whitespace-only or malformed value written before migration 0136 reads the
+same. One predicate decides it — `payment_runs.payable_currency_code` in
+Python, `currency_conversion.invoice_currency_key_sql` in SQL, the same trim set
+and the same `^[A-Za-z]{3}$` pattern — so a rollup and the run builder always
+agree on which rows have a currency (`" eur"` is EUR; `""`, `"  "` and `"US"`
+are unknown). Such a row is never the reporting currency:
+
+- **Never locked.** `materialize_reporting_amount` writes no lock for it, and
+  clears a 1:1 lock written before §473 (when a blank read as the reporting
+  currency).
+- **Its own group, counted unconverted.** Every invoice rollup groups it under
+  a `None` key (the payment queue's `by_currency` sorts that group last) and
+  counts it in `unconverted_count`, whatever lock it carries. The spend
+  rollups still add its face value to the reporting total, the flagged
+  fallback every spend display makes, which is why the count is served
+  beside it; it never joins the reporting currency's own group.
+- **Not expressible in `payment_reporting_amount_sql`.** A payment against it is
+  in no stated currency, so the 1099, risk and cash-flow totals leave it out and
+  count it (`unconverted_payment_count`), never adding it at face value.
+- **Not payable, not creditable.** The run builder, the queue, `POST
+  /api/payments`, dispatch and the card mint refuse it as `currency_unknown`; a
+  linked credit memo or an apply onto it is the 409
+  `credit_memo_invoice_currency_unknown` and neither picker offers it; an
+  invoice-scoped discount offer onto it is the 409
+  `discount_offer_invoice_currency_unknown`, whether or not the caller names a
+  currency. An offer whose own code is missing or malformed is unconvertible
+  in the optimizer, whatever the reporting currency. Setting the invoice's own currency clears
+  all of them.
 
 ### Per-vendor rollups
 

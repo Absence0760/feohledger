@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.invoice import Invoice
 from app.models.vendor import Vendor
 from app.models.virtual_card import VirtualCard
+from app.utils.currency_code import iso_currency_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,14 @@ def build_card_idempotency_key(
     """
     anchor = str(correlation_id) if correlation_id else str(invoice_id)
     return str(uuid.uuid5(CARD_IDEMPOTENCY_NAMESPACE, f"virtual_card:{anchor}:{reissue_seq}"))
+
+
+def _money_label(currency: str | None, amount) -> str:
+    """``"EUR 1,234.00"``, or the bare figure when the invoice records no
+    usable currency — NULL, blank or a malformed legacy value (decisions §473):
+    never a borrowed USD, and never a code no reader could use."""
+    code = iso_currency_or_none(currency)
+    return f"{code} {amount:,.2f}" if code else f"{amount:,.2f}"
 
 
 async def _reissue_sequence(db: AsyncSession, invoice_id) -> int:
@@ -499,14 +508,15 @@ async def issue_card_for_invoice(
     if config is None:
         return CardIssueResult(card=None, success=False, failure_reason="cards_not_enabled")
     # A card is denominated in the invoice's currency; one that records none
-    # (blank: the invoice PATCH's legacy value) is refused before any provider
-    # call, never minted as USD. Both callers refuse it earlier with their own
-    # code — the run's card leg in `payment_runs.dispatch_preflight`, and
-    # `POST /api/cards/generate` as `card_skip_currency_unknown` — so this is
-    # the backstop for a caller that skips that gate.
-    from app.services.international_payments import normalize_currency_code
+    # (NULL, blank, whitespace-only or malformed — decisions §473) is refused
+    # before any provider call, never minted as USD or in a malformed code.
+    # Both callers refuse it earlier with their own code — the run's card leg
+    # in `payment_runs.dispatch_preflight`, and `POST /api/cards/generate` as
+    # `card_skip_currency_unknown` — so this is the backstop for a caller that
+    # skips that gate, and it judges with the same predicate they do.
+    from app.services.payment_runs import payable_currency_code
 
-    card_currency = normalize_currency_code(invoice.currency)
+    card_currency = payable_currency_code(invoice.currency)
     if card_currency is None:
         return CardIssueResult(card=None, success=False, failure_reason="currency_unknown")
 
@@ -764,7 +774,7 @@ async def notify_vendor_of_card(
         f"Hi {vendor.name},\n\n"
         f"{org_name} has issued a virtual card to pay invoice "
         f"{invoice.invoice_number or invoice.id} for "
-        f"{invoice.currency or 'USD'} {(card.amount_limit):,.2f}.\n\n"
+        f"{_money_label(invoice.currency, card.amount_limit)}.\n\n"
         f"View your one-time card details:\n  {link}\n\n"
         "This link will expire in 7 days and can only be used once. "
         "If you didn't expect this email, please reply to let us know.\n"
@@ -786,7 +796,7 @@ async def notify_vendor_of_card(
         + email_credentials(
             [
                 ("Invoice", str(invoice.invoice_number or invoice.id)),
-                ("Amount", f"{invoice.currency or 'USD'} {(card.amount_limit):,.2f}"),
+                ("Amount", _money_label(invoice.currency, card.amount_limit)),
             ]
         )
         + email_button(link, "View your one-time card details", get_brand_context(None))
@@ -838,7 +848,7 @@ async def notify_vendor_of_card(
 #: Not visible in the caller's entity scope, or does not exist. One code for
 #: both, so the answer cannot be used to probe another entity's invoices.
 CARD_SKIP_NOT_FOUND = "card_skip_not_found"
-#: Not at a payable status (`api/payments.PAYABLE_INVOICE_STATUSES`). `status`.
+#: Not at a payable status (`services/payment_gates.PAYABLE_INVOICE_STATUSES`). `status`.
 CARD_SKIP_NOT_PAYABLE = "card_skip_not_payable"
 #: The vendor changed between the unlocked read and the lock, so the invoice
 #: could not be checked against a stable vendor. Nothing minted; retry.
@@ -869,6 +879,9 @@ CARD_SKIP_COMPLIANCE_HOLD = "card_skip_compliance_hold"
 CARD_SKIP_ERP_BILL = "card_skip_erp_bill"
 #: The invoice records no currency, so there is nothing to denominate a card in.
 CARD_SKIP_CURRENCY_UNKNOWN = "card_skip_currency_unknown"
+#: The org's `settings.payments.home_currency` is set but is not a currency
+#: code, so the compliance thresholds it denominates cannot be read (§473).
+CARD_SKIP_HOME_CURRENCY_INVALID = "card_skip_home_currency_invalid"
 #: The provider did not issue a card, or the card could not be recorded.
 CARD_SKIP_ISSUE_FAILED = "card_skip_issue_failed"
 
@@ -899,6 +912,10 @@ CARD_SKIP_MESSAGES: dict[str, str] = {
     CARD_SKIP_ERP_BILL: "The ERP could not confirm this bill is still open and unpaid.",
     CARD_SKIP_CURRENCY_UNKNOWN: (
         "The invoice records no currency; set its currency before issuing a card."
+    ),
+    CARD_SKIP_HOME_CURRENCY_INVALID: (
+        "The organisation's home currency setting is not a three-letter currency code; "
+        "an administrator must correct it before cards can be issued."
     ),
     CARD_SKIP_ISSUE_FAILED: "The card provider did not issue a card.",
 }

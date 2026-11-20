@@ -53,8 +53,8 @@ def _require_own_workspace(user: User, org: Organization) -> None:
     """The caller's account must belong to the workspace being closed.
 
     `tenant.get_tenant` already refuses a token whose `org` claim names another
-    workspace, but it skips a token with no `org` claim at all; for a route that
-    drops a database, the account's own `organization_id` is checked here too.
+    workspace, or that carries none; for a route that drops a database, the
+    account's own `organization_id` is checked here too.
     A 403 coded like `get_tenant`'s, so the SPA ends that session the same way.
     """
     if user.organization_id != org.id:

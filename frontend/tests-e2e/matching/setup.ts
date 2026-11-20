@@ -156,7 +156,8 @@ export async function createMatchedInvoice(
 		po_number: opts.poNumber
 	};
 	if (opts.glAccount) createBody.gl_account = opts.glAccount;
-	if (opts.currency) createBody.currency = opts.currency;
+	// `POST /api/invoices` refuses an omitted currency (decisions §473).
+	createBody.currency = opts.currency ?? 'USD';
 	const created = await page.request.post(`${API_BASE}/api/invoices`, { headers, data: createBody });
 	if (!created.ok()) throw new Error(`create invoice failed: ${created.status()} ${await created.text()}`);
 	const invoiceId = ((await created.json()) as { id: string }).id;

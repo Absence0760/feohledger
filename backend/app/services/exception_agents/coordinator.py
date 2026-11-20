@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_decision import AgentDecision
 from app.models.exception import Exception as APException
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceStatus
 from app.services.exception_agents.autonomy import (
     autonomy_threshold,
     resolve_autonomy_level,
@@ -301,6 +301,10 @@ async def run_agent(
                         raise _FindingPersists(invoice.status)
                     if await _receipts_implicated(db, exception, invoice, org_settings):
                         raise _ReceiptsImplicated(invoice.status)
+                    if _approved_past_po_overbilling(invoice):
+                        raise _POOverbilled(invoice.status)
+                    if _approved_past_contract_cap(invoice):
+                        raise _ContractCap(invoice.status)
         except (NotApprovable, HTTPException) as exc:
             # Two families of refusal, one outcome — an escalation with a
             # recorded decision.
@@ -349,6 +353,25 @@ async def run_agent(
                 )
                 logger.info(
                     "Agent change left the PO-match finding in place on invoice %s; escalating",
+                    invoice.id,
+                )
+            elif isinstance(exc, _POOverbilled):
+                reason = (
+                    "This invoice and the others billing its purchase order exceed the "
+                    "order's total, so it needs a person's approval. Escalated to a human."
+                )
+                logger.info(
+                    "Agent approval would pass a PO's total on invoice %s; escalating",
+                    invoice.id,
+                )
+            elif isinstance(exc, _ContractCap):
+                reason = (
+                    "This invoice is linked to a not-to-exceed contract whose limit it "
+                    "passes, or cannot be measured against because the currencies "
+                    "differ, so it needs a person's approval. Escalated to a human."
+                )
+                logger.info(
+                    "Agent approval would pass a contract cap on invoice %s; escalating",
                     invoice.id,
                 )
             elif isinstance(exc, PayeeFixedByApproval):
@@ -473,6 +496,39 @@ class _ReceiptsImplicated(NotApprovable):
     (``invoice_warnings.receipts_clear_hold``, decisions §262); an agent run
     must not either, whoever triggered it — so the apply unwinds and the row
     escalates."""
+
+
+class _POOverbilled(NotApprovable):
+    """The apply approved an invoice whose refresh reports the cumulative PO
+    over-billing warning (decisions §469). That warning raises no hold, and
+    the unattended doors send it to a person
+    (``invoice_warnings.UNATTENDED_APPROVAL_PO_OVERBILLED``); an agent approval
+    is no person reading it either, so the apply unwinds and the row
+    escalates."""
+
+
+def _approved_past_po_overbilling(invoice) -> bool:
+    from app.services.invoice_warnings import has_po_overbilling_warning
+
+    status = getattr(invoice.status, "value", invoice.status)
+    return status == InvoiceStatus.approved.value and has_po_overbilling_warning(invoice)
+
+
+class _ContractCap(NotApprovable):
+    """The apply approved an invoice whose refresh reports an ``error``
+    contract finding: a not-to-exceed limit passed, or not measurable because
+    the invoice is in another currency or none (decisions §472).
+    The unattended doors send it to a person
+    (``invoice_warnings.UNATTENDED_APPROVAL_CONTRACT_CAP``); an agent approval
+    is no person reading it either, so the apply unwinds and the row
+    escalates."""
+
+
+def _approved_past_contract_cap(invoice) -> bool:
+    from app.services.invoice_warnings import has_contract_cap_warning
+
+    status = getattr(invoice.status, "value", invoice.status)
+    return status == InvoiceStatus.approved.value and has_contract_cap_warning(invoice)
 
 
 async def _receipts_implicated(db, exception, invoice, org_settings) -> bool:

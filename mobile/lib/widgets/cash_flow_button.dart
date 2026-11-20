@@ -1,5 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/cash_flow_screen.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 
@@ -13,12 +14,13 @@ class CashFlowButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!AuthStore.instance.canViewCashFlow) return const SizedBox.shrink();
+    final l = AppLocalizations.of(context);
     return Semantics(
-      label: 'Cash flow forecast',
+      label: l.cashFlowButtonLabel,
       button: true,
       excludeSemantics: true,
       child: IconButton(
-        tooltip: 'Cash flow forecast',
+        tooltip: l.cashFlowButtonLabel,
         icon: const Icon(Icons.show_chart),
         onPressed: () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const CashFlowScreen()),

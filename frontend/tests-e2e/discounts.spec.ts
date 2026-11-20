@@ -104,7 +104,7 @@ test.describe('/discounts (admin)', () => {
 		if (rowCount === 0) {
 			// No seeded offers (or router not wired) → friendly empty state.
 			await expect(page.locator('td.empty')).toBeVisible();
-			await expect(page.locator('td.empty')).toContainText(/No discount offers|Loading offers/);
+			await expect(page.locator('td.empty')).toContainText(/No discount offers|Loading…/);
 			return;
 		}
 
@@ -157,7 +157,8 @@ test.describe('/discounts (clerk — read-only)', () => {
 			data: {
 				vendor: vendor.name,
 				invoice_number: `DISC-RBAC-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
-				amount: 1000
+				amount: 1000,
+				currency: 'USD'
 			}
 		});
 		const invoiceId = ((await invResp.json()) as { id: string }).id;

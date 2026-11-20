@@ -47,6 +47,8 @@ const AUTH_RAW = import.meta.glob(
  * 4a): the busy ring, owned by one component so the exemption has one home.
  */
 const SPINNER = '/src/lib/components/ui/Spinner.svelte';
+/** Renders the ring unconditionally; its callers carry the `{#if}` (see {@link unconditionalSpinners}). */
+const LOADING_STATE = '/src/lib/components/ui/LoadingState.svelte';
 const SPINNER_RAW = (
 	import.meta.glob('/src/lib/components/ui/Spinner.svelte', {
 		query: '?raw',
@@ -148,10 +150,15 @@ function markupOf(source: string): string {
 	return out;
 }
 
-/** Each `<Spinner` a file renders outside any `{#if}` (by line). */
+/**
+ * Each `<Spinner` a file renders outside any `{#if}` (by line). `ui/LoadingState`
+ * renders the ring unconditionally because its whole self is the loading
+ * state, so it is held to the rule through its callers instead: a
+ * `<LoadingState` counts as a `<Spinner` here.
+ */
 function unconditionalSpinners(source: string): number[] {
 	const markup = markupOf(source);
-	return [...markup.matchAll(/<Spinner\b/g)]
+	return [...markup.matchAll(/<(?:Spinner|LoadingState)\b/g)]
 		.filter((u) => {
 			const before = markup.slice(0, u.index);
 			const opened = (before.match(/\{#if\b/g) ?? []).length;
@@ -278,7 +285,9 @@ describe('the busy spinner (rule 4a: the one loop, in one component)', () => {
 	});
 
 	it('every caller mounts it inside an {#if}, so it goes when the answer lands', () => {
-		const callers = Object.entries(ALL_RAW).filter(([, source]) => /<Spinner\b/.test(markupOf(source)));
+		const callers = Object.entries(ALL_RAW).filter(
+			([path, source]) => path !== LOADING_STATE && /<(?:Spinner|LoadingState)\b/.test(markupOf(source))
+		);
 		// The four it was extracted from; a glob that matched nothing would
 		// pass by checking nothing.
 		expect(callers.map(([path]) => path)).toEqual(
@@ -286,7 +295,8 @@ describe('the busy spinner (rule 4a: the one loop, in one component)', () => {
 				'/src/lib/components/auth/AuthCallback.svelte',
 				'/src/routes/login/+page.svelte',
 				'/src/routes/signup/+page.svelte',
-				'/src/routes/verify/+page.svelte'
+				'/src/routes/verify/+page.svelte',
+				'/src/routes/audit/+page.svelte'
 			])
 		);
 		const unconditional = callers
@@ -303,5 +313,7 @@ describe('the busy spinner (rule 4a: the one loop, in one component)', () => {
 		]);
 		expect(unconditionalSpinners(`{#if busy}<Spinner />{/if}`)).toEqual([]);
 		expect(unconditionalSpinners(`{#if busy}x{/if}\n<Spinner />`)).toEqual([2]);
+		expect(unconditionalSpinners(`{#if busy}<LoadingState />{/if}`)).toEqual([]);
+		expect(unconditionalSpinners(`<LoadingState />`)).toEqual([1]);
 	});
 });

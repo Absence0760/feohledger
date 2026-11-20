@@ -148,7 +148,9 @@
 		margin-top: 8px;
 	}
 
-	.actions button[aria-disabled='true'] {
+	/* :global so a button the caller passes in `actions` (rendered in the
+	   caller's scope) gets the busy cursor too, not only Retry. */
+	.actions :global(button[aria-disabled='true']) {
 		cursor: progress;
 	}
 </style>

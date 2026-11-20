@@ -757,7 +757,7 @@ test.describe('the legal set from inside the app', () => {
 		await page.goto('/');
 		await expect(page.locator('aside.sidebar').first()).toBeVisible();
 
-		await page.getByRole('button', { name: 'Profile and account menu' }).click();
+		await page.getByRole('button', { name: 'Profile and account' }).click();
 		await page.getByRole('link', { name: 'Legal & privacy' }).click();
 
 		await expect(page.getByRole('heading', { level: 1, name: 'Legal' })).toBeVisible();

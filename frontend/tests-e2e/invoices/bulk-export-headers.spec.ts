@@ -62,6 +62,13 @@ async function selectFirstSelectableRow(page: import('@playwright/test').Page) {
 	await expect(page.locator('.bulk-bar')).toBeVisible();
 }
 
+/** The formats sit behind the bulk bar's Export menu button (ui/MenuButton). */
+async function exportCsv(page: import('@playwright/test').Page) {
+	const bar = page.locator('.bulk-bar');
+	await bar.getByRole('button', { name: 'Export' }).click();
+	await bar.getByRole('menuitem', { name: 'CSV' }).click();
+}
+
 test.describe('/invoices bulk export request headers', () => {
 	test('carries Authorization + X-Tenant-Slug through the shared client', async ({ page }) => {
 		await page.goto('/invoices');
@@ -69,7 +76,7 @@ test.describe('/invoices bulk export request headers', () => {
 
 		const capture = await captureExportRequest(page);
 		await selectFirstSelectableRow(page);
-		await page.locator('.bulk-bar').getByRole('button', { name: 'CSV' }).click();
+		await exportCsv(page);
 
 		const headers = await capture.headers;
 		expect(headers['authorization']).toMatch(/^Bearer .+/);
@@ -99,7 +106,7 @@ test.describe('/invoices bulk export request headers', () => {
 
 		const capture = await captureExportRequest(page);
 		await selectFirstSelectableRow(page);
-		await page.locator('.bulk-bar').getByRole('button', { name: 'CSV' }).click();
+		await exportCsv(page);
 
 		const headers = await capture.headers;
 		// The header the hand-rolled fetch omitted. Without it the export is
@@ -122,7 +129,7 @@ test.describe('/invoices bulk export request headers', () => {
 		);
 
 		await selectFirstSelectableRow(page);
-		await page.locator('.bulk-bar').getByRole('button', { name: 'CSV' }).click();
+		await exportCsv(page);
 
 		// The shared client's 401 handling: token cleared, redirected to login.
 		await page.waitForURL(/\/login/, { timeout: 15_000 });

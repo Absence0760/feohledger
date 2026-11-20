@@ -115,23 +115,4 @@
 		color: var(--text-muted);
 		font-size: 0.85rem;
 	}
-	.btn-secondary {
-		padding: 6px 14px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.btn-secondary:hover:not(:disabled) {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-	.btn-secondary:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
 </style>

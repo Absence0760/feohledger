@@ -540,8 +540,3 @@ def discrepancy_finding(verification: SettlementVerification) -> dict:
     if variance > 0:
         return exception_finding("settlement_amount_over", variance=str(variance), **figures)
     return exception_finding("settlement_amount_under", variance=str(variance), **figures)
-
-
-def describe_discrepancy(verification: SettlementVerification) -> str:
-    """The English of :func:`discrepancy_finding` — a one-line, PII-free summary."""
-    return discrepancy_finding(verification)["message"]

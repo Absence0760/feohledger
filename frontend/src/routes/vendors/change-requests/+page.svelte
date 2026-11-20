@@ -22,6 +22,7 @@
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { api, ApiError } from '#lib/api.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '#lib/types/admin.ts';
@@ -47,6 +48,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 
 	const PAGE_SIZE = 20;
@@ -103,6 +105,14 @@
 	// silently arm the other).
 	let approveArmedId = $state<string | null>(null);
 	let rejectArmedId = $state<string | null>(null);
+
+	/** Arm one commit and retract the other: two armed red buttons at once is
+	 *  how a mis-click becomes the wrong irreversible decision (the same rule
+	 *  `RunDetailModal` keeps for Execute / Cancel run). */
+	function arm(kind: 'approve' | 'reject', id: string) {
+		approveArmedId = kind === 'approve' ? id : null;
+		rejectArmedId = kind === 'reject' ? id : null;
+	}
 	let busyId = $state<string | null>(null);
 
 	// Detail modal — the selected request plus its REVEALED proposed value, which
@@ -466,11 +476,10 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
-		empty={loading
-			? m('common.loading')
-			: statusFilter === 'pending'
-					? m('vendors.changeRequests.empty.pending')
-					: m('vendors.changeRequests.empty.filtered')}
+		{loading}
+		filtered={statusFilter !== 'pending'}
+		emptyFiltered={m('vendors.changeRequests.empty.filtered')}
+		empty={m('vendors.changeRequests.empty.pending')}
 	>
 		{#snippet body()}
 			{#each items as r (r.id)}
@@ -516,7 +525,7 @@
 								onclick={(e) => {
 									e.stopPropagation();
 									if (approveArmedId === r.id) decide(r, 'approve');
-									else approveArmedId = r.id;
+									else arm('approve', r.id);
 								}}
 							>
 								{approveArmedId === r.id
@@ -530,7 +539,7 @@
 								onclick={(e) => {
 									e.stopPropagation();
 									if (rejectArmedId === r.id) decide(r, 'reject');
-									else rejectArmedId = r.id;
+									else arm('reject', r.id);
 								}}
 							>
 								{rejectArmedId === r.id
@@ -544,23 +553,15 @@
 		{/snippet}
 	</DataTable>
 
-	{#if hasMore}
-		<div class="load-more-row">
-			<button
-				class="btn-load-more"
-				onclick={() => load({ append: true })}
-				disabled={loadingMore}
-			>
-				{loadingMore
-					? m('common.loading')
-					: m('vendors.changeRequests.loadMore', { shown: items.length, total })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('vendors.changeRequests.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={items.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		onloadmore={() => load({ append: true })}
+		moreKey="vendors.changeRequests.loadMore"
+		allKey="vendors.changeRequests.showingAll"
+	/>
 	{/if}
 </PageHeader>
 
@@ -606,7 +607,7 @@
 
 		<h3>{m('vendors.changeRequests.modal.proposed')}</h3>
 		{#if revealLoading}
-			<p class="muted">{m('common.loading')}</p>
+			<LoadingState />
 		{:else if revealError || !revealed}
 			<p class="muted">{m('vendors.changeRequests.modal.revealFailed')}</p>
 		{:else}
@@ -662,16 +663,18 @@
 				     modal makes for its block/re-screen pair. The armed two-click
 				     and its outside-click un-arm are unchanged: both share the
 				     row's `*ArmedId` slots, so arming here and arming the row
-				     behind it can never disagree. -->
+				     behind it can never disagree. The shared `.btn-danger` /
+				     `.btn-primary` paint them (`.armed` included); `.btn-decide`
+				     is only the hook the outside-click un-arm reads. -->
 				<button
 					type="button"
-					class="btn-decide reject"
+					class="btn-danger btn-decide reject"
 					class:armed={rejectArmedId === current.id}
 					disabled={busyId === current.id}
 					onclick={(e) => {
 						e.stopPropagation();
 						if (rejectArmedId === current.id) decide(current, 'reject');
-						else rejectArmedId = current.id;
+						else arm('reject', current.id);
 					}}
 				>
 					{rejectArmedId === current.id
@@ -680,13 +683,13 @@
 				</button>
 				<button
 					type="button"
-					class="btn-decide approve"
+					class="btn-primary btn-decide approve"
 					class:armed={approveArmedId === current.id}
 					disabled={busyId === current.id || !isAllowed(current.approve_refusal)}
 					onclick={(e) => {
 						e.stopPropagation();
 						if (approveArmedId === current.id) decide(current, 'approve');
-						else approveArmedId = current.id;
+						else arm('approve', current.id);
 					}}
 				>
 					{approveArmedId === current.id

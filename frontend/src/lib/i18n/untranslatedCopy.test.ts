@@ -47,6 +47,9 @@ const TRANSLATED = [
 	'/src/lib/components/ConsentBanner.svelte',
 	'/src/lib/components/auth/NewPasswordFields.svelte',
 	'/src/lib/components/auth/PasswordInput.svelte',
+	// Mounted on BOTH the AP invoice modal and the supplier portal, so its keys
+	// live in the main catalogue, not the portal slice (round 25).
+	'/src/lib/components/chat/SupplierChatThread.svelte',
 	'/src/lib/components/marketing/AdapterRail.svelte',
 	'/src/lib/components/marketing/HeroPipeline.svelte',
 	'/src/lib/components/marketing/Landing.svelte',
@@ -114,6 +117,7 @@ const TRANSLATED = [
  * RAG·n priors chip as literals, so it is not on `TRANSLATED`).
  */
 const TOASTS_TRANSLATED = [
+	'/src/lib/components/chat/SupplierChatThread.svelte',
 	'/src/lib/components/modals/CreateVendorModal.svelte',
 	'/src/lib/components/modals/InviteVendorPortalUserModal.svelte',
 	// Was "Merged 2 duplicates (5 records re-homed)", spelled with two

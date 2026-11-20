@@ -24,8 +24,11 @@ FX call, no extra validation.
 
 ## The org's home currency has ONE normaliser
 
-`settings.payments.home_currency` is free text in the tenant's own settings
-JSON — nothing validates it on write — and it denominates three separate
+`settings.payments.home_currency` lives in the tenant's own settings JSON.
+`PATCH /api/organization` validates it on write (three ASCII letters,
+uppercased; blank or null stores `null`, meaning unset; anything else is the
+422 `organization_home_currency_invalid`), but a row written before that check,
+or by hand, can still hold anything. It denominates three separate
 decisions: what `Payment.source_amount` is expressed in, every money threshold
 in `settings.compliance`, and (via the comparison against the invoice's
 currency) **whether a payment takes the FX leg at all**.
@@ -44,10 +47,21 @@ outright — while the compliance gate, reading the same setting through its own
 stripping helper, saw an ordinary domestic payment.
 
 `international_payments.resolve_home_currency(org_settings)` is now the one
-owner, built on `normalize_currency_code` (trim + upper, `None` for anything
-blank). It never returns a blank code — a blank compares equal to nothing,
-which is how the wrong corridor got picked — degrading to
-`DEFAULT_HOME_CURRENCY` (`USD`) instead. `compliance._home_currency` delegates
+owner, built on `normalize_currency_code`, which delegates to the one ISO 4217
+rule (`utils/currency_code.iso_currency_or_none`, decisions §381): `None` for
+anything blank or not exactly three ASCII letters, so `"ÄÖÜ"` or `"US DOLLARS"`
+is unknown — a payment or card leg refuses it (`currency_unknown`) and the KYC
+gate requires KYC. It never returns a blank code — a blank compares equal to
+nothing, which is how the wrong corridor got picked. **Only an UNSET setting**
+(absent, `null`, blank) degrades to `DEFAULT_HOME_CURRENCY` (`USD`). A setting
+that is set but malformed raises `HomeCurrencyInvalidError` (decisions §473,
+amended): read as USD, `"EURO"` paid a USD→EUR leg at a real FX lock, and a GBP
+org that typed `"GBR"` paid a USD invoice as domestic and skipped the
+international KYC. `_execute_single_payment` resolves it once, before the card
+leg and the processor leg, and fails the payment with
+`international_payment_error: home_currency_invalid: …` (retry-safe: nothing
+reached a processor); `prepare_international_payment` refuses one too; the card
+mint skips the invoice as `card_skip_home_currency_invalid`. `compliance._home_currency` delegates
 to it, `prepare_international_payment` normalises both sides of its comparison
 through `normalize_currency_code`, and `api/payments` calls it directly.
 `currency_conversion.resolve_reporting_currency` reads the same field as the
@@ -61,8 +75,12 @@ job is to never answer "unset": it substitutes `DEFAULT_HOME_CURRENCY`. As rung
 unreachable — an org whose only currency signal is `invoice_defaults.currency`
 would silently start rolling up in USD. `configured_home_currency(org_settings)`
 is the primitive underneath both: the setting normalised, or `None` when the
-tenant has not usably set one. `resolve_home_currency` is now literally
-`configured_home_currency(...) or DEFAULT_HOME_CURRENCY`.
+tenant has not usably set one, and `home_currency_is_malformed` tells "set but
+not a code" apart from unset. The reporting chain follows the same rule on
+every rung: an unset rung falls through, a malformed one answers `""` (a
+currency nothing is denominated in, so every amount reads as unconverted)
+rather than passing a garbled code on or falling through to a currency the org
+did not choose.
 
 **Tests:** `tests/test_payment_home_currency.py` — the normaliser's table, the
 `configured_home_currency` unset-vs-USD distinction, the padded-value regression
@@ -70,7 +88,10 @@ at `prepare_international_payment` and end-to-end through
 `_execute_single_payment`, an agreement test across all three readers, a
 fall-through test pinning that an unset home currency still reaches rungs 3 and
 4, and a source-scan guard listing the declared readers of the raw setting (now
-one).
+one). `tests/test_home_currency_fail_closed.py` — a malformed setting refused
+by the resolver, by `prepare_international_payment` and end-to-end through
+`_execute_single_payment`; a malformed reporting rung answering `""`; the CFO
+gate carrying no currency; and the settings PATCH's 422.
 
 ## Corridor selection
 

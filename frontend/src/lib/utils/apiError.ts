@@ -132,3 +132,43 @@ export function errorMessage(err: unknown, fallback: string): string {
 	}
 	return fallback;
 }
+
+/** The structural slice of `api.ts::ApiError` the display helpers read — kept
+ *  structural so this module never imports `#lib/api.ts` (which reaches
+ *  `$app/env/public`). Every `ApiError` carries a numeric HTTP `status`; a
+ *  `TypeError`, a `DOMException` or a hand-thrown `Error` does not. */
+export function isApiErrorLike(err: unknown): err is Error & { status: number; detail?: unknown } {
+	return err instanceof Error && typeof (err as { status?: unknown }).status === 'number';
+}
+
+/**
+ * The text to show for a caught error on a page whose reader may never see a
+ * raw message — the signed-out auth pages: the server's sentence when it sent
+ * one meant for the user, else the caller's localized `fallback`.
+ *
+ * Stricter than {@link errorMessage}, which passes ANY `Error`'s message
+ * through. That leaks, verbatim and in English:
+ * - a network failure's `TypeError` (`"Failed to fetch"`, `"NetworkError when
+ *   attempting to fetch resource."`, `"Load failed"`);
+ * - a WebAuthn `DOMException` (`"The operation either timed out or was not
+ *   allowed…"`) and `webauthn.ts`'s own English throws;
+ * - an `ApiError` whose body carried no `detail` (a proxy's 502 page), whose
+ *   message is `api.ts`'s internal `"API error 502"` / `"Unauthorized"`;
+ * - an uncoded 5xx `detail`, which is never written for the user
+ *   (`"Internal Server Error"`).
+ *
+ * An `ApiError` with a non-blank `detail` keeps its message below 500, and at
+ * any status when the refusal is CODED: a `{code, message, params}` detail is
+ * written for the user on purpose (signup's 502 `signup_email_send_failed`),
+ * and its message is already localized from the code
+ * (`api.ts::apiErrorFromBody`). `authRoutesErrorText.test.ts` fails if a
+ * signed-out auth page reads `.message` off a caught error itself.
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+	if (!isApiErrorLike(err)) return fallback;
+	const coded = typeof (err as { code?: unknown }).code === 'string';
+	if (err.status >= 500 && !coded) return fallback;
+	if (!formatApiDetail(err.detail, '')) return fallback;
+	const text = err.message.trim();
+	return text || fallback;
+}

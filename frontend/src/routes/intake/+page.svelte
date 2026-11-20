@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { IntakeRequest } from '#lib/types/intake.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import {
 		INTAKE_STATUSES,
 		intakeStatusLabelKey,
@@ -409,7 +410,8 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
-		empty={loading ? m('common.loading') : m('intake.empty')}
+		{loading}
+		empty={m('intake.empty')}
 	>
 		{#snippet body()}
 			{#each items as i (i.id)}
@@ -495,23 +497,16 @@
 	</DataTable>
 	{/if}
 
-	{#if hasMore && !errored}
-		<div class="load-more-row">
-			<button
-				class="btn-load-more"
-				onclick={() => load({ append: true })}
-				disabled={loadingMore}
-			>
-				{loadingMore
-					? m('common.loading')
-					: m('intake.loadMore', { shown: items.length, total })}
-			</button>
-		</div>
-	{:else if total > 0 && !errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('intake.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={items.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		{errored}
+		onloadmore={() => load({ append: true })}
+		moreKey="intake.loadMore"
+		allKey="intake.showingAll"
+	/>
 </PageHeader>
 
 {#if showCreate}

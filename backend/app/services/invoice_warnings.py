@@ -7,10 +7,10 @@ import logging
 import re
 import uuid
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import NamedTuple
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,7 @@ from app.models.invoice_status import (
     APPROVED_OR_BEYOND_STATUSES,
     IN_REVIEW_STATUSES,
     PRE_APPROVAL_STATUSES,
+    SETTLED_STATUSES,
 )
 from app.models.procurement import PurchaseOrder, po_currency_code
 from app.services.invoice_warning_catalog import (
@@ -30,6 +31,7 @@ from app.services.invoice_warning_catalog import (
 from app.services.matching_rules import resolve_match_rule, strictest_rule_for_any_commodity
 from app.services.po_matching import (
     CURRENCY_DIFFERENT,
+    CURRENCY_SAME,
     CURRENCY_UNKNOWN,
     format_quantity,
     match_invoice_to_po,
@@ -439,7 +441,12 @@ async def refresh_warnings(
             # currencies into one mean/stdev would both misfire (a normal
             # foreign-currency invoice reads as a huge outlier) and mask
             # real anomalies (a mixed-currency history inflates stdev).
-            if cfg["stat_anomaly_enabled"] and invoice.amount:
+            # An invoice that records no currency has no comparable history:
+            # reading it as USD would score it against USD invoices (§473).
+            from app.services.payment_runs import payable_currency_code
+
+            anomaly_currency = payable_currency_code(invoice.currency)
+            if cfg["stat_anomaly_enabled"] and invoice.amount and anomaly_currency is not None:
                 hist_q = await db.execute(
                     select(Invoice.amount)
                     .where(
@@ -447,7 +454,7 @@ async def refresh_warnings(
                         Invoice.id != invoice.id,
                         Invoice.status.in_(APPROVED_OR_BEYOND_STATUSES),
                         Invoice.amount.isnot(None),
-                        Invoice.currency == (invoice.currency or "USD"),
+                        func.upper(Invoice.currency) == anomaly_currency,
                     )
                     .order_by(Invoice.created_at.desc())
                     .limit(20)
@@ -575,7 +582,9 @@ async def refresh_po_match_only(
     no match, as in the full refresh.
     """
     warnings: list[dict] = [
-        w for w in (invoice.warnings or []) if w.get("type") not in PO_MATCH_EXCEPTION_TYPES
+        w
+        for w in (invoice.warnings or [])
+        if w.get("type") not in PO_MATCH_EXCEPTION_TYPES and w.get("type") != PO_OVERBILLED_TYPE
     ]
     await _void_stale_finding_stamps(db, invoice)
     if invoice.po_number and _status_str(invoice.status) != "new":
@@ -1061,7 +1070,7 @@ async def invoices_citing_pos(
 
 
 #: The exception types `_refresh_po_match` owns. Both block payment
-#: (`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`), so an open row whose
+#: (`services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`), so an open row whose
 #: finding a refresh no longer reports is closed again by
 #: `_close_cleared_po_exceptions` — otherwise a partial receipt that later
 #: completes, or a failed inspection that is re-run and passes, would hold the
@@ -1080,7 +1089,7 @@ _PRE_APPROVAL_STATUSES = PRE_APPROVAL_STATUSES
 #: Invoices the ERP PO sync's re-match (and any ``skip_settled`` one) leaves
 #: alone: the money has gone, so a hold would stop nothing
 #: (``invoices_citing_pos``).
-_ERP_SYNC_SKIPPED_STATUSES = (InvoiceStatus.paid.value, InvoiceStatus.done.value)
+_ERP_SYNC_SKIPPED_STATUSES = tuple(s.value for s in SETTLED_STATUSES)
 
 #: ``Exception.erp_report["kind"]`` of an open PO-match row that an ERP PO
 #: sync's re-match no longer finds (decisions §323, amended). The sync never
@@ -1267,6 +1276,40 @@ async def _refresh_po_match(
         )
         warnings.append(partial_receipt_flag)
 
+    # Cumulative billing: this invoice plus the others already citing the PO
+    # take it past its total (decisions §469), or past the received slice of
+    # it (§470). Independent of the amount and receipt legs, which
+    # compare this invoice alone with the PO.
+    beyond_receipt_flag = await _refresh_po_overbilling(
+        db, invoice, warnings, match, rule.tolerance_pct
+    )
+    # Past approval the cumulative receipt finding is a HOLD (decisions §470,
+    # amended). Before approval a person reads the warning and no unattended
+    # door approves past it; once approved nobody reads it again, and a
+    # receipt cancelled after the bills were signed off (§262 allows it)
+    # reaches them only through this refresh. So it raises the same
+    # payment-blocking `po_mismatch` the per-invoice receipt leg raises: the
+    # run builder and every dispatch refuse it, clearing it is the SoD-gated
+    # sign-off (§169–§170, §420), and the next refresh that no longer finds
+    # it closes it through `_close_cleared_po_exceptions`, which keeps it
+    # open while an implicated or approving recorder's receipt is what
+    # covered the bills (`receipts_clear_hold`, §262, §389).
+    #
+    # Only a finding the approval did not already see: one that reads the
+    # same as, or better than, the warning the invoice carried into this
+    # refresh was in front of whoever approved it, and holding it would make
+    # their sign-off need a second one. Once raised, the hold stays raised
+    # while the finding stands.
+    if (
+        beyond_receipt_flag is not None
+        and _status_str(invoice.status) not in _PRE_APPROVAL_STATUSES
+        and (
+            _beyond_receipt_worsened(invoice.warnings, beyond_receipt_flag)
+            or await _open_po_mismatch_hold(db, invoice)
+        )
+    ):
+        await _raise("po_mismatch", "warning", beyond_receipt_flag)
+
     # 3-way: the invoice bills beyond what has been received. Independent of
     # the amount leg above, because an invoice can be under the PO total and
     # still over what arrived (half the PO billed, a third delivered). A short
@@ -1371,6 +1414,238 @@ async def _refresh_po_match(
         rule=rule,
         erp_po_sync=erp_po_sync,
     )
+
+
+#: The warning type of the cumulative over-billing findings (past the PO's
+#: total, or past what has been received of it). Its own type,
+#: not ``po_mismatch``: the invoice modal shows ``po_mismatch`` warnings through
+#: the PO-match panel's own ``issues``, which this cross-invoice finding is not
+#: one of, and it raises no hold (decisions §469).
+PO_OVERBILLED_TYPE = "po_overbilled"
+
+
+async def _refresh_po_overbilling(
+    db: AsyncSession, invoice: Invoice, warnings: list[dict], match, tolerance_pct
+) -> dict | None:
+    """Warn when this invoice and the others citing its PO bill past its total,
+    or past what has been received of it.
+
+    PO matching compares ONE invoice with the whole PO, so two invoices that
+    each fit (a supplier's PO flip, then the same supplier's own invoice for
+    that order, or AP keying a copy) pass both legs, and a flipped invoice has
+    no number for duplicate detection to match (decisions §468). This sums the
+    other live invoices citing the same PO.
+
+    - **Which PO.** Only a single-PO match whose total is trustworthy and in the
+      invoice's own currency (``CURRENCY_SAME``). A split's legs share one amount
+      that cannot be attributed to any one of them, and a cancelled, unissued,
+      unvouched or other-currency PO already raises its own finding.
+    - **Which others.** Every other invoice billing this PO, in every status
+      but ``rejected`` (which bills nothing while it stays rejected), in the
+      PO's currency: one whose last match resolved to this PO
+      (``po_match->>'po_id'``); one a multi-PO split linked to it
+      (``split_po_ids``), counted at its whole amount because a split's amount
+      cannot be attributed to one leg, and overcounting is the safe direction;
+      and one not yet matched to any PO (a ``new`` invoice, or one reopened to
+      it) that cites the PO's number within the PO's entity (either side
+      unstamped spans entities) and names the PO's vendor or no vendor. Another
+      vendor's invoice citing the same number is another vendor's PO.
+    - **The limit.** The match rule's own tolerance over the PO total, as the
+      amount leg uses (``po_billed_beyond_total``). Within that, on a short
+      receipt, the same tolerance over the received slice of the PO
+      (``MatchResult.received_value``, the figure the per-invoice receipt leg
+      measures against) raises ``po_billed_beyond_receipt``: two invoices of
+      400.00 against 400.00 received each fit on their own (decisions
+      §470). Skipped when this invoice alone bills beyond receipt,
+      which the matcher already holds. One finding at most: past the total,
+      no receipt could cure it, so only that sentence is written.
+
+    Before approval, a warning and not a hold: credit memos, corrective
+    re-bills and a sibling rejected after this refresh all move the sum
+    without re-running it here, so a payment-blocking row would go stale in
+    both directions. The reviewer reads it at approval, beside the duplicate
+    and amount findings, and no unattended approval is given while it stands
+    (:func:`po_match_hold_refusal`, ``UNATTENDED_APPROVAL_PO_OVERBILLED``).
+
+    Returns the ``po_billed_beyond_receipt`` finding when it raised one, so
+    the caller can hold an invoice already PAST approval on it: a receipt
+    cancelled after both bills were signed off reaches them only through
+    this refresh, and no reviewer will read the warning again (decisions
+    §470, amended).
+    """
+    if (
+        _status_str(invoice.status) == InvoiceStatus.rejected.value
+        or invoice.amount is None
+        or not match.po_id
+        or match.po_ids
+        or match.po_total is None
+        or match.currency_check != CURRENCY_SAME
+        or match.po_cancelled
+        or match.po_not_issued
+        or match.po_total_unverifiable_reason
+    ):
+        return None
+    po = (
+        await db.execute(
+            select(
+                PurchaseOrder.id,
+                PurchaseOrder.po_number,
+                PurchaseOrder.entity_id,
+                PurchaseOrder.vendor_id,
+            ).where(PurchaseOrder.id == uuid.UUID(str(match.po_id)))
+        )
+    ).one_or_none()
+    if po is None or not po.po_number:
+        return None
+    code = po_currency_code(invoice.currency)
+    if code is None:
+        return None
+    po_id = str(po.id)
+    matched_po_id = Invoice.po_match["po_id"].astext
+    cites = or_(
+        matched_po_id == po_id,
+        Invoice.split_po_ids.has_any(array([po_id])),
+    )
+    # Not yet matched to any PO: the number it cites, from the PO's vendor or
+    # from no vendor yet. Entity is checked below, as the matcher does.
+    vendor_ok = Invoice.vendor_id.is_(None)
+    if po.vendor_id is not None:
+        vendor_ok = or_(vendor_ok, Invoice.vendor_id == po.vendor_id)
+    cites = or_(
+        cites,
+        and_(
+            Invoice.po_number == po.po_number,
+            # NULL for a NULL column and a JSON null alike.
+            matched_po_id.is_(None),
+            vendor_ok,
+        ),
+    )
+    rows = (
+        await db.execute(
+            select(
+                Invoice.amount,
+                Invoice.entity_id,
+                Invoice.currency,
+                matched_po_id,
+                Invoice.split_po_ids,
+            ).where(
+                Invoice.organization_id == invoice.organization_id,
+                Invoice.id != invoice.id,
+                Invoice.status != InvoiceStatus.rejected,
+                Invoice.amount.isnot(None),
+                cites,
+            )
+        )
+    ).all()
+    billed = Decimal("0")
+    for amount, entity_id, currency, row_po_id, split in rows:
+        # A row matched to this PO, or a split leg of it, is this PO's by id;
+        # a number-only citation must also sit in the PO's entity.
+        same_entity = (
+            row_po_id == po_id
+            or (isinstance(split, list) and po_id in split)
+            or entity_id is None
+            or po.entity_id is None
+            or entity_id == po.entity_id
+        )
+        if same_entity and po_currency_code(currency) == code:
+            billed += Decimal(str(amount))
+    if billed <= 0:
+        return None
+    po_total = Decimal(str(match.po_total))
+    tolerance = Decimal(str(tolerance_pct))
+    total_billed = billed + Decimal(str(invoice.amount))
+    limit = po_total + po_total * tolerance / Decimal("100")
+    if total_billed > limit:
+        warnings.append(
+            warning(
+                "po_billed_beyond_total",
+                "warning",
+                billedAmount=billed,
+                poNumber=po.po_number,
+                poTotal=po_total,
+                currency=code,
+            )
+        )
+        # Past the whole PO: no receipt can cure that, so the receipt
+        # sentence below would only repeat it with a smaller figure.
+        return None
+    # The receipt leg (decisions §470): the same siblings measured
+    # against the received slice of the PO instead of its total. Only on a
+    # SHORT receipt (`received_value` is set only then; a full one is the PO
+    # total, which the check above already measured), and only when this
+    # invoice alone fits what arrived: if it does not, the matcher's own
+    # `billed_beyond_receipt` has already raised the payment-blocking hold.
+    if match.received_value is None or match.billed_beyond_receipt:
+        return None
+    received_value = Decimal(str(match.received_value))
+    receipt_limit = received_value + received_value * tolerance / Decimal("100")
+    if total_billed <= receipt_limit:
+        return None
+    flag = warning(
+        "po_billed_beyond_receipt",
+        "warning",
+        # Every live bill on the PO, this one included.
+        totalBilled=total_billed,
+        poNumber=po.po_number,
+        # Display only: the comparison above used the exact share,
+        # which `po_total × received / ordered` can make non-terminating.
+        receivedValue=received_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+        currency=code,
+    )
+    warnings.append(flag)
+    return flag
+
+
+def _beyond_receipt_worsened(previous: list | None, flag: dict) -> bool:
+    """Whether the cumulative receipt finding ``flag`` is worse than any the
+    invoice carried into this refresh (``previous``, its warnings before the
+    rebuild): none before, a smaller received value, a larger billed total,
+    another PO or currency, or a figure that cannot be read (a row written
+    before ``totalBilled`` existed). Unreadable counts as worse: holding is
+    the safe error."""
+    params = flag.get("params") or {}
+    for w in previous or []:
+        if not isinstance(w, dict) or w.get("code") != "po_billed_beyond_receipt":
+            continue
+        before = w.get("params") or {}
+        if before.get("poNumber") != params.get("poNumber") or before.get("currency") != params.get(
+            "currency"
+        ):
+            continue
+        try:
+            received_before = Decimal(str(before["receivedValue"]))
+            billed_before = Decimal(str(before["totalBilled"]))
+            received_now = Decimal(str(params["receivedValue"]))
+            billed_now = Decimal(str(params["totalBilled"]))
+        except (KeyError, ArithmeticError, ValueError):
+            continue
+        if received_now >= received_before and billed_now <= billed_before:
+            return False
+    return True
+
+
+async def _open_po_mismatch_hold(db: AsyncSession, invoice: Invoice) -> bool:
+    """Whether an open or escalated ``po_mismatch`` is live on ``invoice``,
+    which the standing cumulative receipt finding then keeps found, so the
+    refresh after the one that raised it does not close it again. Any such
+    row, not only one whose sentence is this finding: ``_ensure_exception``
+    folds a finding into the row already open, so a hold raised while
+    another ``po_mismatch`` stood carries the other's sentence."""
+    if invoice.id is None:
+        return False
+    row = (
+        await db.execute(
+            select(APException.id)
+            .where(
+                APException.invoice_id == invoice.id,
+                APException.exception_type == "po_mismatch",
+                APException.status.in_(["open", "escalated"]),
+            )
+            .limit(1)
+        )
+    ).first()
+    return row is not None
 
 
 def blocking_finding_types(match) -> set[str]:
@@ -2384,10 +2659,63 @@ async def _cleared_holds_still_fingerprinted(
 
 
 #: Why an unattended approval (``/complete``'s amount floor, extraction's
-#: auto-approve) stood aside for a PO-match hold (decisions §425). Recorded on
+#: auto-approve) stood aside for a PO-match hold (decisions §425) or the PO
+#: over-billing warning (§469). Recorded on
 #: the audit row's ``auto_approve_suppressed``.
 UNATTENDED_APPROVAL_PO_HOLD_OPEN = "po_match_hold"
 UNATTENDED_APPROVAL_PO_HOLD_WOULD_REOPEN = "po_match_hold_cleared_by_approver"
+#: The invoice carries the cumulative over-billing warning (decisions §469):
+#: no hold, but no unattended door may approve past it.
+UNATTENDED_APPROVAL_PO_OVERBILLED = "po_overbilled"
+#: A live hand-entered receipt on the matched PO was recorded by someone
+#: implicated in the invoice, or by nobody known (decisions §262, §470
+#: amended): the receipt evidence every receipt finding is measured against
+#: may be the typist's own, so no unattended door approves on it.
+UNATTENDED_APPROVAL_PO_RECEIPT_IMPLICATED = "po_receipt_implicated"
+#: The invoice carries an ``error`` contract finding: a not-to-exceed contract's
+#: limit is passed, or cannot be measured because the invoice is in another
+#: currency or none (decisions §472). Like §469's warning it raises
+#: no hold, so no unattended door approves past it.
+UNATTENDED_APPROVAL_CONTRACT_CAP = "contract_cap"
+
+
+def _matched_po_ids(po_match: dict | None) -> list[str]:
+    """The PO ids the last persisted match read receipts on — its split legs,
+    else its single PO (``MatchResult.matched_po_ids`` on the stored JSON)."""
+    if not isinstance(po_match, dict):
+        return []
+    legs = po_match.get("po_ids")
+    if isinstance(legs, list) and legs:
+        return [str(p) for p in legs]
+    return [str(po_match["po_id"])] if po_match.get("po_id") else []
+
+
+def has_po_overbilling_warning(invoice: Invoice) -> bool:
+    """Whether the last refresh left a cumulative over-billing warning
+    (``po_billed_beyond_total`` or ``po_billed_beyond_receipt``, both of type
+    ``po_overbilled``) on ``invoice``.
+
+    Read from ``invoice.warnings``, so asked after the refresh that ran the
+    match, as :func:`po_match_hold_refusal` is."""
+    return any(
+        isinstance(w, dict) and w.get("type") == PO_OVERBILLED_TYPE
+        for w in (invoice.warnings or [])
+    )
+
+
+def has_contract_cap_warning(invoice: Invoice) -> bool:
+    """Whether the last refresh left an ``error`` contract-compliance finding
+    on ``invoice``. Only a ``not_to_exceed`` contract's spend-limit findings
+    carry that severity (``contract_spend_limit_exceeded_not_to_exceed``,
+    ``contract_currency_mismatch`` and its unknown-currency twin), so this is
+    "a hard cap is passed or could not be measured" (decisions §472).
+    Read from ``invoice.warnings``, so asked after the refresh."""
+    return any(
+        isinstance(w, dict)
+        and w.get("type") == "contract_noncompliant"
+        and w.get("severity") == "error"
+        for w in (invoice.warnings or [])
+    )
 
 
 async def po_match_hold_refusal(
@@ -2412,13 +2740,40 @@ async def po_match_hold_refusal(
       approve an invoice the next statement re-holds. Asked with the would-be
       approver added to the approver set, the question
       :func:`_finding_cleared_by_a_person` asks after the stamp.
+    * a cumulative over-billing warning (decisions §469, §470): this
+      invoice and the others billing its PO pass the PO's total, or what has
+      been received of it. It raises no hold, so only a person reading it may
+      approve.
+    * an ``error`` contract finding (:func:`has_contract_cap_warning`,
+      decisions §472): a not-to-exceed contract's limit is passed,
+      or the invoice's currency is not the contract's (or is missing) so the
+      limit was not measured. Not a PO-match finding, but every unattended
+      door already asks this function, so it answers here rather than adding a
+      second question at each.
+    * a live hand-entered receipt on the matched PO whose recorder is
+      implicated in the invoice or unknown (``receipts_clear_hold``, decisions
+      §262, §470 amended). The receipt findings, per-invoice and cumulative,
+      are measured against what was received, so a receipt the uploader typed
+      in can make either vanish; the auto-close refuses to release a hold on
+      that evidence, and an unattended approval is a release too. The org's
+      ``settings.exceptions.require_segregation: false`` lifts it, as it
+      lifts the auto-close's.
     """
+    from app.services.exception_lifecycle import exception_segregation_enabled
     from app.services.payment_runs import blocking_exception_types
 
     if invoice.id is None:
         return None
     if await blocking_exception_types(db, [invoice.id], types=PO_MATCH_EXCEPTION_TYPES):
         return UNATTENDED_APPROVAL_PO_HOLD_OPEN
+    if has_po_overbilling_warning(invoice):
+        return UNATTENDED_APPROVAL_PO_OVERBILLED
+    if has_contract_cap_warning(invoice):
+        return UNATTENDED_APPROVAL_CONTRACT_CAP
+    if exception_segregation_enabled(org_settings) and not await receipts_clear_hold(
+        db, invoice, _matched_po_ids(invoice.po_match)
+    ):
+        return UNATTENDED_APPROVAL_PO_RECEIPT_IMPLICATED
     if approver_id is None:
         # The stamp names nobody, so no clearance changes standing.
         return None

@@ -973,3 +973,136 @@ async def test_monthly_trend_has_no_seventh_stub_bucket(realdb, monkeypatch):
     assert "2025-12" not in months
     assert months[0] == "2026-01"
     assert len(months) <= 6
+
+
+# ---------------------------------------------------------------------------
+# 5. overdue / due soon — counted over the whole book, not the capped list
+# ---------------------------------------------------------------------------
+
+
+async def _seed_due(mk, org_id, ent, today) -> None:
+    """Twelve approved USD invoices a week overdue, more than the ten rows
+    `upcoming_payments` carries, plus the edges of the predicate."""
+    past = today - timedelta(days=7)
+    async with mk() as s:
+        rows = [
+            _inv(org_id, ent, status=InvoiceStatus.approved, due_date=past, amount=Decimal("10.00"))
+            for _ in range(12)
+        ]
+        rows += [
+            # In review is projected outflow: the /cfo overdue card counts it.
+            _inv(org_id, ent, status=InvoiceStatus.ready_for_review, due_date=past),
+            # Another currency groups on its own code, at face value.
+            _inv(
+                org_id,
+                ent,
+                status=InvoiceStatus.approved,
+                due_date=past,
+                amount=_EUR_FACE,
+                currency="EUR",
+            ),
+            # Terminal or settled: not owed, never overdue.
+            _inv(org_id, ent, status=InvoiceStatus.rejected, due_date=past),
+            _inv(org_id, ent, status=InvoiceStatus.paid, due_date=past),
+            # Due today is on time: due soon, not overdue.
+            _inv(org_id, ent, status=InvoiceStatus.approved, due_date=today),
+            # No due date: cannot be timed, so neither.
+            _inv(org_id, ent, status=InvoiceStatus.approved, due_date=None),
+        ]
+        rescheduled = _inv(org_id, ent, status=InvoiceStatus.approved, due_date=past)
+        slipped = _inv(
+            org_id, ent, status=InvoiceStatus.approved, due_date=today + timedelta(days=30)
+        )
+        s.add_all([*rows, rescheduled, slipped])
+        await s.flush()
+        # The payment schedule's date wins over the invoice's, both ways.
+        s.add(PaymentSchedule(invoice_id=rescheduled.id, due_date=today + timedelta(days=3)))
+        s.add(PaymentSchedule(invoice_id=slipped.id, due_date=past))
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_overdue_counts_the_whole_book_and_matches_the_cfo_card(realdb):
+    """Fourteen USD invoices and one EUR invoice are owed and past due (twelve
+    approved, one in review, one whose schedule slipped into the past, the EUR
+    one). `upcoming_payments` stops at ten, so a count derived from it read 10;
+    `overdue_count` reads 15, and it is the same count the forecast's overdue
+    leg reports (the /cfo "Overdue (owed now)" card, decisions §449), because
+    both read `services/open_ap_due`.
+    """
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    today = utc_today()
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+    await _seed_due(mk, org_id, ent, today)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        r = await c.get("/api/dashboard")
+        forecast = (await c.get("/api/analytics/cashflow_forecast")).json()
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert len(body["upcoming_payments"]) == 10
+    assert body["overdue_count"] == 15
+    assert forecast["totals"]["overdue_count"] == body["overdue_count"]
+    assert body["overdue_total"] == [
+        {"currency": "EUR", "amount": float(_EUR_FACE), "count": 1},
+        # 12 × 10.00 + the in-review 1000.00 + the slipped 1000.00.
+        {"currency": "USD", "amount": 2120.0, "count": 14},
+    ]
+    # Due soon: due today, and the past-dated invoice rescheduled three days out.
+    assert body["due_soon_count"] == 2
+    assert body["due_soon_total"] == [{"currency": "USD", "amount": 2000.0, "count": 2}]
+
+
+@pytest.mark.asyncio
+async def test_overdue_with_nothing_owed_is_zero_and_empty(realdb):
+    async with realdb.client(key=TENANT, role="admin") as c:
+        body = (await c.get("/api/dashboard")).json()
+    assert body["overdue_count"] == 0
+    assert body["overdue_total"] == []
+    assert body["due_soon_count"] == 0
+    assert body["due_soon_total"] == []
+
+
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
+@pytest.mark.asyncio
+async def test_overdue_is_scoped_to_the_selected_entity(realdb):
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    today = utc_today()
+    async with realdb.client(key=TENANT, role="admin") as c:
+        r = await c.post("/api/entities", json={"name": "Overdue Sub", "slug": "overdue-sub"})
+        assert r.status_code == 201, r.text
+        sub_id = r.json()["id"]
+        default_id = next(e["id"] for e in (await c.get("/api/entities")).json() if e["is_default"])
+
+    async with mk() as s:
+        s.add(
+            _inv(
+                org_id,
+                uuid.UUID(default_id),
+                status=InvoiceStatus.approved,
+                due_date=today - timedelta(days=2),
+            )
+        )
+        for _ in range(2):
+            s.add(
+                _inv(
+                    org_id,
+                    uuid.UUID(sub_id),
+                    status=InvoiceStatus.approved,
+                    due_date=today - timedelta(days=2),
+                )
+            )
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        consolidated = (await c.get("/api/dashboard")).json()
+        scoped = (await c.get("/api/dashboard", headers={"X-Entity-ID": sub_id})).json()
+
+    assert consolidated["overdue_count"] == 3
+    assert scoped["overdue_count"] == 2
+    assert scoped["overdue_total"] == [{"currency": "USD", "amount": 2000.0, "count": 2}]

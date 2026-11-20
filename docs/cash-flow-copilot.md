@@ -115,7 +115,7 @@ function** we already own and unit-test:
 
 | Copilot capability | Reuses (existing, pure) |
 |---|---|
-| Outflow forecast by period | `services/analytics.bucket_outflows` + `_commitment_rows` (see `app/api/analytics.py::get_cashflow_forecast`) |
+| Outflow forecast by period | `services/analytics.bucket_outflows` + `commitment_rows` (see `app/api/analytics.py::get_cashflow_forecast`) |
 | Running cash position + shortfall detection | `services/analytics.compute_cash_position` (`get_cash_position`) |
 | Pay-early / on-time / late scenarios | `services/analytics.apply_payment_timing_scenario` (`get_cashflow_whatif`) |
 | Which discounts to capture within a cash ceiling | `services/discount_optimizer.optimize` + `services/discount_roi.compute_roi` |
@@ -212,7 +212,7 @@ overclaiming precision on the curve).
      funds). An offer no longer `offered` (already handled by a prior call, or
      a manual accept in the meantime) is skipped, not re-raised.
    - *Stage payments* (`POST /api/cash-flow/plans/{plan_id}/draft-run`):
-     re-derives the SAME commitment rows the plan used (`_commitment_rows`),
+     re-derives the SAME commitment rows the plan used (`commitment_rows`),
      narrows them to invoices that are ACTUALLY payable right now
      (`PAYABLE_INVOICE_STATUSES` — a plan's horizon also includes
      pre-approval pipeline invoices, which can't be staged — and, since the
@@ -309,7 +309,7 @@ stop matching: `/draft-run` cannot hand back a run staged from the old set, and
 `/save` cannot freeze a curve the user was never shown. It was bumped to
 `v2-overdue-in-first-period` when past-due AP started being carried into the
 first period; a plan proposed before that deploy and enacted after it gets the
-ordinary stale-plan 409 and is re-proposed. Bump it whenever `_commitment_rows`
+ordinary stale-plan 409 and is re-proposed. Bump it whenever `commitment_rows`
 or `bucket_outflows` changes which rows a plan includes or when they leave.
 
 `propose_payment_plan` computes this once and returns it as `plan_id` on the
@@ -530,7 +530,7 @@ this page is now shipped.
    blank / unknown provider currency fails closed the same way.
 
    **The outflow side had the mirror-image defect and is now fixed too.**
-   `analytics._commitment_rows` selected `Invoice.amount` — each invoice's OWN
+   `ap_commitments.commitment_rows` selected `Invoice.amount` — each invoice's OWN
    currency — with no conversion, so the premise the paragraph above rests on
    ("every outflow subtracted from the opening balance is denominated in the
    org's reporting currency") was true of the balance and false of the
@@ -612,7 +612,7 @@ Per org, per tick:
    `settings.cashflow.min_balance_threshold` (managed by
    `GET/PUT /api/analytics/cash-position-settings`). The threshold *is* the
    opt-in — with no line there is nothing to breach and nothing to say.
-2. Build the org-wide commitment rows via the same `_commitment_rows` the CFO
+2. Build the org-wide commitment rows via the same `commitment_rows` the CFO
    dashboard and the copilot use, bucket them weekly over
    `FEOH_CASHFLOW_SHORTFALL_ALERTS_HORIZON_DAYS`, resolve the opening balance
    through the shared `resolve_opening_balance` (§12.2), and run
@@ -667,7 +667,7 @@ Frontend: `src/routes/cash-flow/+page.svelte`, `src/lib/components/cash-flow/`,
 
 ## Currencies the curve could not convert
 
-`api/analytics._commitment_rows` includes a foreign invoice with no usable
+`ap_commitments.commitment_rows` includes a foreign invoice with no usable
 rate lock at **face value** — dropping it would understate the outflow — and
 flags it `unconverted`. `services/analytics.bucket_outflows` counts those into
 `unconverted_count`, and the count now rides every surface built on that curve:

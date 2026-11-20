@@ -479,7 +479,9 @@ async def _create_invoice_from_attachment(
         vendor_name="",
         description=f"Received by email from {sender}" + (f" — {subject}" if subject else ""),
         amount=Decimal("0"),
-        currency="USD",
+        # Unknown until extraction reads the document (decisions §473): never
+        # a guessed USD.
+        currency=None,
         status=InvoiceStatus.pending,  # skip 'new' — intake = trigger extraction
         organization_id=org_id,
         entity_id=entity_id,

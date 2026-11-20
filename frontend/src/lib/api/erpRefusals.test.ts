@@ -5,15 +5,30 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { en } from '../i18n/locales/en';
-import { messages as de } from '../i18n/locales/de';
-import { messages as es } from '../i18n/locales/es';
-import { messages as fr } from '../i18n/locales/fr';
-import { messages as ja } from '../i18n/locales/ja';
-import { messages as ptBR } from '../i18n/locales/pt-BR';
+import { en as enMain } from '../i18n/locales/en';
+import { enRefusal } from '../i18n/locales/refusal/en';
+import { messages as deMain } from '../i18n/locales/de';
+import { messages as deRefusal } from '../i18n/locales/refusal/de';
+import { messages as esMain } from '../i18n/locales/es';
+import { messages as esRefusal } from '../i18n/locales/refusal/es';
+import { messages as frMain } from '../i18n/locales/fr';
+import { messages as frRefusal } from '../i18n/locales/refusal/fr';
+import { messages as jaMain } from '../i18n/locales/ja';
+import { messages as jaRefusal } from '../i18n/locales/refusal/ja';
+import { messages as ptBRMain } from '../i18n/locales/pt-BR';
+import { messages as ptBRRefusal } from '../i18n/locales/refusal/pt-BR';
 import { interpolate } from '../i18n/interpolate';
 import type { MessageKey } from '../i18n/messages';
 import { ERP_REFUSAL_CODES, erpRefusalText } from './erpRefusals';
+
+// The `erpRefusal.*` sentences are in the preloaded refusal catalogue slice
+// (i18n/catalogues.ts); the app reads both through `m()`, so the tests do too.
+const en = { ...enMain, ...enRefusal };
+const de = { ...deMain, ...deRefusal };
+const es = { ...esMain, ...esRefusal };
+const fr = { ...frMain, ...frRefusal };
+const ja = { ...jaMain, ...jaRefusal };
+const ptBR = { ...ptBRMain, ...ptBRRefusal };
 
 const translator =
 	(messages: Record<string, string>, locale: string) =>
@@ -369,4 +384,34 @@ describe('refusals QuickBooks answered with (Intuit Fault codes)', () => {
 			expect(erpRefusalText({ code, params: { possibly_posted: 'true' } }, enT)).toBe(en[key]);
 		}
 	);
+});
+
+describe('before the refusal slice has loaded', () => {
+	// `m()` hands an unresolved key back as itself; the slice is preloaded but
+	// not awaited, so that is what a refusal in the first moments reads.
+	const notLoaded = (key: MessageKey, params?: Record<string, string | number>) =>
+		key.startsWith('erpRefusal.') ? key : enT(key, params);
+	const vendor = { code: 'vendor_not_linked', params: { provider: 'Xero' } };
+
+	it('states nothing, so the caller shows the server sentence, never a raw key', () => {
+		expect(erpRefusalText(vendor, notLoaded)).toBeNull();
+		expect(
+			erpRefusalText(
+				{ code: 'erp_retries_exhausted', params: { possibly_posted: true } },
+				notLoaded
+			)
+		).toBeNull();
+		expect(
+			erpRefusalText(
+				{ code: 'exception_blocks_erp_export', params: { exception_type: 'duplicate' } },
+				notLoaded
+			)
+		).toBeNull();
+	});
+
+	it('states the sentence once the slice is there', () => {
+		expect(erpRefusalText(vendor, enT)).toBe(
+			interpolate(enRefusal['erpRefusal.vendorNotLinked'], { provider: 'Xero' }, 'en')
+		);
+	});
 });

@@ -16,6 +16,8 @@ ids / addresses); validation errors name field paths only, never values.
 
 from __future__ import annotations
 
+import asyncio
+
 from app.services.e_invoice import (
     EInvoiceDocument,
     EInvoiceValidationError,
@@ -63,7 +65,9 @@ class EInvoiceExtractionAdapter(ExtractionAdapter):
         file_url: str = "",
     ) -> ExtractionResult:
         try:
-            doc = parse_e_invoice(file_bytes, mime_type, file_key)
+            # A hybrid PDF is opened with PyMuPDF to find its CII attachment:
+            # run the parse on a worker thread (services/pdf_reader).
+            doc = await asyncio.to_thread(parse_e_invoice, file_bytes, mime_type, file_key)
         except EInvoiceValidationError as exc:
             # Field-named errors only — never the offending value (PII).
             return ExtractionResult(

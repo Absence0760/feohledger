@@ -3,6 +3,7 @@ import 'package:flutter/scheduler.dart';
 
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -10,6 +11,7 @@ import 'package:feohledger_mobile/stores/payment_queue_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
 import 'package:feohledger_mobile/widgets/record_payment_dialog.dart';
 
@@ -48,11 +50,11 @@ String _runTotal(PaymentRun run) =>
 
 /// Localized label for a payment method (the model's `label` is English-only).
 String _methodLabel(AppLocalizations l, PaymentMethod m) => switch (m) {
-      PaymentMethod.ach => l.payMethodAch,
-      PaymentMethod.wire => l.payMethodWire,
-      PaymentMethod.check => l.payMethodCheck,
-      PaymentMethod.virtualCard => l.payMethodVirtualCard,
-    };
+  PaymentMethod.ach => l.payMethodAch,
+  PaymentMethod.wire => l.payMethodWire,
+  PaymentMethod.check => l.payMethodCheck,
+  PaymentMethod.virtualCard => l.payMethodVirtualCard,
+};
 
 /// Localized sentence for why a payment run would refuse — or constrain — a
 /// queue row.
@@ -65,22 +67,22 @@ String _methodLabel(AppLocalizations l, PaymentMethod m) => switch (m) {
 /// rendering a raw identifier at the operator. Mirrors the web page's
 /// `blockedReason()`.
 String _blockedReasonLabel(AppLocalizations l, String? code) => switch (code) {
-      'duplicate' => l.payQueueBlockedDuplicate,
-      'fraud_flag' => l.payQueueBlockedFraudFlag,
-      'line_total_mismatch' => l.payQueueBlockedLineTotalMismatch,
-      'payment_reconciliation' => l.payQueueBlockedPaymentReconciliation,
-      'quality_hold' => l.payQueueBlockedQualityHold,
-      'po_mismatch' => l.payQueueBlockedPoMismatch,
-      'vendor_not_active' => l.payQueueBlockedVendorNotActive,
-      // The invoice records no currency: no rail can pay it until one is set.
-      'currency_unknown' => l.payQueueBlockedCurrencyUnknown,
-      'applied_credit_mismatch' => l.payQueueBlockedAppliedCreditMismatch,
-      'fully_credited' => l.payQueueBlockedFullyCredited,
-      // Not a block — the row is pinned to the card rail. Its own sentence
-      // says so, rather than the "can't be paid" generic.
-      'live_virtual_card' => l.payQueueBlockedLiveVirtualCard,
-      _ => l.payQueueBlockedGeneric,
-    };
+  'duplicate' => l.payQueueBlockedDuplicate,
+  'fraud_flag' => l.payQueueBlockedFraudFlag,
+  'line_total_mismatch' => l.payQueueBlockedLineTotalMismatch,
+  'payment_reconciliation' => l.payQueueBlockedPaymentReconciliation,
+  'quality_hold' => l.payQueueBlockedQualityHold,
+  'po_mismatch' => l.payQueueBlockedPoMismatch,
+  'vendor_not_active' => l.payQueueBlockedVendorNotActive,
+  // The invoice records no currency: no rail can pay it until one is set.
+  'currency_unknown' => l.payQueueBlockedCurrencyUnknown,
+  'applied_credit_mismatch' => l.payQueueBlockedAppliedCreditMismatch,
+  'fully_credited' => l.payQueueBlockedFullyCredited,
+  // Not a block — the row is pinned to the card rail. Its own sentence
+  // says so, rather than the "can't be paid" generic.
+  'live_virtual_card' => l.payQueueBlockedLiveVirtualCard,
+  _ => l.payQueueBlockedGeneric,
+};
 
 /// The sentence for a row's refusal verdict, or `null` when there is nothing
 /// to say. The ONE derivation — the chip and the screen-reader announcement
@@ -92,8 +94,8 @@ String _blockedReasonLabel(AppLocalizations l, String? code) => switch (code) {
 /// server sent no code for it.
 String? _verdictReason(AppLocalizations l, PaymentQueueItem item) =>
     item.blockedReason != null || !item.isSelectable
-        ? _blockedReasonLabel(l, item.blockedReason)
-        : null;
+    ? _blockedReasonLabel(l, item.blockedReason)
+    : null;
 
 /// The refusal verdict, as the tail of a queue row's single merged
 /// announcement. Empty when a run would neither refuse nor constrain the row.
@@ -112,19 +114,21 @@ String _verdictAnnounce(AppLocalizations l, PaymentQueueItem item) {
   return parts.isEmpty ? '' : ', ${parts.join(', ')}';
 }
 
-/// Localized label for a payment-run status string. Unknown statuses fall back
-/// to the server-supplied value capitalized (mirrors the old behaviour).
-String _runStatusLabel(AppLocalizations l, String status) => switch (status) {
-      'draft' => l.payRunStatusDraft,
-      'exported' => l.payRunStatusExported,
-      'completed' => l.payRunStatusCompleted,
-      'submitted' => l.payRunStatusSubmitted,
-      'partial' => l.payRunStatusPartial,
-      'failed' => l.payRunStatusFailed,
-      'cancelled' => l.payRunStatusCancelled,
-      _ => status.isEmpty
-          ? status
-          : status[0].toUpperCase() + status.substring(1),
+/// Localized label for a run's status. A status this build does not name
+/// ([PaymentRunStatus.other]) falls back to the served code, capitalized.
+String _runStatusLabel(AppLocalizations l, PaymentRun run) =>
+    switch (run.status) {
+      PaymentRunStatus.draft => l.payRunStatusDraft,
+      PaymentRunStatus.exported => l.payRunStatusExported,
+      PaymentRunStatus.completed => l.payRunStatusCompleted,
+      PaymentRunStatus.submitted => l.payRunStatusSubmitted,
+      PaymentRunStatus.partial => l.payRunStatusPartial,
+      PaymentRunStatus.failed => l.payRunStatusFailed,
+      PaymentRunStatus.cancelled => l.payRunStatusCancelled,
+      PaymentRunStatus.other =>
+        run.statusCode.isEmpty
+            ? run.statusCode
+            : run.statusCode[0].toUpperCase() + run.statusCode.substring(1),
     };
 
 /// Payment queue + runs. Tab 1 lists approved invoices; the user ticks rows,
@@ -135,12 +139,16 @@ String _runStatusLabel(AppLocalizations l, String status) => switch (status) {
 /// **Record-only tenants** (the no-rail pilot, backend decisions §251): the
 /// server's execution mode (`GET /api/payments/execution-mode`) decides
 /// whether Execute is offered at all — failing closed while unknown — and a
-/// confirmed record-only tenant gets a one-sentence note saying so, as the
-/// first item of each tab's list (so it scrolls away rather than holding
-/// height above both tabs at large text sizes). "Record as paid" is
-/// offered in BOTH modes, as on the web: per queue row from the row's own
+/// confirmed record-only tenant gets a one-sentence note saying so, leading
+/// each tab's list and scrolling away with it (so it does not hold height
+/// above the rows at large text sizes). "Record as paid" is offered in BOTH
+/// modes, as on the web: per queue row from the row's own
 /// `record_outside_refusal`, and per run from the run detail's
 /// `actions.record_outside` verdict.
+///
+/// Both tabs' bodies are [AsyncListBody], each worded from its own load error
+/// ([PaymentQueueStore.queueLoadError] / [PaymentQueueStore.runsLoadError]);
+/// a refused run action is [PaymentQueueStore.actionError], a snackbar.
 class PaymentQueueScreen extends StatefulWidget {
   const PaymentQueueScreen({super.key});
 
@@ -191,10 +199,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
           Expanded(
             child: TabBarView(
               controller: _tabs,
-              children: [
-                _queueTab(),
-                _runsTab(),
-              ],
+              children: [_queueTab(), _runsTab()],
             ),
           ),
         ],
@@ -262,32 +267,46 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     if (!PaymentQueueStore.instance.isRecordOnly) return null;
     final l = AppLocalizations.of(context);
     return Container(
-          key: const Key('record-only-banner'),
-          width: double.infinity,
-          margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.blueGrey.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(8),
+      key: const Key('record-only-banner'),
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blueGrey.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ExcludeSemantics(
+            child: Icon(
+              Icons.info_outline,
+              size: 20,
+              color: Colors.blueGrey.shade800,
+            ),
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ExcludeSemantics(
-                child: Icon(Icons.info_outline,
-                    size: 20, color: Colors.blueGrey.shade800),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  l.payRecordOnlyBanner,
-                  // Darkened for AA contrast over the pale tint.
-                  style: TextStyle(color: Colors.blueGrey.shade900, fontSize: 13),
-                ),
-              ),
-            ],
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              l.payRecordOnlyBanner,
+              // Darkened for AA contrast over the pale tint.
+              style: TextStyle(color: Colors.blueGrey.shade900, fontSize: 13),
+            ),
           ),
-        );
+        ],
+      ),
+    );
+  }
+
+  /// [body] with the record-only note (when there is one) as a header that
+  /// scrolls away with the list rather than holding height above it.
+  Widget _withLeadingBanner(Widget body) {
+    final banner = _recordOnlyBanner();
+    if (banner == null) return body;
+    return NestedScrollView(
+      headerSliverBuilder: (context, _) => [SliverToBoxAdapter(child: banner)],
+      body: body,
+    );
   }
 
   // ── Queue tab ──────────────────────────────────────────────────────
@@ -297,39 +316,29 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       builder: (context, _) {
         final l = AppLocalizations.of(context);
         final store = PaymentQueueStore.instance;
-
-        if (store.loading && store.queue.isEmpty) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (store.error != null && store.queue.isEmpty) {
-          return _errorState(store.error!, store.fetch);
-        }
-        final banner = _recordOnlyBanner();
-        if (store.queue.isEmpty) {
-          return ListView(
-            children: [
-              ?banner,
-              const SizedBox(height: 120),
-              Center(child: Text(l.payQueueEmpty)),
-            ],
-          );
-        }
-
-        final lead = banner == null ? 0 : 1;
+        final loadError = store.queueLoadError;
         return Column(
           children: [
             Expanded(
-              child: RefreshIndicator(
-                onRefresh: store.fetch,
-                child: ListView.separated(
-                  itemCount: store.queue.length + lead,
-                  // No rule between the note and the first row.
-                  separatorBuilder: (_, index) => index < lead
-                      ? const SizedBox.shrink()
-                      : const Divider(height: 1),
-                  itemBuilder: (context, index) => index < lead
-                      ? banner!
-                      : _queueRow(store.queue[index - lead]),
+              child: _withLeadingBanner(
+                AsyncListBody<PaymentQueueItem>(
+                  items: store.queue,
+                  loading: store.loading,
+                  // The queue read's failure only: a refused run action is
+                  // actionError and leaves the list live; a failed runs read is
+                  // the Runs tab's.
+                  hasError: loadError != null,
+                  fromCache: store.fromCache,
+                  errorMessage: loadError == null
+                      ? ''
+                      : describeLoadError(
+                          l,
+                          loadError,
+                          l.payQueueLoadErrorPrefix,
+                        ),
+                  onRefresh: store.fetch,
+                  empty: Text(l.payQueueEmpty, textAlign: TextAlign.center),
+                  itemBuilder: (context, item) => _queueRow(item),
                 ),
               ),
             ),
@@ -364,7 +373,8 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     ];
 
     final row = Semantics(
-      label: '${item.vendorName}, '
+      label:
+          '${item.vendorName}, '
           '${_money(item.amountDisplay, item.currency)}, '
           '${subtitleParts.join(', ')}'
           '${item.isOverdue ? ', ${l.payQueueOverdue}' : ''}'
@@ -381,8 +391,9 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
                 // `null` renders the Material disabled state AND makes the
                 // control untappable; the store refuses the same row anyway,
                 // so the guard holds even if this ever regresses.
-                onChanged:
-                    selectable ? (_) => store.toggleSelection(item) : null,
+                onChanged: selectable
+                    ? (_) => store.toggleSelection(item)
+                    : null,
               )
             : null,
         title: Row(
@@ -410,8 +421,10 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
                   Flexible(
                     child: Text(
                       item.invoiceNumber,
-                      style:
-                          TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                      style: TextStyle(
+                        color: Colors.grey.shade700,
+                        fontSize: 13,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -471,10 +484,10 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     final String? why = code == null
         ? null
         : localizeCodedRefusal(l, {
-              'code': code,
-              'params': {'status': item.status},
-            }) ??
-            l.payRecordUnavailable;
+                'code': code,
+                'params': {'status': item.status},
+              }) ??
+              l.payRecordUnavailable;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Row(
@@ -578,8 +591,10 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
             .map(
               (m) => DropdownMenuItem(
                 value: m,
-                child: Text(_methodLabel(l, m),
-                    style: const TextStyle(fontSize: 13)),
+                child: Text(
+                  _methodLabel(l, m),
+                  style: const TextStyle(fontSize: 13),
+                ),
               ),
             )
             .toList(),
@@ -627,12 +642,12 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
   Future<void> _createRun() async {
     final l = AppLocalizations.of(context);
     setState(() => _busy = true);
-    final message =
-        await PaymentQueueStore.instance.createRunFromSelection();
+    final message = await PaymentQueueStore.instance.createRunFromSelection();
     if (!mounted) return;
     setState(() => _busy = false);
-    final text = message ??
-        l.payCreateRunFailed('${PaymentQueueStore.instance.error}');
+    final text =
+        message ??
+        l.payCreateRunFailed(PaymentQueueStore.instance.actionError ?? '');
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
     A11y.announce(context, text);
     if (message != null) _tabs.animateTo(1); // jump to Runs
@@ -645,30 +660,21 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       builder: (context, _) {
         final l = AppLocalizations.of(context);
         final store = PaymentQueueStore.instance;
-        final banner = _recordOnlyBanner();
-        if (store.runs.isEmpty) {
-          return RefreshIndicator(
+        final loadError = store.runsLoadError;
+        return _withLeadingBanner(
+          AsyncListBody<PaymentRun>(
+            items: store.runs,
+            loading: store.runsLoading,
+            hasError: loadError != null,
+            // Runs are never served from the cache (a stale status would
+            // offer money controls), so there is no saved copy to label.
+            fromCache: false,
+            errorMessage: loadError == null
+                ? ''
+                : describeLoadError(l, loadError, l.payRunsLoadErrorPrefix),
             onRefresh: store.fetchRuns,
-            child: ListView(
-              children: [
-                ?banner,
-                const SizedBox(height: 120),
-                Center(child: Text(l.payRunsEmpty)),
-              ],
-            ),
-          );
-        }
-        final lead = banner == null ? 0 : 1;
-        return RefreshIndicator(
-          onRefresh: store.fetchRuns,
-          child: ListView.separated(
-            itemCount: store.runs.length + lead,
-            separatorBuilder: (_, index) => index < lead
-                ? const SizedBox.shrink()
-                : const Divider(height: 1),
-            itemBuilder: (context, index) => index < lead
-                ? banner!
-                : _runRow(store.runs[index - lead]),
+            empty: Text(l.payRunsEmpty, textAlign: TextAlign.center),
+            itemBuilder: (context, run) => _runRow(run),
           ),
         );
       },
@@ -679,13 +685,11 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     final l = AppLocalizations.of(context);
     final subtitle =
         l.payRunSubtitle(run.paymentCount, formatDate(run.createdAt)) +
-            (run.requiresCfoApproval && !run.cfoApproved
-                ? l.payRunCfoRequiredSuffix
-                : '');
+        (run.awaitsCfoApproval ? l.payRunCfoRequiredSuffix : '');
     return Semantics(
       label: l.payRunAnnounce(
         _runTotal(run),
-        _runStatusLabel(l, run.status),
+        _runStatusLabel(l, run),
         subtitle,
       ),
       excludeSemantics: true,
@@ -698,7 +702,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
-            _runStatusChip(run.status),
+            _runStatusChip(run),
           ],
         ),
         subtitle: Padding(
@@ -731,16 +735,14 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       // ever be refused; the record path below replaces it.
       if (manageDraft && store.canDispatch)
         PopupMenuItem(value: 'execute', child: Text(l.payRunActionExecute)),
-      if (manageDraft)
+      if (_canManage && run.isCancellable)
         PopupMenuItem(value: 'cancel', child: Text(l.payRunActionCancel)),
       // Record the run as paid outside FeohLedger, in either mode. The menu
-      // entry appears for the two stored statuses a run can hold an open
-      // record decision in (a draft, or one whose bank file was exported on
-      // the web); whether THIS reader may record it is the run detail's
-      // `actions.record_outside` verdict, which the dialog reads before it
-      // offers a form.
-      if (AuthStore.instance.canRecordExternalPayment &&
-          (run.status == 'draft' || run.status == 'exported'))
+      // entry appears where [PaymentRun.mayRecordOutside] says a run can hold
+      // an open record decision; whether THIS reader may record it is the
+      // run detail's `actions.record_outside` verdict, which the dialog reads
+      // before it offers a form.
+      if (AuthStore.instance.canRecordExternalPayment && run.mayRecordOutside)
         PopupMenuItem(value: 'record', child: Text(l.payRunActionRecord)),
     ];
     if (items.isEmpty) return null;
@@ -754,14 +756,11 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     );
   }
 
-  /// Whether the signed-in user can sign this run off. Mirrors the backend
-  /// `require_roles(ROLE_CFO)` on `POST /api/payments/runs/{id}/approve` plus
-  /// its two state guards (draft — already implied by [PaymentRun.isExecutable]
-  /// at the call site — requires sign-off, not yet signed off).
+  /// Whether the signed-in user can sign this run off: the backend's
+  /// `require_roles(ROLE_CFO)` on `POST /api/payments/runs/{id}/approve`
+  /// (the role) and its state guards ([PaymentRun.canTakeCfoApproval]).
   bool _canApproveRun(PaymentRun run) =>
-      AuthStore.instance.canApprovePaymentRun &&
-      run.requiresCfoApproval &&
-      !run.cfoApproved;
+      AuthStore.instance.canApprovePaymentRun && run.canTakeCfoApproval;
 
   Future<void> _runMenuAction(PaymentRun run, String action) async {
     final l = AppLocalizations.of(context);
@@ -791,7 +790,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       A11y.announce(context, text);
     } else if (action == 'execute') {
       // CFO approval is a server-side gate; surface it before attempting.
-      if (run.requiresCfoApproval && !run.cfoApproved) {
+      if (run.awaitsCfoApproval) {
         final text = l.payRunCfoBlocked;
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(text)));
@@ -811,8 +810,9 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     } else {
       final message = await PaymentQueueStore.instance.cancelRun(run.id);
       if (!mounted) return;
-      final text = message ??
-          l.payRunCancelFailed('${PaymentQueueStore.instance.error}');
+      final text =
+          message ??
+          l.payRunCancelFailed(PaymentQueueStore.instance.actionError ?? '');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
       A11y.announce(context, text);
     }
@@ -823,7 +823,8 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
   String _runRefusal(AppLocalizations l) {
     final store = PaymentQueueStore.instance;
     return localizeCodedRefusal(l, store.runActionErrorDetail) ??
-        '${store.error}';
+        store.actionError ??
+        '';
   }
 
   Future<bool?> _confirm(String title, String body, {String? confirmLabel}) {
@@ -847,20 +848,20 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     );
   }
 
-  Widget _runStatusChip(String status) {
+  Widget _runStatusChip(PaymentRun run) {
     final l = AppLocalizations.of(context);
     // Darkened foreground for AA contrast over the pale tint (≥4.5:1).
-    final (color, textColor) = switch (status) {
-      'draft' => (Colors.blueGrey, Colors.blueGrey.shade800),
-      'exported' => (Colors.indigo, Colors.indigo.shade800),
-      'completed' => (Colors.green, Colors.green.shade900),
-      'submitted' => (Colors.blue, Colors.blue.shade800),
-      'partial' => (Colors.orange, Colors.brown.shade800),
-      'failed' => (Colors.red, Colors.red.shade900),
-      'cancelled' => (Colors.grey, Colors.grey.shade800),
-      _ => (Colors.grey, Colors.grey.shade800),
+    final (color, textColor) = switch (run.status) {
+      PaymentRunStatus.draft => (Colors.blueGrey, Colors.blueGrey.shade800),
+      PaymentRunStatus.exported => (Colors.indigo, Colors.indigo.shade800),
+      PaymentRunStatus.completed => (Colors.green, Colors.green.shade900),
+      PaymentRunStatus.submitted => (Colors.blue, Colors.blue.shade800),
+      PaymentRunStatus.partial => (Colors.orange, Colors.brown.shade800),
+      PaymentRunStatus.failed => (Colors.red, Colors.red.shade900),
+      PaymentRunStatus.cancelled ||
+      PaymentRunStatus.other => (Colors.grey, Colors.grey.shade800),
     };
-    final label = _runStatusLabel(l, status);
+    final label = _runStatusLabel(l, run);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -874,22 +875,6 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
-      ),
-    );
-  }
-
-  Widget _errorState(String message, Future<void> Function() onRetry) {
-    final l = AppLocalizations.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.error_outline, size: 48, color: Colors.red.shade700),
-          const SizedBox(height: 12),
-          Text(l.payQueueError),
-          const SizedBox(height: 12),
-          FilledButton(onPressed: onRetry, child: Text(l.payQueueRetry)),
-        ],
       ),
     );
   }

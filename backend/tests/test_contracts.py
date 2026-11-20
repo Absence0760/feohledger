@@ -1251,3 +1251,230 @@ async def test_a_usd_invoice_still_matches_a_usd_contract(currency):
 
     assert db.calls == 2
     assert [f["code"] for f in findings] == ["contract_spend_limit_exceeded_not_to_exceed"]
+
+
+# ---------------------------------------------------------------------------
+# An invoice the limit cannot measure says so (decisions §472).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("not_to_exceed", "severity"), [(True, "error"), (False, "warning")])
+async def test_an_other_currency_invoice_reports_the_unchecked_limit(not_to_exceed, severity):
+    """A EUR invoice on a USD contract is neither summed nor converted: no
+    spend query runs, and the finding names both codes at the severity the
+    spend-limit finding would carry."""
+    from app.services.contract_compliance import evaluate_contract_compliance
+
+    db = _ComplianceDb(_usd_contract(not_to_exceed=not_to_exceed), Decimal("0"))
+    findings = await evaluate_contract_compliance(db, _contract_invoice(" eur "))
+
+    assert db.calls == 1  # no spend sum, so no rate was ever needed
+    assert findings == [
+        {
+            "type": "contract_noncompliant",
+            "severity": severity,
+            "message": "Invoice is in EUR but contract MSA-NTE is in USD — "
+            "its spend limit was not checked",
+            "code": "contract_currency_mismatch",
+            "params": {
+                "invoiceCurrency": "EUR",
+                "contractNumber": "MSA-NTE",
+                "contractCurrency": "USD",
+            },
+        }
+    ]
+
+
+@pytest.mark.parametrize(("not_to_exceed", "severity"), [(True, "error"), (False, "warning")])
+@pytest.mark.parametrize("currency", [None, "", "   ", "US", "12$"])
+async def test_a_code_less_invoice_reports_the_unchecked_limit(currency, not_to_exceed, severity):
+    from app.services.contract_compliance import evaluate_contract_compliance
+
+    db = _ComplianceDb(_usd_contract(not_to_exceed=not_to_exceed), Decimal("0"))
+    findings = await evaluate_contract_compliance(db, _contract_invoice(currency))
+
+    assert db.calls == 1
+    assert [(f["code"], f["severity"], f["params"]) for f in findings] == [
+        (
+            "contract_currency_mismatch_invoice_currency_unknown",
+            severity,
+            {"contractNumber": "MSA-NTE", "contractCurrency": "USD"},
+        )
+    ]
+
+
+async def test_a_same_currency_invoice_is_measured_as_before_without_not_to_exceed():
+    from app.services.contract_compliance import evaluate_contract_compliance
+
+    db = _ComplianceDb(_usd_contract(not_to_exceed=False), Decimal("0"))
+    findings = await evaluate_contract_compliance(db, _contract_invoice("USD"))
+
+    assert db.calls == 2
+    assert [(f["code"], f["severity"]) for f in findings] == [
+        ("contract_spend_limit_exceeded", "warning")
+    ]
+
+
+async def test_a_same_currency_invoice_under_the_limit_reports_nothing():
+    from app.services.contract_compliance import evaluate_contract_compliance
+
+    db = _ComplianceDb(_usd_contract(spend_limit=Decimal("1500.00")), Decimal("0"))
+    assert await evaluate_contract_compliance(db, _contract_invoice("USD")) == []
+    assert db.calls == 2
+
+
+@pytest.mark.parametrize("currency", ["EUR", None])
+async def test_a_contract_without_a_limit_reports_no_currency_finding(currency):
+    """Nothing to measure, so nothing unmeasured: the currency finding is about
+    the limit, not about the contract's currency as such."""
+    from app.services.contract_compliance import evaluate_contract_compliance
+
+    db = _ComplianceDb(_usd_contract(spend_limit=None), Decimal("0"))
+    assert await evaluate_contract_compliance(db, _contract_invoice(currency)) == []
+
+
+def test_only_an_error_contract_finding_is_a_contract_cap():
+    from types import SimpleNamespace
+
+    from app.services.invoice_warning_catalog import warning
+    from app.services.invoice_warnings import has_contract_cap_warning
+
+    def inv(*ws):
+        return SimpleNamespace(warnings=list(ws))
+
+    mismatch = dict(invoiceCurrency="EUR", contractNumber="C-1", contractCurrency="USD")
+    assert has_contract_cap_warning(inv(warning("contract_currency_mismatch", "error", **mismatch)))
+    assert not has_contract_cap_warning(
+        inv(warning("contract_currency_mismatch", "warning", **mismatch))
+    )
+    assert not has_contract_cap_warning(
+        inv(warning("contract_vendor_mismatch", "warning", contractNumber="C-1"))
+    )
+    assert not has_contract_cap_warning(inv())
+    assert not has_contract_cap_warning(SimpleNamespace(warnings=None))
+
+
+async def _link_eur_invoice(realdb, *, not_to_exceed: bool):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    async with mk() as s:
+        inv = Invoice(
+            organization_id=org_id,
+            invoice_number=f"INV-{uuid.uuid4().hex[:6]}",
+            vendor_name="Globex Industrial",
+            amount=Decimal("300.00"),
+            currency="EUR",
+            status=InvoiceStatus.ready_for_review,
+            vendor_id=uuid.UUID(vendor_id),
+        )
+        s.add(inv)
+        await s.commit()
+        invoice_id = str(inv.id)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        contract_id = (
+            await _create_contract(c, vendor_id, spend_limit="1000.00", not_to_exceed=not_to_exceed)
+        ).json()["id"]
+        linked = await c.post(
+            f"/api/invoices/{invoice_id}/link-contract", json={"contract_id": contract_id}
+        )
+    assert linked.status_code == 200, linked.text
+    return mk, uuid.UUID(invoice_id), linked.json()["warnings"] or []
+
+
+@pytest.mark.parametrize(
+    ("not_to_exceed", "severity", "refusal"),
+    [(True, "error", "contract_cap"), (False, "warning", None)],
+)
+async def test_linking_an_other_currency_invoice_warns_and_gates_unattended_approval(
+    realdb, not_to_exceed, severity, refusal
+):
+    """Through the real link route: the EUR invoice on a USD contract carries
+    the finding, and only a not-to-exceed contract stops the unattended doors
+    (`po_match_hold_refusal`, which extraction's auto-approve and
+    `/complete`'s floor both ask)."""
+    from app.services.invoice_warnings import po_match_hold_refusal
+
+    mk, invoice_id, warnings = await _link_eur_invoice(realdb, not_to_exceed=not_to_exceed)
+
+    found = [w for w in warnings if w.get("code") == "contract_currency_mismatch"]
+    assert [(w["severity"], w["params"]["invoiceCurrency"]) for w in found] == [(severity, "EUR")]
+    assert not [w for w in warnings if w.get("code", "").startswith("contract_spend_limit")]
+
+    async with mk() as s:
+        invoice = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+        assert await po_match_hold_refusal(s, invoice, approver_id=None, org_settings={}) == refusal
+
+
+async def test_linking_a_same_currency_over_limit_invoice_gates_unattended_approval(realdb):
+    """The same-currency breach through the real link route: a USD invoice over
+    a USD not-to-exceed limit carries the error finding, and the unattended
+    doors refuse it as `contract_cap`."""
+    import uuid
+
+    from app.services.invoice_warnings import po_match_hold_refusal
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    async with mk() as s:
+        inv = Invoice(
+            organization_id=org_id,
+            invoice_number=f"INV-{uuid.uuid4().hex[:6]}",
+            vendor_name="Globex Industrial",
+            amount=Decimal("1500.00"),
+            currency="USD",
+            status=InvoiceStatus.ready_for_review,
+            vendor_id=uuid.UUID(vendor_id),
+        )
+        s.add(inv)
+        await s.commit()
+        invoice_id = inv.id
+    async with realdb.client(key="a", role="ap_manager") as c:
+        contract_id = (
+            await _create_contract(c, vendor_id, spend_limit="1000.00", not_to_exceed=True)
+        ).json()["id"]
+        linked = await c.post(
+            f"/api/invoices/{invoice_id}/link-contract", json={"contract_id": contract_id}
+        )
+    assert linked.status_code == 200, linked.text
+    found = [
+        w
+        for w in linked.json()["warnings"] or []
+        if w.get("code") == "contract_spend_limit_exceeded_not_to_exceed"
+    ]
+    assert [w["severity"] for w in found] == ["error"]
+
+    async with mk() as s:
+        invoice = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+        assert (
+            await po_match_hold_refusal(s, invoice, approver_id=None, org_settings={})
+            == "contract_cap"
+        )
+
+
+def test_a_same_currency_breach_at_error_is_a_contract_cap():
+    from types import SimpleNamespace
+
+    from app.services.invoice_warning_catalog import warning
+    from app.services.invoice_warnings import has_contract_cap_warning
+
+    def inv(severity):
+        return SimpleNamespace(
+            warnings=[
+                warning(
+                    "contract_spend_limit_exceeded_not_to_exceed",
+                    severity,
+                    **PARAMS,
+                )
+            ]
+        )
+
+    from app.services.invoice_warning_catalog import _BY_CODE
+
+    PARAMS = {
+        name: {"money": "1.00", "currency": "USD", "count": 1}.get(kind, "x")
+        for name, kind in _BY_CODE["contract_spend_limit_exceeded_not_to_exceed"].params.items()
+    }
+    assert has_contract_cap_warning(inv("error"))
+    assert not has_contract_cap_warning(inv("warning"))

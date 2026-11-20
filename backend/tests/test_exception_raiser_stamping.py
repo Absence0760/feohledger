@@ -89,8 +89,10 @@ _NO_RAISING_ACTOR: dict[str, str] = {
 # get a second pair of eyes on that act. The same site raises the void's
 # re-payment flag (decisions §383), stamped with whoever re-pointed the payee
 # since the voided payment: the merge's actor or the bank change's approver.
+# `flag_invoice_for_bank_change` moved out of `api/vendors` into its own
+# service so `services/payee_stamp` need not import a router.
 _MUST_STAMP_AN_ACTOR: dict[str, str] = {
-    "app/api/vendors.py": (
+    "app/services/vendor_bank_change.py": (
         "the bank-change approver, or for a voided payment's re-payment the vendor "
         "merge's actor (services/payee_stamp) — the person whose act re-pointed the "
         "payee, which is what the flag asks someone else to check, and the axis the "

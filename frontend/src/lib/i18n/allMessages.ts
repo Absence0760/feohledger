@@ -3,6 +3,7 @@ import { enHelp } from './locales/help/en';
 import { enPortal } from './locales/portal/en';
 import { enSettings } from './locales/settings/en';
 import { enMarketing } from './locales/marketing/en';
+import { enRefusal } from './locales/refusal/en';
 import { enAudit } from './locales/audit/en';
 import { CATALOGUE_LOADERS, SLICE_LOADERS, SLICE_NAMES } from './catalogues';
 import type { Locale } from './locale';
@@ -20,6 +21,7 @@ export const EN_SLICES: { [S in SliceName]: SliceMessages[S] } = {
 	settings: enSettings,
 	portal: enPortal,
 	marketing: enMarketing,
+	refusal: enRefusal,
 	audit: enAudit,
 };
 

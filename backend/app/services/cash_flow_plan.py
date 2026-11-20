@@ -101,7 +101,7 @@ def assemble_plan(
     today: date,
 ) -> PlanArtifact:
     """Assemble a plan artifact from commitment ``rows`` (the same shape
-    ``_commitment_rows`` returns — each carrying an ``invoice_id``) and an
+    ``commitment_rows`` returns — each carrying an ``invoice_id``) and an
     already-computed ``optimizer_result`` (the same one
     ``/api/discounts/optimize`` and the ``optimize_discount_capture`` tool
     produce for equivalent inputs — this function never re-derives or
@@ -204,7 +204,7 @@ def assemble_plan(
 #: inputs on the same date produce a DIFFERENT plan, and an id minted under the
 #: old rule must stop matching rather than let `/draft-run` (idempotent on
 #: `plan_id`) hand back a run staged from the old set, or `/save` freeze a
-#: curve the user was never shown. Bump it whenever `_commitment_rows` or
+#: curve the user was never shown. Bump it whenever `commitment_rows` or
 #: `bucket_outflows` changes WHICH rows a plan includes or WHEN they leave.
 #:   v2 — AP already past due is carried into the first period (it used to be
 #:        dropped, so a plan overstated cash by exactly the overdue AP).

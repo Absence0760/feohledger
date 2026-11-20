@@ -2,9 +2,12 @@ import 'package:flutter/foundation.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
+import 'package:feohledger_mobile/l10n/ambient_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
+import 'package:feohledger_mobile/utils/money.dart';
+import 'package:feohledger_mobile/utils/sequenced_fetch.dart';
 
 /// What a record-as-paid call came back with. [ok] or not; on a refusal,
 /// [message] is the server's English sentence and [detail] its raw decoded
@@ -39,7 +42,15 @@ class RecordOutcome {
 /// the store never sums money on the device. The "selected total" shown in the
 /// UI counts rows, not currency — the authoritative total is computed by the
 /// backend when the run is created.
-class PaymentQueueStore extends ChangeNotifier {
+///
+/// Errors live in three places, one per thing that can fail: [queueLoadError]
+/// (the Queue tab's read), [runsLoadError] (the Runs tab's read) and
+/// [actionError] (a refused create / approve / execute / cancel). They used to
+/// share one `error`, so a failed runs read put the Queue tab into its error
+/// state and a refused execute read as "couldn't refresh". [fetch] is ordered
+/// by [SequencedFetch] and [fetchRuns] by its own [RequestSequence], so a slow
+/// response can't overwrite a newer one and neither list cancels the other.
+class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
   static final PaymentQueueStore instance = PaymentQueueStore._();
   PaymentQueueStore._();
 
@@ -47,8 +58,12 @@ class PaymentQueueStore extends ChangeNotifier {
   List<PaymentRun> _runs = [];
   PaymentSummary? _summary;
   bool _loading = false;
-  String? _error;
+  bool _runsLoading = false;
+  Object? _queueLoadError;
+  Object? _runsLoadError;
+  String? _actionError;
   Object? _runActionErrorDetail;
+  final RequestSequence _runsSeq = RequestSequence();
   bool _fromCache = false;
   String? _executionMode;
 
@@ -59,14 +74,28 @@ class PaymentQueueStore extends ChangeNotifier {
   List<PaymentQueueItem> get queue => _queue;
   List<PaymentRun> get runs => _runs;
   PaymentSummary? get summary => _summary;
+  /// The queue + summary read is in flight.
   bool get loading => _loading;
-  String? get error => _error;
+
+  /// The runs read is in flight.
+  bool get runsLoading => _runsLoading;
+
+  /// The last failed queue + summary read, as caught, when no cached queue
+  /// could stand in. The Queue tab's error state and banner read this alone.
+  Object? get queueLoadError => _queueLoadError;
+
+  /// The last failed runs read, as caught. The Runs tab reads this alone.
+  Object? get runsLoadError => _runsLoadError;
+
+  /// The last refused run action (create / approve / execute / cancel), as a
+  /// sentence ([describeApiError]). Never a load state: the lists stay live.
+  String? get actionError => _actionError;
 
   /// The raw decoded `detail` of the last refused [approveRun] /
   /// [executeRun] — maker-checker and the CFO-approval wait answer with a
   /// coded refusal (`payment_run_segregation` / `payment_run_awaiting_cfo`)
-  /// the screen states through `localizeCodedRefusal`, with [error] as the
-  /// fallback. `null` after a success or a transport failure.
+  /// the screen states through `localizeCodedRefusal`, with [actionError] as
+  /// the fallback. `null` after a success or a transport failure.
   Object? get runActionErrorDetail => _runActionErrorDetail;
   bool get fromCache => _fromCache;
 
@@ -109,10 +138,16 @@ class PaymentQueueStore extends ChangeNotifier {
     _runs = [];
     _summary = null;
     _loading = false;
-    _error = null;
+    _runsLoading = false;
+    _queueLoadError = null;
+    _runsLoadError = null;
+    _actionError = null;
+    _runActionErrorDetail = null;
     _fromCache = false;
     _executionMode = null;
     _selection.clear();
+    debugResetSequence();
+    _runsSeq.reset();
   }
 
   /// Tick / untick a queue row.
@@ -155,8 +190,11 @@ class PaymentQueueStore extends ChangeNotifier {
   /// Load the queue + summary together (the two halves of the payments-page
   /// header). Runs are loaded separately by [fetchRuns].
   Future<void> fetch() async {
+    // See SequencedFetch — a response superseded by a newer fetch() is
+    // discarded rather than written over the newer queue.
+    final token = nextRequestToken();
     _loading = true;
-    _error = null;
+    _queueLoadError = null;
     notifyListeners();
 
     // Read beside the queue, and on its own failure path: the mode only
@@ -169,7 +207,9 @@ class PaymentQueueStore extends ChangeNotifier {
         PaymentApi.queue(),
         PaymentApi.summary(),
       ]);
-      await mode;
+      final resolvedMode = await mode;
+      if (!isCurrentRequest(token)) return;
+      _executionMode = resolvedMode;
       _queue = results[0] as List<PaymentQueueItem>;
       _summary = results[1] as PaymentSummary;
       _fromCache = false;
@@ -184,10 +224,13 @@ class PaymentQueueStore extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      await mode;
+      final resolvedMode = await mode;
+      if (!isCurrentRequest(token)) return;
+      _executionMode = resolvedMode;
       try {
         final cached = await OfflineStore.instance.get('payment_queue');
         if (cached != null) {
+          if (!isCurrentRequest(token)) return;
           _queue = (cached as List)
               .map((j) => PaymentQueueItem.fromJson(j as Map<String, dynamic>))
               .toList();
@@ -201,26 +244,26 @@ class PaymentQueueStore extends ChangeNotifier {
           return;
         }
       } catch (_) {}
+      if (!isCurrentRequest(token)) return;
       _fromCache = false;
       _loading = false;
-      _error = describeApiError(e);
+      _queueLoadError = e;
       notifyListeners();
     }
   }
 
   /// `GET /api/payments/execution-mode`. Any failure — offline, a 403, a
   /// payload without a string `mode` — leaves the mode unknown, which
-  /// [canDispatch] reads as record-only. Never throws.
-  Future<void> _loadExecutionMode() async {
-    String? mode;
+  /// [canDispatch] reads as record-only. Never throws. Returns the mode
+  /// rather than storing it, so [fetch] applies it under its request token.
+  Future<String?> _loadExecutionMode() async {
     try {
       final data = await PaymentApi.executionMode();
       final raw = data['mode'];
-      mode = raw is String ? raw : null;
+      return raw is String ? raw : null;
     } catch (_) {
-      mode = null;
+      return null;
     }
-    _executionMode = mode;
   }
 
   /// Re-derive the selection against the queue that was just loaded.
@@ -246,20 +289,31 @@ class PaymentQueueStore extends ChangeNotifier {
     }
   }
 
+  /// Load the run list. Ordered by its own sequence, apart from [fetch]'s, so
+  /// a queue refresh never discards a runs response or the reverse. Not
+  /// cached: a run's status gates money controls, and a stale one must not
+  /// offer them.
   Future<void> fetchRuns() async {
+    final token = _runsSeq.next();
+    _runsLoading = true;
+    _runsLoadError = null;
+    notifyListeners();
     try {
-      _runs = await PaymentApi.runs();
-      notifyListeners();
+      final runs = await PaymentApi.runs();
+      if (!_runsSeq.isCurrent(token)) return;
+      _runs = runs;
     } catch (e) {
-      _error = describeApiError(e);
-      notifyListeners();
+      if (!_runsSeq.isCurrent(token)) return;
+      _runsLoadError = e;
     }
+    _runsLoading = false;
+    notifyListeners();
   }
 
   /// Create a draft run from the current selection. On success, clears the
-  /// selection and refreshes the queue + runs, and returns the server's
-  /// human-readable message (which flags CFO approval when required). Returns
-  /// null on failure with [error] set.
+  /// selection and refreshes the queue + runs, and returns the run's
+  /// localized summary (which flags CFO approval when required). Returns
+  /// null on failure with [actionError] set.
   Future<String?> createRunFromSelection() async {
     if (_selection.isEmpty) return null;
     // Belt-and-braces on the rail: `_reconcileSelection` already pinned every
@@ -275,55 +329,59 @@ class PaymentQueueStore extends ChangeNotifier {
         method: row == null ? e.value : methodFor(row),
       );
     }).toList();
+    _actionError = null;
     try {
       final result = await PaymentApi.createRun(selections);
       _selection.clear();
       await fetch();
       await fetchRuns();
-      return result['message'] as String? ?? 'Payment run created';
+      return _runCreatedMessage(result);
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return null;
     }
   }
 
   /// CFO sign-off on a draft run that trips the org's approval threshold.
-  /// Returns the server message, or null on failure with [error] set.
+  /// Returns a localized confirmation, or null on failure with [actionError]
+  /// set.
   ///
   /// This authorizes execution; it moves no money. Refusals are routine — 409
   /// (not a draft / doesn't need sign-off / already signed off) and 403 (the
   /// maker-checker check: the run's creator can't approve their own run) — so
-  /// [error] carries the server's own `detail` sentence via [describeApiError].
+  /// [actionError] carries the server's own `detail` sentence via [describeApiError].
   Future<String?> approveRun(String runId) async {
+    _actionError = null;
     _runActionErrorDetail = null;
     try {
-      final result = await PaymentApi.approveRun(runId);
+      await PaymentApi.approveRun(runId);
       await fetchRuns();
-      return result['message'] as String? ?? 'Run approved by CFO';
+      return ambientLocalizations().payRunApproved;
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       _runActionErrorDetail = e is ApiException ? e.detail : null;
       notifyListeners();
       return null;
     }
   }
 
-  /// Execute a draft run. Returns the server message, or null on failure.
+  /// Execute a draft run. Returns a localized summary, or null on failure.
   ///
   /// A refusal here is routine, not exceptional — the CFO-approval gate and the
-  /// segregation-of-duties check both answer 403 — so [error] carries the
+  /// segregation-of-duties check both answer 403 — so [actionError] carries the
   /// server's own `detail` sentence (see [describeApiError]), never the raw
   /// JSON body it arrived in.
   Future<String?> executeRun(String runId) async {
+    _actionError = null;
     _runActionErrorDetail = null;
     try {
       final result = await PaymentApi.executeRun(runId);
       await fetch();
       await fetchRuns();
-      return result['message'] as String? ?? 'Payment run executed';
+      return _runExecutedMessage(result);
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       _runActionErrorDetail = e is ApiException ? e.detail : null;
       notifyListeners();
       return null;
@@ -332,13 +390,14 @@ class PaymentQueueStore extends ChangeNotifier {
 
   /// Cancel a draft run (releases its invoices back to the queue).
   Future<String?> cancelRun(String runId) async {
+    _actionError = null;
     try {
       final result = await PaymentApi.cancelRun(runId);
       await fetch();
       await fetchRuns();
-      return result['message'] as String? ?? 'Payment run cancelled';
+      return _runCancelledMessage(result);
     } catch (e) {
-      _error = describeApiError(e);
+      _actionError = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -454,4 +513,54 @@ class PaymentQueueStore extends ChangeNotifier {
         'payable_amount': i.payableAmountDisplay,
         'erp_reported_payment': i.erpReportedPayment?.toJson(),
       };
+}
+
+// The run actions' success toasts, in the reader's language. The server's
+// `message` is an English sentence, so these are built from the structured
+// fields beside it (`backend/app/api/payments.py`); a reply missing a count
+// gets the plain sentence rather than a guessed figure.
+
+String _runCreatedMessage(Map<String, dynamic> result) {
+  final l = ambientLocalizations();
+  final count = result['payment_count'];
+  final total = result['total_amount'];
+  // One key with a `select` on the CFO gate, so a translation can place the
+  // approval note where its grammar wants it rather than after a fixed join.
+  final cfo = result['requires_cfo_approval'] == true ? 'required' : 'none';
+  if (count is int && total is String && total.trim().isNotEmpty) {
+    // The run total through the shared money helper: the run's own currency
+    // symbol when the server could prove one, the bare exact figure when it
+    // sent `currency: null` (a mixed or unknown run — decisions §79/§82).
+    final amount = formatMoneyString(
+      total,
+      currency: result['currency'] as String?,
+    );
+    return l.payRunCreated(count, amount, cfo);
+  }
+  return l.payRunCreatedPlain(cfo);
+}
+
+String _runExecutedMessage(Map<String, dynamic> result) {
+  final l = ambientLocalizations();
+  final provider = result['provider'];
+  final completed = result['payments_completed'];
+  final inFlight = result['payments_in_flight'];
+  final failed = result['payments_failed'];
+  final executed = provider is String &&
+          provider.isNotEmpty &&
+          completed is int &&
+          inFlight is int &&
+          failed is int
+      ? l.payRunExecuted(provider, completed, inFlight, failed)
+      : l.payRunExecutedPlain;
+  final cards = result['cards_issued'];
+  return cards is int && cards > 0
+      ? '$executed ${l.payRunExecutedCards(cards)}'
+      : executed;
+}
+
+String _runCancelledMessage(Map<String, dynamic> result) {
+  final l = ambientLocalizations();
+  final released = result['released_invoices'];
+  return released is int ? l.payRunCancelled(released) : l.payRunCancelledPlain;
 }

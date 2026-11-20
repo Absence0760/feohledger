@@ -66,6 +66,7 @@ import {
 	erpRefusalText
 } from '#lib/api/erpRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
+import { resolvedOnly } from '#lib/api/resolvedOnly.ts';
 import { formatList } from '#lib/utils/list.ts';
 import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
 import { refusalBlockers } from '#lib/types/workspaceClosureRefusal.ts';
@@ -538,11 +539,18 @@ const BUILDERS: Record<string, Builder> = {
 	segregation_raiser: fixed('refusal.exceptionSegregationRaiser'),
 	segregation_implicated: fixed('refusal.exceptionSegregationImplicated'),
 	segregation_approver: fixed('refusal.exceptionSegregationApprover'),
+	// `api/billing.py` — a configured billing provider's read failed (502).
+	billing_provider_unavailable: fixed('refusal.billingProviderUnavailable'),
 	// `api/credit_memos.py`
 	credit_memo_vendor_mismatch: fixed('refusal.creditMemoVendorMismatch'),
 	credit_memo_vendor_unresolved: fixed('refusal.creditMemoVendorUnresolved'),
 	credit_memo_entity_mismatch: fixed('refusal.creditMemoEntityMismatch'),
 	credit_memo_currency_mismatch: fixed('refusal.creditMemoCurrencyMismatch'),
+	credit_memo_invoice_currency_unknown: fixed('refusal.creditMemoInvoiceCurrencyUnknown'),
+	// `api/discounts.py` — an invoice-scoped offer on an invoice in no stated currency.
+	discount_offer_invoice_currency_unknown: fixed('refusal.discountOfferInvoiceCurrencyUnknown'),
+	// `api/organization.py` — `payments.home_currency` that is not a code.
+	organization_home_currency_invalid: fixed('refusal.organizationHomeCurrencyInvalid'),
 	credit_memo_invoice_settled: (p, t) => {
 		const status = str(p, 'status');
 		return status === null
@@ -644,6 +652,23 @@ const BUILDERS: Record<string, Builder> = {
 	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),
 	// The sign-in challenge's emailed code missed: wrong, expired or spent.
 	mfa_email_code_invalid: fixed('refusal.mfaEmailCodeInvalid'),
+	// The auth refusals that used to send an exception's own text
+	// (`api/refusals.py` § auth refusals): a password complexity rule (employee
+	// and portal), a spent MFA challenge, a passkey that would not register,
+	// and the SSO legs (state, code exchange, ID token, SAML handoff link).
+	password_too_short: (p, t) =>
+		typeof p.min_length === 'number' && p.min_length > 0
+			? t('refusal.passwordTooShort', { min: p.min_length })
+			: null,
+	password_needs_uppercase: fixed('refusal.passwordNeedsUppercase'),
+	password_needs_lowercase: fixed('refusal.passwordNeedsLowercase'),
+	password_needs_digit: fixed('refusal.passwordNeedsDigit'),
+	mfa_challenge_invalid: fixed('refusal.mfaChallengeInvalid'),
+	passkey_registration_failed: fixed('refusal.passkeyRegistrationFailed'),
+	sso_session_expired: fixed('refusal.ssoSessionExpired'),
+	sso_login_rejected: fixed('refusal.ssoLoginRejected'),
+	sso_token_invalid: fixed('refusal.ssoTokenInvalid'),
+	sso_link_expired: fixed('refusal.ssoLinkExpired'),
 	// `api/auth.py::_refuse_other_workspace` — signing in on another
 	// workspace's page. `sign_in_url` is the account's own sign-in page, query
 	// string (`?email=`) included; the sentence names only its host, which is
@@ -1001,6 +1026,7 @@ const BUILDERS: Record<string, Builder> = {
 	card_skip_compliance_hold: fixed('refusal.cardSkipComplianceHold'),
 	card_skip_erp_bill: fixed('refusal.cardSkipErpBill'),
 	card_skip_currency_unknown: fixed('refusal.cardSkipCurrencyUnknown'),
+	card_skip_home_currency_invalid: fixed('refusal.cardSkipHomeCurrencyInvalid'),
 	card_skip_issue_failed: fixed('refusal.cardSkipIssueFailed'),
 	// The whole `/cards/generate` call, on a tenant whose programme is off.
 	cards_not_enabled: fixed('refusal.cardsNotEnabled'),
@@ -1017,13 +1043,14 @@ export const CODED_REFUSAL_CODES = Object.keys(BUILDERS);
 
 /**
  * The localized sentence for a `{code, params}` refusal this table knows, or
- * `null` — then the caller renders the server's `message`. Never throws.
+ * `null` — then the caller renders the server's `message`. Also `null` while
+ * the `refusal` slice is still loading (`api/resolvedOnly.ts`). Never throws.
  */
 export function codedRefusalText(code: string, params: Params, t: Translate): string | null {
 	const build = BUILDERS[code];
 	if (!build) return null;
 	try {
-		return build(params, t);
+		return build(params, resolvedOnly(t));
 	} catch {
 		// A formatter that throws on a value this build did not expect must
 		// degrade to the server's sentence, never blank the error.

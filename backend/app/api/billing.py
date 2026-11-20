@@ -17,6 +17,7 @@ surface where exactness is the point. See ``backend/docs/billing.md``.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -27,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import ROLE_ADMIN, ROLE_CFO, require_roles
+from app.api.refusals import coded_refusal
 from app.config import settings
 from app.database import get_control_db
 from app.models.billing import Plan
@@ -50,7 +52,31 @@ from app.services.billing.ai_invoice_meter import (
     summarize,
 )
 from app.services.billing_adapters import get_billing_adapter
+from app.services.billing_adapters.base import BillingNotConfigured
 from app.tenant import get_tenant, get_tenant_db, lock_organization
+
+logger = logging.getLogger(__name__)
+
+#: The 502 a billing read answers when the provider is configured but the call
+#: failed. Distinct from "not configured", which is the empty / `configured=false`
+#: shape: an outage reported as "no saved cards" or "no receipts" is a wrong
+#: answer an admin acts on (adds a second card), not a safe default.
+BILLING_PROVIDER_UNAVAILABLE = "billing_provider_unavailable"
+BILLING_PROVIDER_UNAVAILABLE_DETAIL = coded_refusal(
+    BILLING_PROVIDER_UNAVAILABLE, "Billing provider is unavailable; please retry."
+)
+
+
+def _provider_unavailable(op: str, exc: Exception) -> HTTPException:
+    """Log a failed billing-provider read by exception CLASS only and build its 502.
+
+    Never the message: a provider error can carry customer detail.
+    """
+    logger.warning("billing %s failed: %s", op, type(exc).__name__)
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY, detail=BILLING_PROVIDER_UNAVAILABLE_DETAIL
+    )
+
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -421,8 +447,9 @@ async def list_billing_invoices(
     admin/cfo only (matches `GET /subscription`). Sourced through the org's
     billing adapter (`mock` locally → deterministic synthetic receipts;
     `stripe_billing` → the org's Stripe invoices). Graceful degradation: an org
-    never provisioned with the provider (no customer id) — or an unconfigured /
-    unavailable provider — yields an empty list, never a 500. Money is an exact
+    never provisioned with the provider (no customer id) or an unconfigured
+    provider yields an empty list; a configured provider that fails is a logged
+    502, never an empty list. Money is an exact
     decimal string (this is a billing surface — exactness is the point).
     """
     provider = _resolve_provider(org)
@@ -430,10 +457,11 @@ async def list_billing_invoices(
     customer_id = _resolve_customer_id(org)
     try:
         provider_invoices = await adapter.list_invoices(customer_id=customer_id)
-    except Exception:  # noqa: BLE001
-        # The live provider fails closed (no key) or is unreachable — surface an
-        # empty list rather than a 500. PII-free: no provider detail is echoed.
+    except BillingNotConfigured:
+        # The live provider fails closed without a key: nothing to list.
         provider_invoices = []
+    except Exception as exc:  # noqa: BLE001 — any other provider failure is a logged 502
+        raise _provider_unavailable("list_invoices", exc) from exc
 
     return BillingInvoicesResponse(
         provider=provider,
@@ -475,19 +503,20 @@ async def create_payment_method_setup_intent(
     admin/cfo only (matches the other billing routes). Returns the provider's
     single-use `client_secret`; the frontend confirms the card against it with
     the provider's JS SDK — no charge, no PAN ever touches our backend. Graceful
-    degradation: an org never provisioned with the provider (no customer id) — or
-    an unconfigured / unavailable provider — yields `configured=false` with a
-    null `client_secret`, never a 500.
+    degradation: an org never provisioned with the provider (no customer id) or an
+    unconfigured provider yields `configured=false` with a null `client_secret`;
+    a configured provider that fails is a logged 502.
     """
     provider = _resolve_provider(org)
     adapter = get_billing_adapter(provider)
     customer_id = _resolve_customer_id(org)
     try:
         intent = await adapter.create_setup_intent(customer_id)
-    except Exception:  # noqa: BLE001
-        # The live provider fails closed (no key) or is unreachable — surface a
-        # not-configured shape rather than a 500. PII-free: no provider detail.
+    except BillingNotConfigured:
+        # The live provider fails closed without a key: the not-configured shape.
         intent = None
+    except Exception as exc:  # noqa: BLE001 — any other provider failure is a logged 502
+        raise _provider_unavailable("create_setup_intent", exc) from exc
 
     return SetupIntentResponse(
         provider=provider,
@@ -520,16 +549,20 @@ async def list_payment_methods(
     """The org's saved cards — PII-safe metadata only (brand / last4 / expiry).
 
     admin/cfo only. NEVER returns or logs a full card number. Graceful
-    degradation: an org never provisioned with the provider (no customer id) — or
-    an unconfigured / unavailable provider — yields an empty list, never a 500.
+    degradation: an org never provisioned with the provider (no customer id) or an
+    unconfigured provider yields an empty list; a configured provider that fails
+    is a logged 502, never "no saved cards".
     """
     provider = _resolve_provider(org)
     adapter = get_billing_adapter(provider)
     customer_id = _resolve_customer_id(org)
     try:
         methods = await adapter.list_payment_methods(customer_id)
-    except Exception:  # noqa: BLE001
+    except BillingNotConfigured:
+        # The live provider fails closed without a key: no cards to list.
         methods = []
+    except Exception as exc:  # noqa: BLE001 — any other provider failure is a logged 502
+        raise _provider_unavailable("list_payment_methods", exc) from exc
 
     return PaymentMethodsResponse(
         provider=provider,

@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/exception.dart';
@@ -62,6 +63,8 @@ import 'package:feohledger_mobile/widgets/record_payment_dialog.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 import 'package:feohledger_mobile/widgets/vendor_status_badge.dart';
+
+final _en = lookupAppLocalizations(const Locale('en'));
 
 // Regression guard mirroring the web axe pass: every key surface must clear
 // Flutter's built-in accessibility guidelines — minimum tap-target size
@@ -275,6 +278,46 @@ void main() {
       expect(find.bySemanticsLabel('For Review: 7, 3 overdue'), findsOneWidget);
       handle.dispose();
     });
+
+    testWidgets('two cards side by side are two announcements, not one',
+        (tester) async {
+      // The dashboard lays KPI cards out in Rows inside a ListView. A
+      // label-only `Semantics` is not a node boundary, so the two siblings
+      // merged into the list item's node, labelled with both cards joined by
+      // a newline: a screen reader read "For Review: 7 / Upcoming: 2, $2K" as
+      // one item. Outside a list item the bug does not show, hence the
+      // ListView.
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(_host(
+        ListView(
+          children: const [
+            Row(
+          children: [
+            Expanded(
+              child: KpiCard(
+                title: 'For Review',
+                value: '7',
+                icon: Icons.rate_review,
+              ),
+            ),
+            Expanded(
+              child: KpiCard(
+                title: 'Upcoming',
+                value: '2',
+                subtitle: r'$2K',
+                icon: Icons.schedule,
+              ),
+            ),
+          ],
+            ),
+          ],
+        ),
+      ));
+
+      expect(find.bySemanticsLabel('For Review: 7'), findsOneWidget);
+      expect(find.bySemanticsLabel(r'Upcoming: 2, $2K'), findsOneWidget);
+      handle.dispose();
+    });
   });
 
   group('PartialConversionNote', () {
@@ -366,7 +409,9 @@ void main() {
         await tester.pumpWidget(_host(VendorStatusBadge(status: status)));
         await expectLater(tester, meetsGuideline(textContrastGuideline));
         expect(
-          find.bySemanticsLabel('Status: ${status.label}'),
+          find.bySemanticsLabel(
+            'Status: ${vendorStatusLabel(_en, status)}',
+          ),
           findsOneWidget,
         );
         handle.dispose();
@@ -913,8 +958,10 @@ void main() {
         final handle = tester.ensureSemantics();
         await tester.pumpWidget(_host(ExceptionStatusBadge(status: status)));
         await expectLater(tester, meetsGuideline(textContrastGuideline));
-        expect(find.bySemanticsLabel('Status: ${status.label}'),
-            findsOneWidget);
+        expect(
+          find.bySemanticsLabel('Status: ${exceptionStatusLabel(_en, status)}'),
+          findsOneWidget,
+        );
         handle.dispose();
       });
     }

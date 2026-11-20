@@ -193,28 +193,14 @@ def test_webhook_tenant_slug_is_string_typed():
 
 
 # ---------------------------------------------------------------------------
-# Password schema — explicit min_length on the new password field
+# Password schema — the length rule lives in `validate_password_complexity`,
+# whose coded refusal the client localizes; the schema keeps only the upper
+# bound (`tests/test_password_security.py` pins both).
 # ---------------------------------------------------------------------------
 
 
-def test_change_password_request_enforces_min_length():
-    """`ChangePasswordRequest.new_password` must declare a minimum
-    length at the schema level — defence in depth alongside the
-    `validate_password_complexity` runtime check."""
-    from app.schemas.auth import ChangePasswordRequest
-
-    field = ChangePasswordRequest.model_fields["new_password"]
-    # min_length sits in field.metadata for pydantic v2.
-    metadata_str = str(field.metadata)
-    assert "MinLen" in metadata_str or "min_length" in metadata_str, (
-        f"new_password must have a min_length constraint; got {field.metadata}"
-    )
-
-
-def test_change_password_request_rejects_clearly_short_new_password():
-    """End-to-end: a 6-char password is rejected by the schema
-    before the handler runs."""
+def test_change_password_request_bounds_the_new_password_length():
     from app.schemas.auth import ChangePasswordRequest
 
     with pytest.raises(pydantic.ValidationError):
-        ChangePasswordRequest(current_password="anything", new_password="short1")
+        ChangePasswordRequest(current_password="anything", new_password="A1a" * 50)

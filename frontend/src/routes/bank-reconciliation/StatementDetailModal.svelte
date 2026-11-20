@@ -44,6 +44,7 @@
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { formatPercent } from '#lib/utils/percent.ts';
 	import { paymentStatusLabelKey } from '#lib/types/payment.ts';
@@ -339,7 +340,7 @@
 									/>
 								</div>
 								{#if candidatesLoading}
-									<p class="picker-note muted">{m('common.loading')}</p>
+									<LoadingState />
 								{:else if candidatesError}
 									<LoadError
 										message={m('bankRecon.error.load')}

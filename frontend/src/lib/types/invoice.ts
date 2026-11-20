@@ -363,7 +363,10 @@ export interface Invoice {
 	vendor_id: string | null;
 	invoice_number: string;
 	amount: MoneyAmount;
-	currency: string;
+	/** `null` = currency unknown: an upload nothing has read yet, or a document
+	 *  that names none (decisions §473). Render the amount bare, never
+	 *  with a guessed symbol (§160 / §196 / §200). */
+	currency: string | null;
 	invoice_date: string | null;
 	received_date: string | null;
 	due_date: string | null;

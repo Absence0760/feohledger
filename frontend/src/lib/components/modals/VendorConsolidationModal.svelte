@@ -25,8 +25,10 @@
 	} from '#lib/api/vendors.ts';
 	import { vendorStatusLabelKey, type VendorCluster } from '#lib/types/vendor.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { consolidationReasonLabel } from '#lib/utils/vendorConsolidation.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let {
 		onclose,
@@ -136,7 +138,7 @@
 	<p class="hint muted">{m('vendors.consolidation.hint')}</p>
 
 	{#if loading}
-		<p class="muted state">{m('vendors.consolidation.loading')}</p>
+		<LoadingState label={m('vendors.consolidation.loading')} />
 	{:else if loadError}
 		<p class="muted state" role="alert">{m('vendors.consolidation.loadFailed')}</p>
 	{:else if clusters.length === 0}
@@ -221,7 +223,7 @@
 									<td class="mono muted">{member.code ?? '—'}</td>
 									<td class="mono muted">{member.tax_id_masked ?? '—'}</td>
 									<td class="muted">{statusKey ? m(statusKey) : (member.status ?? '—')}</td>
-									<td class="num mono">{member.invoice_count}</td>
+									<td class="num mono">{formatCount(member.invoice_count)}</td>
 									<td>
 										{#if member.is_canonical}
 											<span class="role-badge canonical"

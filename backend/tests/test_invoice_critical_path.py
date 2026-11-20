@@ -184,6 +184,7 @@ async def test_invoice_vendor_tax_id_masked_and_round_trip_safe(realdb):
         created = await c.post(
             "/api/invoices",
             json={
+                "currency": "USD",
                 "vendor": "Masked Vendor Inc",
                 "invoice_number": "MASK-001",
                 "amount": "42.00",

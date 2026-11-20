@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
+import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
@@ -27,16 +29,19 @@ class InvoiceListTile extends StatelessWidget {
 
   // A single, sensible screen-reader announcement for the whole row, instead
   // of letting the reader walk 4-5 disjoint Text spans (WCAG 1.3.1 / 4.1.2).
-  String get _semanticLabel {
+  String _semanticLabel(AppLocalizations l) {
+    final due = invoice.dueDate;
     final parts = <String>[
-      if (selectionMode) selected ? 'Selected' : 'Not selected',
-      invoice.vendorName ?? 'Unknown Vendor',
+      if (selectionMode) selected ? l.listRowSelected : l.listRowNotSelected,
+      invoice.vendorName ?? l.invoiceDetailUnknownVendor,
       if (invoice.amount != null) _amount,
-      if (invoice.invoiceNumber != null) 'invoice ${invoice.invoiceNumber}',
-      invoice.status.label,
-      if (invoice.dueDate != null)
-        '${invoice.dueDate!.isBefore(DateTime.now()) ? 'past due' : 'due'} '
-            '${formatLongDayMonth(invoice.dueDate!)}',
+      if (invoice.invoiceNumber != null)
+        l.listRowInvoiceNumber(invoice.invoiceNumber!),
+      invoiceStatusLabel(l, invoice.status),
+      if (due != null)
+        due.isBefore(DateTime.now())
+            ? l.listRowPastDue(formatLongDayMonth(due))
+            : l.listRowDue(formatLongDayMonth(due)),
     ];
     return parts.join(', ');
   }
@@ -52,16 +57,17 @@ class InvoiceListTile extends StatelessWidget {
     // Merge the inner spans into one announcement; the row stays a single
     // focusable button for assistive tech when it's tappable. In selection
     // mode it reads as a checkbox toggle.
+    final l = AppLocalizations.of(context);
     return Semantics(
-      label: _semanticLabel,
+      label: _semanticLabel(l),
       button: onTap != null && !selectionMode,
       checked: selectionMode ? selected : null,
       excludeSemantics: true,
-      child: _buildTile(),
+      child: _buildTile(l),
     );
   }
 
-  Widget _buildTile() {
+  Widget _buildTile(AppLocalizations l) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       onTap: onTap,
@@ -81,7 +87,7 @@ class InvoiceListTile extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              invoice.vendorName ?? 'Unknown Vendor',
+              invoice.vendorName ?? l.invoiceDetailUnknownVendor,
               style: const TextStyle(fontWeight: FontWeight.w600),
               overflow: TextOverflow.ellipsis,
             ),

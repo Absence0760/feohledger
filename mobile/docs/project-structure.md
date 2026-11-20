@@ -13,9 +13,10 @@ mobile/
 │   ├── config.dart              # API URL, tenant slug
 │   ├── l10n/                    # i18n — ARB catalogues + committed gen-l10n output
 │   │   ├── app_en.arb           # source-of-truth catalogue (+ app_{de,fr,es,pt,pt_BR,ja}.arb)
+│   │   ├── load_error_messages.dart # describeLoadError: a failed read as a localized sentence (the server's detail inside the screen's own words, or the connection sentence) — never an exception toString()
 │   │   └── gen/                 # committed AppLocalizations (flutter gen-l10n; non-synthetic)
 │   ├── api/
-│   │   ├── api_client.dart      # HTTP client (JWT + X-Tenant-Slug header, timeout, debug logs)
+│   │   ├── api_client.dart      # HTTP client (JWT + X-Tenant-Slug header, timeout, debug logs); `getPage` → `PagedResult` (a list page's items + the server's `total`; an envelope with no total counts its own rows). `getList` is the items alone
 │   │   └── endpoints.dart       # Typed API methods (auth, invoices, dashboard, payments)
 │   ├── models/
 │   │   ├── user.dart            # User model with role helpers
@@ -27,9 +28,9 @@ mobile/
 │   │   ├── invoice.dart         # Invoice, InvoiceStatus enum (12 states); isEditable mirrors backend IMMUTABLE_STATUSES; `Invoice.financiallyLocked` is the server's `financially_locked` verdict (missing = locked; decisions §370) + kFinancialInvoiceFields / stripFinancialFields
 │   │   ├── mfa_challenge.dart    # MFAChallenge (login MFA-challenge response) — challengeToken + offered methods (totp/email) + mustEnroll
 │   │   ├── exception.dart       # ApException, ApExceptionStatus + ApExceptionSeverity enums
-│   │   ├── notification.dart    # AppNotification (in-app notification center row); eventLabel + linksToInvoice helper; copyMarkedRead for optimistic mark-read
-│   │   ├── payment.dart         # Payment (+ its invoice's `currency`), PaymentMethod, DashboardData (reads the `reporting` block's rollups + `reporting_currency` — the face-value keys are cross-currency sums), aging, trends
-│   │   ├── payment_queue.dart   # PaymentQueueItem (own invoice currency), PaymentSummary (+ the reporting `currency` it names), PaymentRun (total is a cross-currency SUM — no currency exists for it), PaymentRunSelection (money as display strings — no client float math)
+│   │   ├── notification.dart    # AppNotification (in-app notification center row); linksToInvoice helper (event names: `l10n/enum_labels.dart`); copyMarkedRead for optimistic mark-read
+│   │   ├── payment.dart         # Payment (amount + discount as display strings, never `double`; + its invoice's `currency`; `toJson` for the offline cache), PaymentMethod, DashboardData (reads the `reporting` block's rollups + `reporting_currency` — the face-value keys are cross-currency sums), aging, trends
+│   │   ├── payment_queue.dart   # PaymentQueueItem (own invoice currency), PaymentSummary (+ the reporting `currency` it names), PaymentRun (total in the `currency` the run response names; `PaymentRunStatus` enum + the run rules as predicates — `isExecutable` / `isCancellable` / `awaitsCfoApproval` / `canTakeCfoApproval` / `mayRecordOutside` — so no screen compares a raw status string), PaymentRunSelection (money as display strings — no client float math)
 │   │   ├── vendor.dart          # Vendor, VendorStatus enum (active/unverified/inactive/rejected)
 │   │   └── workflow.dart        # WorkflowDefinition + WorkflowStepConfig (read-only; parses steps_config.steps; typeLabel helper)
 │   ├── services/
@@ -42,50 +43,52 @@ mobile/
 │   ├── stores/
 │   │   ├── adaptive_store.dart  # Adaptive read models — three independent section states + request sequences; dismiss patches the row from the response; NOT offline-cached (privileged analytics read)
 │   │   ├── goods_receipt_store.dart # Record-a-goods-receipt form — PO search + pick (two request sequences), submit with one Idempotency-Key per opened form; NOT offline-cached
-│   │   ├── inspection_store.dart # Quality inspections — list + server-side result filter, record (refetches), getById, goods-receipt options; NOT offline-cached (a stale pass/fail is a wrong answer about payability)
+│   │   ├── inspection_store.dart # Quality inspections — list + server-side result filter, record (refetches), getById, goods-receipt options; `loadError` (fetch) apart from `actionError` (record / receipt options); NOT offline-cached (a stale pass/fail is a wrong answer about payability)
 │   │   ├── auth_store.dart      # Auth state — login, logout, role checks (incl. canBulkEditInvoices + isOrgAdmin gates); binds the session scope on login/restore
 │   │   ├── admin_user_store.dart # Admin user management — users + roles, set-roles / activate-deactivate (admin-only, not offline-cached)
 │   │   ├── org_settings_store.dart # Organization settings — load + save the safe subset (company + invoice defaults; admin-only, not offline-cached)
 │   │   ├── org_currency_store.dart # The org's REPORTING currency for aggregates no payload names (adaptive per-vendor averages, the cash-flow forecast leg) — three settings rungs, `null` when none is usable; NOT for per-row amounts, which carry their own
-│   │   ├── invoice_store.dart   # Invoice list, filter, approve/reject + multi-select bulk delete/status (offline cached)
+│   │   ├── invoice_store.dart   # Invoice list, filter, approve/reject + multi-select bulk delete/status (offline cached). Both lists page: the Invoices tab through `PagedFetch` (`total` / `hasMore` / `loadMore`), the approvals queue through its own `PagedList` (`pendingTotal` is the queue's count). `loadError` / `pendingLoadError` are fetch failures only; every action writes `actionError`
 │   │   ├── exception_store.dart # Exception list, filter, resolve/escalate/dismiss + getById (detail) + assign (in-place row patch) + multi-select state + bulkResolve (offline cached)
-│   │   ├── notification_store.dart # In-app notification center — list (All/Unread filter), unread badge count, optimistic mark-read + read-all (offline cached)
+│   │   ├── notification_store.dart # In-app notification center — list (All/Unread filter), unread badge count, optimistic mark-read + read-all; `loadError` (fetch) apart from `actionError` (mark-read / read-all) (offline cached)
 │   │   ├── dashboard_store.dart # Dashboard KPI data (offline cached)
 │   │   ├── contract_store.dart  # Contract list, status filter + search, activate/terminate/cancel (offline cached)
 │   │   ├── cash_flow_store.dart # Predictive cash-flow forecast + cash position (CFO/admin); 30/60/90-day horizon; not offline-cached (privileged fast-moving read)
 │   │   ├── locale_store.dart    # Per-device display-language choice (i18n) → MaterialApp.locale; persisted via secure storage, never account-roamed
-│   │   ├── vendor_store.dart    # Vendor list, filter/search, verify/reject, ERP sync (offline cached)
+│   │   ├── vendor_store.dart    # Vendor list, filter/search (`isFiltered`, `clearFilters`), verify/reject, ERP sync; `loadError` (fetch) apart from `actionError` (verify / reject / sync) (offline cached)
 │   │   ├── workflow_store.dart  # Workflow-definition list (read-only) — load + loading/error; NOT offline-cached (privileged admin read, no mutators)
-│   │   └── payment_queue_store.dart # Payment queue + summary + runs; per-row method selection; create/execute/cancel runs; execution mode + record-as-paid (row + run)
+│   │   ├── payment_queue_store.dart # Payment queue + summary + runs; per-row method selection; create/execute/cancel runs; execution mode + record-as-paid (row + run). Errors split three ways: `queueLoadError` (Queue tab), `runsLoadError` (Runs tab), `actionError` (a refused run action); `fetch` ordered by SequencedFetch, `fetchRuns` by its own RequestSequence
+│   │   └── payment_store.dart # Payment history (`GET /api/payments`): SequencedFetch + `OfflineStore.cachedFetch`, `loadError` / `actionError`
 │   ├── utils/
 │   │   ├── money.dart           # THE money formatter — formatMoney (num) / formatMoneyString (exact decimal) / formatMoneyCompact + normalizeCurrencyCode; a figure is formatted with the currency its own payload names, and renders BARE when none can be proven (never a substituted `$`)
 │   │   ├── a11y.dart            # A11y.announce — screen-reader live-region announcements (SemanticsService, Directionality-aware)
 │   │   ├── debouncer.dart       # Trailing-edge debounce for search-as-you-type
-│   │   └── sequenced_fetch.dart # SequencedFetch mixin — per-store request sequence so a slow response can't overwrite a newer one
+│   │   ├── sequenced_fetch.dart # SequencedFetch mixin — per-store request sequence so a slow response can't overwrite a newer one
+│   │   └── paged_fetch.dart     # PagedFetch mixin (on SequencedFetch) + PagedList — a server-paged list's rows, `total`, `page`, `hasMore`, `loadMore` (appends, de-duplicated by key; a next page reuses the fetch's token, so a refetch discards it); offline-cached rows are unpaged. Adopted by InvoiceStore; other list stores adopt it as they convert
 │   ├── screens/
 │   │   ├── login_screen.dart    # Tenant + email/password login (routes to MfaScreen on an MFA challenge)
 │   │   ├── mfa_screen.dart      # MFA second-factor code entry (TOTP + email-OTP backup); POST /auth/mfa/verify → JWT
 │   │   ├── home_screen.dart     # Bottom nav host (role-aware tabs)
 │   │   ├── dashboard_screen.dart # KPIs, aging, top vendors (app-bar: CashFlowButton + NotificationBell)
 │   │   ├── cash_flow_screen.dart # Predictive cash-flow forecast (CFO/admin) — KPI summary (opening/projected-end balance, committed/pending outflow), per-period forecast + running cash-position list, low-balance alert, 30/60/90-day horizon chips, pull-to-refresh
-│   │   ├── invoices_screen.dart  # Invoice list — search + status filters + advanced-search (tune) + camera + multi-select bulk delete/status (admin/ap_manager/cfo)
+│   │   ├── invoices_screen.dart  # Invoice list — search + status filters + advanced-search (tune) + camera + multi-select bulk delete/status (admin/ap_manager/cfo); AsyncListBody with Load more, and a filtered-empty state whose Show all clears chip, search and advanced filters
 │   │   ├── contracts_screen.dart # Contract list — search + status filter chips; tap a row → detail
 │   │   ├── contract_detail_screen.dart # Contract detail — terms/dates/value fields, spend-to-contract summary, line items, activate / terminate lifecycle actions (admin/ap_manager)
 │   │   ├── admin_users_screen.dart # Admin — user management: list/search users, edit roles (system roles), activate/deactivate (admin-only)
 │   │   ├── org_settings_screen.dart # Admin — organization settings: company profile + invoice defaults form (admin-only; ERP/payment/SSO secrets NOT surfaced)
 │   │   ├── invoice_detail_screen.dart # Detail view with approve/reject + edit affordance + warnings/fraud + PO match + ERP status + activity timeline + file preview (image thumbnail / PDF card) → full viewer
-│   │   ├── approvals_screen.dart # Pending approvals with swipe-to-approve
+│   │   ├── approvals_screen.dart # Pending approvals with swipe-to-approve; AsyncListBody with Load more; the count is the server's total of invoices awaiting review
 │   │   ├── exceptions_screen.dart # Exception queue — filter + swipe resolve/dismiss; tap a row → detail; long-press / checklist app-bar action → multi-select + BulkActionBar bulk-resolve (admin/ap_manager)
 │   │   ├── exception_detail_screen.dart # Single-exception detail (GET /api/exceptions/{id}) — full fields + linked invoice + SLA/due/overdue + assignee, resolve/escalate/dismiss + an admin-gated assignee picker; loading/error/empty states
-│   │   ├── notifications_screen.dart # In-app notification center — All/Unread filter, tap → mark read (+ deep-link to invoice detail when the row is an invoice), mark-all-read; empty/loading/error states
+│   │   ├── notifications_screen.dart # In-app notification center — All/Unread filter, tap → mark read (+ deep-link to invoice detail when the row is an invoice), mark-all-read; body is `AsyncListBody` (Unread-to-zero → filtered empty + Show all)
 │   │   ├── capture_screen.dart   # Camera/gallery capture + file picker (PDF/PNG/JPG/TIFF) → upload → extract
-│   │   ├── payments_screen.dart  # Payment history
-│   │   ├── vendors_screen.dart   # Vendor management — list + search/status filters, swipe/sheet verify+reject (unverified only), ERP-sync app-bar action (all admin/ap_manager-gated)
-│   │   ├── payment_queue_screen.dart # Pay — Queue tab (select approved invoices + per-row method → Create Run) + Runs tab (execute/cancel drafts, record a run as paid), KPI summary bar, record-only banner
+│   │   ├── payments_screen.dart  # Payment history — PaymentStore + AsyncListBody
+│   │   ├── vendors_screen.dart   # Vendor management — list + search/status filters, swipe/sheet verify+reject (unverified only), ERP-sync app-bar action (all admin/ap_manager-gated); body is `AsyncListBody` (chip or search to zero → filtered empty + Show all, which also clears the search box)
+│   │   ├── payment_queue_screen.dart # Pay — Queue tab (select approved invoices + per-row method → Create Run) + Runs tab (execute/cancel drafts, record a run as paid), KPI summary bar, record-only banner (a NestedScrollView header over each tab, so it scrolls away); both tabs are AsyncListBody
 │   │   ├── workflows_screen.dart # Admin — read-only workflow list (name, active/default status, step count) → tap-through; reached from Settings → Administration
 │   │   ├── workflow_detail_screen.dart # Read-only workflow detail — steps (number, type, name, enabled) + per-step config summary; fetches GET /api/workflows/{id} on open
 │   │   ├── goods_receipt_record_screen.dart # Record a goods receipt — PO search/picker, per-line ordered / received / outstanding with outstanding pre-filled, free-text lines for a line-less PO, coded refusals, segregation note; pops with the GR number
-│   │   ├── inspections_screen.dart # Quality inspections — list + server-side outcome chips, pull-to-refresh, record-inspection FAB (admin/ap_manager); tap a row → detail
+│   │   ├── inspections_screen.dart # Quality inspections — list + server-side outcome chips (to zero → filtered empty + Show all), `AsyncListBody` body, record-inspection FAB (admin/ap_manager); tap a row → detail
 │   │   ├── inspection_detail_screen.dart # Read-only inspection detail — fields + what the outcome does to the 4-way match + an unlinked-row warning; loading / not-found / error states
 │   │   ├── adaptive_screen.dart  # Adaptive AI workflows — Suggestions (+ dismiss) / Approval patterns / Anomalies tabs, per-tab states; read-first (no apply paths)
 │   │   └── settings_screen.dart  # User profile, biometric toggle, logout; Procurement section: Quality Inspections (all roles), Record receipt (admin/ap_manager/ap_clerk); Administration section (gated PER ENTRY — User Management / Organization Settings / Workflows for admins, Adaptive Workflows for admin/ap_manager/cfo)
@@ -107,12 +110,14 @@ mobile/
 │       ├── contract_list_tile.dart    # Contract row with number/title, vendor, value, status
 │       ├── contract_status_badge.dart # Colored contract status chip (draft/active/expired/terminated/cancelled)
 │       ├── status_badge.dart    # Colored invoice status chip
+│       ├── status_pill.dart     # `StatusPill(label, tone, semanticsLabel)` — the one status chip every badge above renders; a fixed `StatusTone` set, each with an opaque background and a text colour computed to ≥4.5:1 (`test/widgets/status_pill_test.dart`)
 │       ├── exception_status_badge.dart # Colored exception status chip (open/escalated/resolved/dismissed)
 │       ├── exception_list_tile.dart    # Exception row with type, invoice, severity, status
 │       ├── notification_list_tile.dart # Notification row — unread dot, title, body, event label + relative time; one merged Semantics label
 │       ├── notification_bell.dart      # App-bar bell action with a live unread Badge → opens NotificationsScreen (in the Dashboard app bar; visible to all roles)
 │       ├── kpi_card.dart        # Dashboard metric card
-│       ├── load_error_state.dart # Full-screen first-load failure: localized message + Retry (never a raw exception string); dashboard today, the per-screen `_ErrorState` copies are candidates to migrate
+│       ├── async_list_body.dart # AsyncListBody<T> — a store-backed list's body in one fixed order: spinner (loading, no rows) → LoadErrorState + Retry (load failed, no rows; never the empty copy) → empty state (scrollable, inside the RefreshIndicator, so it pulls to refresh) → rows with dividers. Slots: `hasError` is the store's FETCH failure only (`loadError`; an action's failure lives in `actionError` and raises nothing here); `errorMessage` is worded from the cause by `describeLoadError` (the server's reason via `…LoadErrorPrefix`, the connection sentence only when no server answered); `empty` for an unfiltered list with no rows; optional `filteredEmpty` (pass it only while a chip / search is set — `FilteredEmptyState`, also exported: "No escalated exceptions" + a Show all that clears the filter). Over rows or empty, StaleDataBanner (also exported; used by the dashboard too) says "showing a saved copy" when `fromCache`, or "couldn't refresh" when a fetch failed with rows still on screen, with a 48dp Retry wired to `onRefresh`; the message is a live region, brown.shade700 on amber.shade50 (8.8:1). Optional `header` (above the rows, not the empty state) and, for a `PagedFetch` store, `onLoadMore` + `hasMore` / `loadingMore` / `loadMoreFailed` / `total`: `LoadMoreFooter` (also exported) under the rows says "Showing 20 of 57" (a live region, so the new count is announced when a page lands) with a 48dp Load more, then "Showing all N". Exceptions, Contracts, Invoices and Approvals use it; `test/screens/async_list_body_adoption_test.dart` bans a hand-rolled `RefreshIndicator(` in lib/screens/ outside its shrinking allowlist of not-yet-converted screens
+│       ├── load_error_state.dart # Full-screen first-load failure: localized message + Retry (never a raw exception string). Used by the dashboard, most list screens and the five detail screens (invoice, contract, inspection, workflow, exception), which word the message with `l10n/load_error_messages.dart`'s `describeLoadError`. `test/screens/load_error_rendering_guard_test.dart` bans a hand-built `Icons.error_outline, size:` block and a caught error's `toString()` / `'$e'` in `lib/screens/` (allowlist: the screens not yet converted)
 │       ├── partial_conversion_note.dart # Amber-reading disclosure that a rendered rollup counts unconvertible rows at face value (dashboard + cash flow); caller passes the localized sentence and renders it only for a non-zero count
 │       ├── cash_flow_button.dart # Dashboard app-bar action → CashFlowScreen; gated to CFO/admin (renders nothing otherwise; mirrors backend _CFO_ROLES)
 │       ├── invoice_list_tile.dart # Invoice row with vendor, amount, status

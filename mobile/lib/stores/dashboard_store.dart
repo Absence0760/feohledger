@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
@@ -78,6 +79,16 @@ class DashboardStore extends ChangeNotifier {
           ),
           'upcoming_total_amount_reporting': d.upcoming.totalAmount,
           'upcoming_unconverted_count': d.upcoming.unconvertedCount,
+          // Only when the live payload had them: a cache written from an
+          // older backend must not invent a `0` overdue.
+          if (d.overdue != null) ...{
+            'overdue_count': d.overdue!.count,
+            'overdue_total': d.overdue!.totalsToJson(),
+          },
+          if (d.dueSoon != null) ...{
+            'due_soon_count': d.dueSoon!.count,
+            'due_soon_total': d.dueSoon!.totalsToJson(),
+          },
         },
         fromCache: (json) =>
             DashboardData.fromJson(json as Map<String, dynamic>),
@@ -101,7 +112,7 @@ class DashboardStore extends ChangeNotifier {
       // No cache to fall back on — don't keep claiming the data is cached.
       _fromCache = false;
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }

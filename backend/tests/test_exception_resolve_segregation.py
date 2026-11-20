@@ -601,12 +601,12 @@ def test_every_refusal_code_has_a_message():
 
 
 def test_the_scope_is_the_payment_run_gate_and_nothing_else():
-    """`is_payment_blocking` reads `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`,
+    """`is_payment_blocking` reads `services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`,
     so there is no second classification to keep in step — adding a type to that
     tuple extends this control for free. Pinned so a refactor that forks the
     definition is caught."""
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
     from app.services.exception_lifecycle import EXCEPTION_TYPES, is_payment_blocking
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     in_scope = {t for t in EXCEPTION_TYPES if is_payment_blocking(t)}
     assert in_scope == set(PAYMENT_BLOCKING_EXCEPTION_TYPES)

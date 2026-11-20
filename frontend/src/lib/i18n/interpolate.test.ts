@@ -60,3 +60,15 @@ test('plural: missing selected category falls back to other', () => {
 	const tpl = '{n, plural, other {# things}}';
 	expect(interpolate(tpl, { n: 1 }, 'en')).toBe('1 things');
 });
+
+test('plural: # is the count grouped for the message locale, not raw digits', () => {
+	expect(interpolate(INVOICES, { n: 12345 }, 'en')).toBe('12,345 invoices');
+	const de = '{n, plural, one {# Rechnung} other {# Rechnungen}}';
+	expect(interpolate(de, { n: 12345 }, 'de')).toBe('12.345 Rechnungen');
+	// A string count (some params arrive as strings) is grouped the same way.
+	expect(interpolate(INVOICES, { n: '2500' }, 'en')).toBe('2,500 invoices');
+});
+
+test('plural: a fractional plural value keeps its digits rather than rounding', () => {
+	expect(interpolate('{n, plural, other {# days}}', { n: 1.5 }, 'en')).toBe('1.5 days');
+});

@@ -26,6 +26,10 @@ name: Deploy to the VM
 # armed by FRONTEND_PUBLISH_ENABLED=true (infra/README.md § Frontend on
 # CloudFront); with it off, a release ships the backend and no SPA at all.
 #
+# Last, the `smoke` job runs deploy/smoke.sh from the runner through public
+# DNS: deploy.sh's own smoke check goes through the VM's Caddy at 127.0.0.1,
+# so only this one sees a DNS, Elastic IP or security-group fault on `api.`.
+#
 # `aws-deploy.yml` is the separate, disarmed pipeline for the ECS build-out
 # (docs/production-deployment.md); this one is for the stack that exists.
 #
@@ -315,3 +319,55 @@ jobs:
           fi
           origins+=("${app}" "https://smoke-check.${app#https://}")
           src/deploy/smoke-frontend.sh frontend-build "${origins[@]}"
+
+  smoke:
+    name: Smoke-check the API through public DNS
+    runs-on: ubuntu-latest
+    # Last, after the VM deploy and the SPA publish succeeded; skipped with the
+    # deploy job. Every other check in this workflow either runs ON the VM
+    # (deploy.sh's `smoke.sh --vm`, through the VM's own Caddy at 127.0.0.1)
+    # or asks only the CloudFront hosts (smoke-frontend.sh). This one asks
+    # `api.` from outside, so a DNS, Elastic IP or security-group fault on the
+    # API fails the release instead of showing up as a broken site.
+    #
+    # No environment, no AWS, no secret: a second `production` job would pause
+    # for a second approval (docs/production-deployment.md § Production gate),
+    # and this job needs nothing but curl. Same shape as aws-deploy.yml's
+    # `smoke` job. A failure fails the run and rolls nothing back: a public-DNS
+    # fault is not fixed by redeploying older code, and a rollback is the
+    # operator's call (run this workflow from an older release tag).
+    needs: deploy
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: deploy
+
+      - name: Smoke-check the deployed stack (deploy/smoke.sh)
+        # The apex, api/health, a tenant host's TLS, and /api/public-config
+        # agreeing with SIGNUP_ENABLED (plus a captcha site key whenever signup
+        # is on). Repository variables, none secret; an unset one fails the
+        # step rather than skipping its check.
+        #
+        # The tenant host is the same synthetic `smoke-check.` subdomain the
+        # edge check uses: since §364 every tenant subdomain is CloudFront's
+        # wildcard, so it proves tenant TLS without naming a customer in this
+        # public run log.
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
+          SIGNUP_ENABLED: ${{ vars.SIGNUP_ENABLED }}
+        run: |
+          set -euo pipefail
+          for name in APP_URL PUBLIC_API_URL SIGNUP_ENABLED; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository variable ${name} is empty (docs/production-deployment.md § Required configuration)."
+              exit 1
+            fi
+          done
+          app=${APP_URL#https://}
+          app=${app%/}
+          api=${PUBLIC_API_URL#https://}
+          deploy/smoke.sh --app "$app" --api "${api%/}" \
+            --tenant "smoke-check.${app}" --signup "$SIGNUP_ENABLED"

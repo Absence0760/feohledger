@@ -11,6 +11,8 @@ import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/payments_screen.dart';
+import 'package:feohledger_mobile/services/offline_store.dart';
+import 'package:feohledger_mobile/stores/payment_store.dart';
 
 Widget _localized(Widget home) => MaterialApp(
       localizationsDelegates: appLocalizationsDelegates,
@@ -26,7 +28,8 @@ http.Response _list(List<Map<String, dynamic>> items) => http.Response(
 
 Map<String, dynamic> _paymentJson(
   String id, {
-  double amount = 1250.50,
+  // A number or the decimal string the backend actually sends (`MoneyAmount`).
+  Object amount = 1250.50,
   String method = 'ach',
   String status = 'completed',
   String? reference = 'REF-001',
@@ -56,9 +59,17 @@ Future<void> _pumpUntil(WidgetTester tester, Finder finder) async {
 }
 
 void main() {
-  setUp(() {
+  setUpAll(() {
+    OfflineStore.instance.debugUseMemory();
+  });
+
+  setUp(() async {
     FlutterSecureStorage.setMockInitialValues({});
     ApiClient().debugConfigure();
+    // The store is a process-lifetime singleton: without this, one test's
+    // rows (or cached copy) would be on screen when the next one starts.
+    PaymentStore.instance.reset();
+    await OfflineStore.instance.clear();
   });
 
   testWidgets('shows a loading spinner while the fetch is in flight',
@@ -148,14 +159,16 @@ void main() {
     // substitute a default". The digits still render; the symbol does not.
     ApiClient().debugConfigure(
       client: MockClient((req) async => _list([
-            _paymentJson('1', amount: 1250.50, currency: null),
+            _paymentJson('1', amount: '1250.50', currency: null),
           ])),
     );
 
     await tester.pumpWidget(_localized(const PaymentsScreen()));
     await _pumpUntil(tester, find.byType(ListTile));
 
-    expect(find.text('1,250.50'), findsOneWidget);
+    // With no code there is nothing to format with, so the server's own
+    // decimal string is the figure, verbatim (`formatMoneyString`).
+    expect(find.text('1250.50'), findsOneWidget);
     expect(find.textContaining(r'$'), findsNothing);
   });
 
@@ -226,29 +239,82 @@ void main() {
     expect(find.byIcon(Icons.credit_card), findsOneWidget);
   });
 
-  testWidgets('shows an error message when the fetch fails', (tester) async {
+  testWidgets('a failed first load says why and offers Retry, which reloads',
+      (tester) async {
+    // It used to print "Error: …" as plain text with no way to try again
+    // short of leaving the screen.
+    var fail = true;
     ApiClient().debugConfigure(
-      client: MockClient((req) async => http.Response('boom', 500)),
+      client: MockClient((req) async => fail
+          ? http.Response(
+              jsonEncode({'detail': 'Not permitted'}),
+              403,
+              headers: {'content-type': 'application/json'},
+            )
+          : _list([_paymentJson('1', amount: 99.00)])),
     );
 
     await tester.pumpWidget(_localized(const PaymentsScreen()));
-    await _pumpUntil(tester, find.textContaining('Error:'));
+    await _pumpUntil(tester, find.text('Retry'));
 
-    expect(find.textContaining('Error:'), findsOneWidget);
+    // The server's own reason, framed in the screen's words.
+    expect(
+      find.text("Couldn't load payments: Not permitted"),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(FilledButton, 'Retry'), findsOneWidget);
     expect(find.byType(ListTile), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+    // Never the empty state: "No payments" on a refused read would be false.
+    expect(find.text('No payments'), findsNothing);
+
+    fail = false;
+    await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+    await _pumpUntil(tester, find.byType(ListTile));
+
+    expect(find.text(r'$99.00'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
   });
 
-  testWidgets('shows an error message when the transport throws',
+  testWidgets('a transport failure reads as the connection sentence + Retry',
       (tester) async {
     ApiClient().debugConfigure(
       client: MockClient((req) async => throw Exception('network down')),
     );
 
     await tester.pumpWidget(_localized(const PaymentsScreen()));
-    await _pumpUntil(tester, find.textContaining('Error:'));
+    await _pumpUntil(tester, find.text('Retry'));
 
-    expect(find.textContaining('Error:'), findsOneWidget);
+    expect(
+      find.text(
+        "Couldn't reach FeohLedger. Check your connection and tap Retry.",
+      ),
+      findsOneWidget,
+    );
+    // Never the raw exception.
+    expect(find.textContaining('network down'), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets('offline, the saved copy is shown and labelled as one',
+      (tester) async {
+    var offline = false;
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (offline) throw Exception('offline');
+        return _list([_paymentJson('1', amount: 1250.50, currency: 'EUR')]);
+      }),
+    );
+    // Prime the cache with one live load, then lose the network.
+    await tester.runAsync(PaymentStore.instance.fetch);
+    offline = true;
+
+    await tester.pumpWidget(_localized(const PaymentsScreen()));
+    await _pumpUntil(tester, find.byType(ListTile));
+    await _pumpUntil(tester, find.byIcon(Icons.cloud_off));
+
+    expect(find.text('€1,250.50'), findsOneWidget);
+    expect(find.byIcon(Icons.cloud_off), findsOneWidget);
+    expect(PaymentStore.instance.fromCache, isTrue);
   });
 }

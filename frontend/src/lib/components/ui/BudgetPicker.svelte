@@ -27,6 +27,7 @@
 	import type { SearchPickerLoad } from '#lib/utils/searchPicker.ts';
 	import { budgetOptionLabel } from '#lib/utils/budgetPicker.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let {
 		value = $bindable(''),
@@ -76,7 +77,7 @@
 		empty: m('budgets.picker.empty', { currency: code }),
 		noMatches: (query) => m('budgets.picker.noMatches', { query }),
 		showingAll: (total) => m('budgets.picker.showingAll', { total }),
-		showingPartial: (shown, total) => m('budgets.picker.showingPartial', { shown, total }),
+		showingPartial: (shown, total) => m('budgets.picker.showingPartial', { shown: formatCount(shown), total: formatCount(total) }),
 		refineHint: m('budgets.picker.refineHint'),
 		loadMore: m('budgets.picker.loadMore'),
 		loadMoreFailed: m('budgets.picker.loadMoreFailed'),

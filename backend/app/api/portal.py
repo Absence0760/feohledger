@@ -43,6 +43,7 @@ from app.models.procurement import (
     UNISSUED_PO_STATUS,
     POLineItem,
     PurchaseOrder,
+    po_currency_code,
     po_vouched_money,
 )
 from app.models.supplier_chat import ChatAuthorRole, ChatThreadStatus, SupplierChatMessage
@@ -573,7 +574,8 @@ async def submit_invoice(
         vendor_id=vendor.id,
         description="",
         amount=Decimal("0"),
-        currency="USD",
+        # Unknown until extraction reads the document (§473).
+        currency=None,
         status=InvoiceStatus.new,
         organization_id=vendor.organization_id,
         # The supplier portal has no entity selector — a vendor's invoice lands
@@ -903,7 +905,9 @@ async def list_my_payments(
                 invoice_id=str(p.invoice_id),
                 invoice_number=inv_num or "",
                 amount=p.amount,
-                currency=inv_currency or "USD",
+                # NULL when the paid invoice records no currency (decisions
+                # §473): the portal renders the figure bare, never as dollars.
+                currency=inv_currency,
                 method=p.method,
                 status=p.status,
                 reference=p.reference,
@@ -1001,6 +1005,16 @@ async def _pos_already_invoiced(
     invoice bills nothing while it stays rejected, and the supplier who is
     told to re-bill needs a way to (decisions §468).
 
+    Except the PO's OWN rejected flip (``reference_number`` is its
+    ``po-flip:<po_id>`` marker), which still counts (decisions §469), and for
+    that PO only.
+    The marker is unique in every status (migration 0024), so a second flip
+    could never mint an invoice anyway: the endpoint replays the rejected one.
+    And a rejected flip is reopened, not replaced (``rejected → new`` by AP, or
+    the supplier's ``/resubmit``), so a second live flip beside it would be a
+    double bill the moment it reopens. Offering "Create invoice" there would
+    promise a creation the endpoint never performs.
+
     Scoped to the caller's own vendor, so the verdict says nothing about any
     other supplier's invoices.
     """
@@ -1011,18 +1025,32 @@ async def _pos_already_invoiced(
     cites = Invoice.split_po_ids.has_any(array(ids))
     if numbers:
         cites = or_(Invoice.po_number.in_(numbers), cites)
+    own_flips = [f"po-flip:{po.id}" for po in pos]
     rows = (
         await db.execute(
-            select(Invoice.po_number, Invoice.entity_id, Invoice.split_po_ids).where(
+            select(
+                Invoice.po_number,
+                Invoice.entity_id,
+                Invoice.split_po_ids,
+                Invoice.status,
+                Invoice.reference_number,
+            ).where(
                 Invoice.vendor_id == vendor_id,
-                Invoice.status != InvoiceStatus.rejected,
+                or_(
+                    Invoice.status != InvoiceStatus.rejected,
+                    Invoice.reference_number.in_(own_flips),
+                ),
                 cites,
             )
         )
     ).all()
     invoiced: set[uuid.UUID] = set()
     for po in pos:
-        for number, entity_id, split in rows:
+        for number, entity_id, split, inv_status, reference in rows:
+            if inv_status == InvoiceStatus.rejected and reference != f"po-flip:{po.id}":
+                # A rejected flip counts for its OWN PO only, so a flip whose
+                # PO number was edited cannot mark another order invoiced.
+                continue
             same_entity = entity_id is None or po.entity_id is None or entity_id == po.entity_id
             by_number = number == po.po_number and same_entity
             by_leg = isinstance(split, list) and str(po.id) in split
@@ -1225,11 +1253,11 @@ async def flip_purchase_order(
         amount=po.total,
         # The invoice bills the PO's own total, so it is in the PO's currency.
         # A PO that records none (created before migration 0099 with no
-        # requisition behind it) falls back to the column's historical "USD":
-        # `invoices.currency` is NOT NULL and cannot say "unknown". That pairing
-        # is never mistaken for proof — `po_matching` reads the PO's NULL, not
-        # this placeholder, and reports the currency leg as unverified.
-        currency=po.currency or "USD",
+        # requisition behind it) yields an invoice that records none either:
+        # NULL is "unknown" (decisions §473), so a run refuses it as
+        # `currency_unknown` until someone states the code, rather than paying
+        # it in a guessed USD.
+        currency=po_currency_code(po.currency),
         status=InvoiceStatus.new,
         po_number=po.po_number,
         # Stable per-PO marker — drives the idempotency guard above.

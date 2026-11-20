@@ -722,3 +722,71 @@ async def test_agent_stats_scopes_by_entity(realdb):
 
         stats_all = (await c.get("/api/exceptions/agent-stats")).json()
         assert stats_all["total_decisions"] == 4
+
+
+@pytest.mark.parametrize(
+    ("status", "warned", "refused"),
+    [
+        (InvoiceStatus.approved, True, True),
+        (InvoiceStatus.approved, False, False),
+        (InvoiceStatus.ready_for_review, True, False),
+    ],
+)
+def test_an_agent_approval_past_a_po_over_billing_warning_unwinds(status, warned, refused):
+    """An agent's approval is no person reading the cumulative over-billing
+    warning (decisions §469): the coordinator unwinds an apply that approved an
+    invoice carrying it, and escalates."""
+    from types import SimpleNamespace
+
+    from app.services.exception_agents.coordinator import _approved_past_po_overbilling
+    from app.services.invoice_warning_catalog import warning
+
+    warnings = (
+        [
+            warning(
+                "po_billed_beyond_total",
+                "warning",
+                billedAmount=Decimal("500.00"),
+                poNumber="PO-469",
+                poTotal=Decimal("500.00"),
+                currency="USD",
+            )
+        ]
+        if warned
+        else None
+    )
+    invoice = SimpleNamespace(status=status, warnings=warnings)
+    assert _approved_past_po_overbilling(invoice) is refused
+
+
+@pytest.mark.parametrize(
+    ("status", "severity", "refused"),
+    [
+        (InvoiceStatus.approved, "error", True),
+        (InvoiceStatus.approved, "warning", False),
+        (InvoiceStatus.ready_for_review, "error", False),
+    ],
+)
+def test_an_agent_approval_past_a_not_to_exceed_contract_cap_unwinds(status, severity, refused):
+    """A not-to-exceed contract whose limit the invoice cannot be measured
+    against (another currency) is an `error` finding that no unattended door
+    approves past (decisions §472); an agent's approval is no person
+    reading it either. A plain contract's `warning` does not unwind."""
+    from types import SimpleNamespace
+
+    from app.services.exception_agents.coordinator import _approved_past_contract_cap
+    from app.services.invoice_warning_catalog import warning
+
+    invoice = SimpleNamespace(
+        status=status,
+        warnings=[
+            warning(
+                "contract_currency_mismatch",
+                severity,
+                invoiceCurrency="EUR",
+                contractNumber="MSA-1",
+                contractCurrency="USD",
+            )
+        ],
+    )
+    assert _approved_past_contract_cap(invoice) is refused

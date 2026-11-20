@@ -1,8 +1,8 @@
 <script lang="ts">
 	import type { UsageResponse } from '#lib/types/assistant.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { formatMonth } from '#lib/utils/time.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	let { usage }: { usage: UsageResponse | null } = $props();
 
@@ -14,11 +14,6 @@
 	let near = $derived(pct >= 80 && pct < 100);
 	let over = $derived(pct >= 100);
 
-	// The in-app locale, not the browser's: a bare `Intl.NumberFormat()` printed
-	// "1,234" under a German UI. Read per call so a locale switch re-renders.
-	function fmt(n: number): string {
-		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
-	}
 	// The backend sends a `YYYY-MM` key; a reader says "Nov 2026".
 	let label = $derived(usage ? m('assistant.usage.label', { period: formatMonth(usage.period) }) : '');
 </script>
@@ -29,9 +24,9 @@
 			<span class="usage-label">{label}</span>
 			<span class="usage-figs">
 				{#if unlimited}
-					{m('assistant.usage.tokens', { total: fmt(usage.total_tokens) })}
+					{m('assistant.usage.tokens', { total: formatCount(usage.total_tokens) })}
 				{:else}
-					{m('assistant.usage.tokensOf', { total: fmt(usage.total_tokens), budget: fmt(usage.budget) })}
+					{m('assistant.usage.tokensOf', { total: formatCount(usage.total_tokens), budget: formatCount(usage.budget) })}
 				{/if}
 			</span>
 		</div>
@@ -42,7 +37,7 @@
 			{#if over}
 				<span class="usage-note">{m('assistant.usage.budgetReached')}</span>
 			{:else if near}
-				<span class="usage-note">{m('assistant.usage.remaining', { remaining: fmt(usage.remaining) })}</span>
+				<span class="usage-note">{m('assistant.usage.remaining', { remaining: formatCount(usage.remaining) })}</span>
 			{/if}
 		{:else}
 			<span class="usage-note muted">{m('assistant.usage.unlimited')}</span>

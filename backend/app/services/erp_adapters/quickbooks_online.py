@@ -115,6 +115,7 @@ from app.services.erp_adapters.posted_total import (
     previous_bill_removed,
 )
 from app.services.payment_methods import RailPart
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.json_money import dumps_exact_json
 
 PROVIDER = "QuickBooks Online"
@@ -1102,8 +1103,8 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             # Fail closed: QuickBooks states every bill's currency (the home
             # one included), so a bill or a payment without one is not known
             # to be in the same currency, and the figure is not posted.
-            bill_currency = str((bill.get("CurrencyRef") or {}).get("value") or "").strip().upper()
-            if not bill_currency or bill_currency != (payload.currency or "").strip().upper():
+            bill_currency = iso_currency_or_none((bill.get("CurrencyRef") or {}).get("value"))
+            if bill_currency is None or bill_currency != iso_currency_or_none(payload.currency):
                 return _nothing_posted(erp_refusal(PROVIDER, CURRENCY_MISMATCH))
             balance = _dec(bill.get("Balance"))
             if balance is None or payload.amount > balance:
@@ -1375,7 +1376,7 @@ def _is_cash_payment(record: dict) -> bool:
 
 
 def _currency(record: dict) -> str | None:
-    return str((record.get("CurrencyRef") or {}).get("value") or "").strip().upper() or None
+    return iso_currency_or_none((record.get("CurrencyRef") or {}).get("value"))
 
 
 def _cash_currency(bill: dict, cash: list[dict]) -> str | None:

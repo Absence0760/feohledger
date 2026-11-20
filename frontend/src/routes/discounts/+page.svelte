@@ -3,6 +3,7 @@
 	import { page as appPage } from '$app/state';
 	import { untrack } from 'svelte';
 	import { formatPercent } from '#lib/utils/percent.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { hasPartialRealisedSet, partialRealisedCount } from '#lib/utils/discountPartialSet.ts';
@@ -18,6 +19,7 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
@@ -423,7 +425,7 @@
 	{/snippet}
 
 	{#if !userLoaded}
-		<p class="loading">{m('common.loading')}</p>
+		<LoadingState />
 	{:else if !canRead}
 		<p class="loading">{m('discounts.redirecting')}</p>
 	{:else}
@@ -690,7 +692,8 @@
 			<DataTable
 				columns={OFFER_COLUMNS}
 				isEmpty={!loading && offers.length === 0}
-				empty={loading ? m('discounts.table.loading') : m('discounts.table.empty')}
+				{loading}
+				empty={m('discounts.table.empty')}
 				colspan={8}
 			>
 				{#snippet body()}
@@ -758,17 +761,16 @@
 			</DataTable>
 		{/if}
 
-		{#if hasMore && !offersError}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={() => loadOffers({ append: true })} disabled={loadingMore}>
-					{loadingMore ? m('common.loading') : m('discounts.loadMore', { shown: offers.length, total })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('discounts.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={offers.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			errored={offersError}
+			onloadmore={() => loadOffers({ append: true })}
+			moreKey="discounts.loadMore"
+			allKey="discounts.showingAll"
+		/>
 	{/if}
 </PageHeader>
 

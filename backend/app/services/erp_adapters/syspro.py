@@ -121,6 +121,7 @@ from app.services.erp_adapters.base import (
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.log_redaction import redact_query_strings_containing
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.url_safety import UnsafeUrlError
 
 logger = logging.getLogger(__name__)
@@ -652,21 +653,47 @@ def po_is_foreign(header_currency: str | None, local_currency: str | None) -> bo
 
     A PO with no header ``Currency`` is read as local: it carries no label (the
     payload's ``currency`` is None) and its prices are ``MPrice``. A labelled
-    PO is foreign when its code differs from the local currency, and None when
-    the local currency could not be read — the caller must then skip the PO,
-    never guess which side of the line it is on.
+    PO is compared under SYSPRO's own code rule first (``_CURRENCY_CODE_RE``:
+    ``$`` is a valid SYSPRO code and is not ISO 4217), so a header equal to the
+    local currency is local. Otherwise it is foreign when it is an ISO code or
+    a SYSPRO code that differs from the local one. None — the caller must skip
+    the PO, never guess which side of the line it is on — when the local
+    currency could not be read, or the label matches neither rule.
     """
-    code = (header_currency or "").strip().upper()
-    if not code:
+    if header_currency is None or not header_currency.strip():
         return False
     if local_currency is None:
         return None
-    return code != local_currency
+    local = syspro_currency_code(local_currency)
+    header = syspro_currency_code(header_currency)
+    if header is not None and header == local:
+        return False
+    code = iso_currency_or_none(header_currency)
+    if code is not None:
+        return code != local
+    if header is not None:
+        return True
+    # A label that is no currency code under either rule is unknown, never local.
+    return None
 
 
 #: A SYSPRO currency code: up to three characters (SYSPRO's own codes are not
 #: necessarily ISO 4217, e.g. ``$``).
 _CURRENCY_CODE_RE = re.compile(r"[A-Z0-9$]{1,3}")
+
+
+def syspro_currency_code(label: str | None) -> str | None:
+    """``label`` as a SYSPRO currency code (``_CURRENCY_CODE_RE``, upper-cased),
+    or None. SYSPRO's own rule, not ISO 4217 (``$`` is a valid SYSPRO code), so
+    it cannot go through ``utils/currency_code.iso_currency_or_none``; this is
+    the one place the adapter normalises one."""
+    if label is None:
+        return None
+    text = label.strip()
+    if not text.isascii():
+        return None
+    text = text.upper()
+    return text if _CURRENCY_CODE_RE.fullmatch(text) else None
 
 
 class LogonProfileUnreadable(ValueError):
@@ -697,8 +724,7 @@ def parse_local_currency(body: str) -> str | None:
         raise LogonProfileUnreadable("GetLogonProfile answer is not a readable profile")
     for el in root.iter():
         if isinstance(el.tag, str) and local_name(el) == "LocalCurrencyCode":
-            code = (el.text or "").strip().upper()
-            return code if _CURRENCY_CODE_RE.fullmatch(code) else None
+            return syspro_currency_code(el.text)
     return None
 
 

@@ -506,13 +506,6 @@
 		font-size: 0.8rem;
 	}
 
-	/* Armed confirm — the same red "one more click commits this" cue
-	   `RowAction armed` and `BulkDeleteButton` use. */
-	.btn-primary.armed {
-		background: var(--danger);
-		border-color: var(--danger);
-	}
-
 	.bulk-result {
 		display: flex;
 		flex-direction: column;

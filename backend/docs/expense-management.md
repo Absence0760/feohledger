@@ -358,10 +358,9 @@ normally.
 **`create-expense` evaluates policy on the row it mints.** It never called
 `_refresh_policy_violations`, so a card-derived line carried no policy flags
 until something else happened to PATCH it — on the one kind of expense that is,
-by construction, already spent money. It now runs the same best-effort refresh
-the sibling write paths use (create, PATCH, receipt upload): a failure leaves
-the stored value untouched and never breaks the mint, because the violations are
-advisory.
+by construction, already spent money. It now runs the same refresh the sibling write
+paths use (create, PATCH, receipt upload), and a policy-engine failure fails
+the mint like any other write.
 
 Virtual-card sync (`sync_virtual_cards`) carries charged virtual-card spend into the same feed so virtual cards reconcile through one surface. Dedupe is the synthetic `external_txn_id = vc:<provider_card_id>` backed by the `uq_corporate_card_txn_external` partial-unique index (no new webhook — the card-charge webhook already exists). Each synced txn keeps the card's own `entity_id`.
 
@@ -415,8 +414,11 @@ were: the web falls back to `message` for a code it predates, a malformed
 param, or a row stored in `expenses.policy_violations` before `params` existed
 (the next write to the line refreshes it). The violation badge's title and the
 submit panel both read through `frontend/src/lib/api/policyViolations.ts`. `evaluate_expense` is wired into expense **create**, **PATCH**,
-and **receipt upload** as a best-effort refresh of `Expense.policy_violations`
-(a policy-engine error never breaks the write).
+and **receipt upload** as a refresh of `Expense.policy_violations`. A
+policy-engine error fails the write: it was once swallowed, which left the
+stored badges describing the line as it was before the edit, so an approver saw
+no violation on a line that now broke policy (submit re-runs the same engine
+uncaught, so the failure only surfaced later, further from its cause).
 
 #### Mileage — the rate is enforced, not just declared
 
@@ -597,7 +599,15 @@ two things did:
 - `""` is read by `expense_currency.normalize_currency(code, default=…)` as
   "whatever the target currency is" — the silent assume-the-default that
   locked-FX exists to eliminate. A blank-currency expense attached to a USD
-  report was locked at rate 1 as if it had been filed in USD.
+  report was locked at rate 1 as if it had been filed in USD. Nothing decided
+  that default, so `normalize_currency` now delegates to the shared rule and
+  returns `None` for a blank or malformed code (a legacy row the validator
+  never saw), and every caller fails closed on it: the lock raises
+  `ExpenseConversionError` (the `expense_fx_rate_unavailable` refusal), the
+  line counts as unconverted (blocking submission), the CFO-gate figure is
+  unknown (CFO sign-off required), and a policy comparison counts as a breach.
+  Only an unset `ExpensePolicy.threshold_currency` still falls back to the
+  reporting currency; a set but malformed one is never re-denominated.
 - `"usd"` and `"USD"` are two `GROUP BY` keys, so `GET /api/expenses/summary`
   emitted two `by_currency` entries which the response then relabelled
   identically — one currency's money split across two rows both reading `USD`.

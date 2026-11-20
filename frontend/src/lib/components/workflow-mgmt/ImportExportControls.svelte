@@ -172,7 +172,7 @@
 
 	<div class="modal-footer">
 		<button type="button" class="btn-cancel" onclick={close}>{m('common.cancel')}</button>
-		<button type="button" class="btn-import" disabled={importing} onclick={handleImport}>
+		<button type="button" class="btn-primary" disabled={importing} onclick={handleImport}>
 			{importing ? m('workflows.mgmt.import.importing') : m('workflows.mgmt.import.import')}
 		</button>
 	</div>
@@ -237,31 +237,4 @@
 		gap: 4px;
 	}
 
-	.btn-cancel {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-import {
-		padding: 8px 18px;
-		border-radius: 6px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-import:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
 </style>

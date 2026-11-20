@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/cash_flow.dart';
 import 'package:feohledger_mobile/utils/sequenced_fetch.dart';
@@ -66,7 +67,7 @@ class CashFlowStore extends ChangeNotifier with SequencedFetch {
       if (!isCurrentRequest(token)) return;
       _data = null;
       _loading = false;
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
     }
   }

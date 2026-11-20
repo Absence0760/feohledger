@@ -46,6 +46,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
 	import { formatPercent } from '#lib/utils/percent.ts';
@@ -473,7 +474,8 @@
 				<DataTable
 					columns={SUGGESTION_COLUMNS}
 					isEmpty={suggestions.length === 0}
-					empty={suggestionsLoading ? m('common.loading') : m('adaptive.suggestions.empty')}
+					loading={suggestionsLoading}
+					empty={m('adaptive.suggestions.empty')}
 				>
 					{#snippet body()}
 						{#each suggestions as s (s.id)}
@@ -597,7 +599,7 @@
 					testId="adaptive-threshold-error"
 				/>
 			{:else if thresholdLoading && !threshold}
-				<p class="state">{m('common.loading')}</p>
+				<LoadingState />
 			{:else if threshold}
 				<p class="rationale" data-testid="adaptive-threshold-rationale">{threshold.rationale}</p>
 
@@ -686,7 +688,7 @@
 					testId="adaptive-routing-error"
 				/>
 			{:else if routingLoading}
-				<p class="state">{m('common.loading')}</p>
+				<LoadingState />
 			{:else if routing}
 				{#if routing.insufficient_history || routing.candidates.length === 0}
 					<p class="state" data-testid="adaptive-routing-insufficient">
@@ -756,7 +758,8 @@
 				<DataTable
 					columns={APPROVER_COLUMNS}
 					isEmpty={(patterns?.approvers.length ?? 0) === 0}
-					empty={patternsLoading ? m('common.loading') : m('adaptive.patterns.emptyApprovers')}
+					loading={patternsLoading}
+					empty={m('adaptive.patterns.emptyApprovers')}
 				>
 					{#snippet body()}
 						{#each patterns?.approvers ?? [] as a (a.approver_id)}
@@ -797,7 +800,8 @@
 				<DataTable
 					columns={VENDOR_COLUMNS}
 					isEmpty={(patterns?.vendors.length ?? 0) === 0}
-					empty={patternsLoading ? m('common.loading') : m('adaptive.patterns.emptyVendors')}
+					loading={patternsLoading}
+					empty={m('adaptive.patterns.emptyVendors')}
 				>
 					{#snippet body()}
 						{#each patterns?.vendors ?? [] as v (v.vendor_name)}
@@ -840,7 +844,8 @@
 				<DataTable
 					columns={ANOMALY_COLUMNS}
 					isEmpty={(anomalies?.flagged.length ?? 0) === 0}
-					empty={anomaliesLoading ? m('common.loading') : m('adaptive.anomalies.empty')}
+					loading={anomaliesLoading}
+					empty={m('adaptive.anomalies.empty')}
 				>
 					{#snippet body()}
 						{#each anomalies?.flagged ?? [] as a (a.invoice_id)}
@@ -950,7 +955,7 @@
 					testId="adaptive-feedback-error"
 				/>
 			{:else if feedbackLoading}
-				<p class="state">{m('common.loading')}</p>
+				<LoadingState />
 			{:else if feedback}
 				<h3>{m('adaptive.feedback.metrics')}</h3>
 				<ul class="metrics">

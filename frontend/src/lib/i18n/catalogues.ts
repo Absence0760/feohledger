@@ -39,6 +39,16 @@ export const CATALOGUE_LOADERS: Record<Locale, () => Promise<Messages>> = {
 //              `marketing.pricing.*` keys stay in the main catalogue, which
 //              `m()` reads first: `pricing.test.ts` holds them to the main
 //              catalogues by import.
+//   refusal  — the coded-refusal sentences (`api/codedRefusals.ts`) and the
+//              refused-ERP-push ones (`erpRefusal.*`, `api/erpRefusals.ts`). A
+//              refusal can follow any API call on any page, so no route can
+//              gate it: it is PRELOADED (below) — `initLocale` asks for it with
+//              the main catalogue at startup — and its two readers treat a key
+//              that does not resolve yet as "cannot state this"
+//              (`api/resolvedOnly.ts`), so the caller shows the server's
+//              sentence (or the stored `last_error`) instead. A `refusal.*`
+//              key a page renders through `m()` directly stays in the main
+//              catalogue (`refusal.expenseReportForeignLine`).
 //   audit    — the /audit console's action labels (`audit.action.*`, one per
 //              AuditLog.action token, and `audit.actionPattern.*`). Loaded by
 //              /audit's `+layout.ts`. The console's own chrome (`audit.col.*`,
@@ -87,6 +97,14 @@ export const SLICE_LOADERS: { [S in SliceName]: Record<Locale, () => Promise<Sli
 		'pt-BR': () => import('./locales/marketing/pt-BR').then((m) => m.messages),
 		ja: () => import('./locales/marketing/ja').then((m) => m.messages),
 	},
+	refusal: {
+		en: () => import('./locales/refusal/en').then((m) => m.enRefusal),
+		de: () => import('./locales/refusal/de').then((m) => m.messages),
+		fr: () => import('./locales/refusal/fr').then((m) => m.messages),
+		es: () => import('./locales/refusal/es').then((m) => m.messages),
+		'pt-BR': () => import('./locales/refusal/pt-BR').then((m) => m.messages),
+		ja: () => import('./locales/refusal/ja').then((m) => m.messages),
+	},
 	audit: {
 		en: () => import('./locales/audit/en').then((m) => m.enAudit),
 		de: () => import('./locales/audit/de').then((m) => m.messages),
@@ -110,11 +128,22 @@ export const SLICE_PREFIXES: Record<SliceName, readonly string[]> = {
 	settings: ['org.', 'orgSso.', 'admin.', 'billing.', 'sweepHealth.'],
 	portal: ['portal.'],
 	marketing: ['marketing.'],
+	refusal: ['refusal.', 'erpRefusal.'],
 	audit: ['audit.action.', 'audit.actionPattern.'],
 };
 
 /** The static English copy a slice shows until its chunk lands — help only (see above). */
 export const EN_FALLBACK: { [S in SliceName]?: SliceMessages[S] } = { help: enHelp };
+
+/**
+ * Slices no route can gate, because shared code anywhere may need them: the
+ * store asks for them with the main catalogue as the app starts (`initLocale`),
+ * so they arrive with the reader's language rather than when a route loads.
+ * They are NOT awaited before the first paint, so whatever reads one must cope
+ * with it being absent — `slices.test.ts` allows their keys only in the files
+ * listed in its PRELOADED_READERS, which do.
+ */
+export const PRELOADED_SLICES: readonly SliceName[] = ['refusal'];
 
 export const SLICE_NAMES = Object.keys(SLICE_LOADERS) as SliceName[];
 

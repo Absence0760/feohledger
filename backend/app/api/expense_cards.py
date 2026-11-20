@@ -546,7 +546,7 @@ async def create_expense_from_card(
     db.add(expense)
     await db.flush()
 
-    # Same best-effort refresh every other expense write path performs (create,
+    # Same policy refresh every other expense write path performs (create,
     # PATCH, receipt upload). Without it a card-derived line carried no policy
     # flags at all until something else happened to PATCH it — so a receipt- or
     # pre-approval-required violation was invisible on the row that is, by

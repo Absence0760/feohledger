@@ -385,6 +385,7 @@ async def _invoice_with_file(realdb, *, vendor: str, entity_id=None) -> uuid.UUI
         created = await c.post(
             "/api/invoices",
             json={
+                "currency": "USD",
                 "invoice_number": f"COA-{uuid.uuid4().hex[:8]}",
                 "vendor": vendor,
                 "amount": "100.00",

@@ -40,6 +40,7 @@ from datetime import datetime
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 
 from app.services.analytics import _avg, _decimal_days, _quantile  # noqa: F401
+from app.utils.currency_code import iso_currency_or_none
 
 __all__ = [
     "ApproverPattern",
@@ -384,7 +385,7 @@ def compute_vendor_baseline(
         typical_approver_ids=approvers,
         median_time_to_approve_days=_quantile(times, 0.5) if times else Decimal("0"),
         unconverted_count=len(approved_rows) - len(usable),
-        currency=(currency or "").strip().upper(),
+        currency=iso_currency_or_none(currency) or "",
     )
 
 
@@ -598,7 +599,7 @@ def derive_suggestions(
     in — the org's REPORTING currency, which is also what
     ``auto_approve_below`` is measured in.
     """
-    cur = (currency or "USD").strip().upper() or "USD"
+    cur = iso_currency_or_none(currency) or "USD"
     out: list[DerivedSuggestion] = []
     for vp in vendor_patterns:
         if (
@@ -739,7 +740,7 @@ def recommend_auto_approve_threshold(
 
     Pure / deterministic — no LLM, no IO. The caller persists/applies.
     """
-    cur = (currency or "USD").strip().upper() or "USD"
+    cur = iso_currency_or_none(currency) or "USD"
     current = current_threshold if current_threshold > 0 else Decimal("0")
 
     qualifying: list[VendorApprovalPattern] = [

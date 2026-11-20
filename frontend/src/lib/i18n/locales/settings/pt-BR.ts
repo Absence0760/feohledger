@@ -153,7 +153,8 @@ export const messages = {
 	'org.chat.webhook.saving': 'Salvando…',
 	'org.chat.webhook.remove': 'Remover webhook',
 	'org.chat.webhook.confirmRemove': 'Confirmar remoção',
-	'org.chat.webhook.removeAria': 'Remover a URL do webhook de entrada do chat',
+	'org.chat.webhook.removeAria': 'Remover webhook: a URL do webhook de entrada do chat',
+	'org.chat.webhook.confirmRemoveAria': 'Confirmar remoção: a URL do webhook de entrada do chat',
 	'org.chat.webhook.rotateHint':
 		'A substituição vale imediatamente e sem janela de sobreposição — publicamos em uma única URL, então manter a antiga ativa continuaria publicando nela. Exclua também o webhook antigo no seu provedor de chat: só ele pode revogá-lo.',
 	'org.chat.webhook.toast.saved': 'Webhook de chat salvo',
@@ -186,7 +187,8 @@ export const messages = {
 	'org.emailIntake.rotate': 'Rotacionar endereço',
 	'org.emailIntake.rotateConfirm': 'Confirmar rotação',
 	'org.emailIntake.rotating': 'Rotacionando…',
-	'org.emailIntake.rotateAria': 'Rotacionar o endereço de recebimento por e-mail',
+	'org.emailIntake.rotateAria': 'Rotacionar endereço de recebimento por e-mail',
+	'org.emailIntake.rotateConfirmAria': 'Confirmar rotação do endereço de recebimento por e-mail',
 	'org.emailIntake.rotateWarning':
 		'A rotação substitui este endereço imediatamente. O endereço atual para de aceitar e-mails no instante em que você confirmar — o que um fornecedor enviar depois disso é descartado, sem retorno e sem fatura. Informe o novo endereço a todos os fornecedores antes da próxima cobrança.',
 	'org.emailIntake.rotated.aria': 'Novo endereço de recebimento por e-mail',
@@ -969,7 +971,6 @@ export const messages = {
 	'admin.partner.join.generate': 'Gerar código de vínculo',
 	'admin.partner.join.copy': 'Copiar',
 	'admin.partner.join.expiresIn': 'Expira em {minutes} min',
-	'admin.partner.loading': 'Carregando…',
 	'admin.partner.loadFailed': 'Falha ao carregar a visão geral de parceiros.',
 	'admin.partner.notPartner':
 		'Este espaço de trabalho ainda não administra inquilinos filhos. Quando um inquilino for vinculado a este espaço de trabalho como parceiro, seus filhos aparecerão aqui.',

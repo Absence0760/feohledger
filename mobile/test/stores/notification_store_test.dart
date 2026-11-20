@@ -76,7 +76,7 @@ void main() {
       expect(store.notifications[1].isRead, isTrue);
       expect(store.unread, 1);
       expect(store.fromCache, isFalse);
-      expect(store.error, isNull);
+      expect(store.loadError, isNull);
       expect(store.loading, isFalse);
     });
 
@@ -107,7 +107,7 @@ void main() {
 
       await store.fetch();
 
-      expect(store.error, isNotNull);
+      expect(store.loadError, isNotNull);
       expect(store.fromCache, isFalse);
       expect(store.notifications, isEmpty);
     });
@@ -230,7 +230,10 @@ void main() {
       final ok = await store.markRead('1');
 
       expect(ok, isFalse);
-      expect(store.error, isNotNull);
+      expect(store.actionError, isNotNull);
+      // The reconciling refetch succeeded: the list is live, so nothing may
+      // read the refused mark-read as a failed refresh.
+      expect(store.loadError, isNull);
       expect(listCalls, 2, reason: 'a failed mark-read refetches to reconcile');
       // The refetch restored the real (unread) state.
       expect(store.notifications.first.isRead, isFalse);
@@ -275,7 +278,9 @@ void main() {
       final ok = await store.markAllRead();
 
       expect(ok, isFalse);
-      expect(store.error, isNotNull);
+      expect(store.actionError, isNotNull);
+      // A refused action is not a failed load: no "couldn't refresh" banner.
+      expect(store.loadError, isNull);
     });
   });
 }

@@ -57,6 +57,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get commonRetry => '再試行';
 
   @override
+  String get commonLoadErrorConnection =>
+      'FeohLedger に接続できませんでした。接続を確認して再試行をタップしてください。';
+
+  @override
   String get commonAll => 'すべて';
 
   @override
@@ -114,6 +118,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get dashboardForReview => '確認待ち';
 
   @override
+  String get dashboardOverdue => '期限超過';
+
+  @override
   String get dashboardApproved => '承認済み';
 
   @override
@@ -142,7 +149,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get dashboardRefreshFailed =>
-      '更新できませんでした。最後に読み込んだ数値を表示しています。下に引いて再試行してください。';
+      '更新できませんでした。最後に読み込んだ数値を表示しています。「再試行」をタップしてください。';
 
   @override
   String get dashboardNeedsAttention => '対応が必要';
@@ -294,13 +301,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get notificationsEmpty => '通知はありません';
 
   @override
-  String get notificationsCaughtUp => 'すべて確認済みです';
-
-  @override
   String get notificationsNothingYet => 'まだ何もありません';
 
   @override
-  String get notificationsLoadError => '通知を読み込めませんでした';
+  String notificationsLoadErrorPrefix(String error) {
+    return '通知を読み込めませんでした: $error';
+  }
 
   @override
   String get vendorsTitle => '取引先';
@@ -330,7 +336,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get vendorsEmpty => '取引先が見つかりません';
 
   @override
-  String get vendorsLoadError => '取引先を読み込めませんでした';
+  String vendorsLoadErrorPrefix(String error) {
+    return '取引先を読み込めませんでした: $error';
+  }
 
   @override
   String get vendorActionVerify => '確認';
@@ -430,8 +438,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get paymentsEmpty => '支払いはありません';
 
   @override
-  String paymentsErrorPrefix(String error) {
-    return 'エラー: $error';
+  String paymentsLoadErrorPrefix(String error) {
+    return '支払を読み込めませんでした: $error';
   }
 
   @override
@@ -457,9 +465,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get approvalsNoneWaiting => '承認待ちの請求書はありません';
-
-  @override
-  String get approvalsLoadError => '承認待ちの請求書を読み込めませんでした';
 
   @override
   String approvalsPendingCount(int count) {
@@ -1125,10 +1130,14 @@ class AppLocalizationsJa extends AppLocalizations {
   String get payQueueEmpty => '支払待ちの請求書はありません';
 
   @override
-  String get payQueueError => '支払キューを読み込めませんでした';
+  String payQueueLoadErrorPrefix(String error) {
+    return '支払キューを読み込めませんでした: $error';
+  }
 
   @override
-  String get payQueueRetry => '再試行';
+  String payRunsLoadErrorPrefix(String error) {
+    return '支払実行を読み込めませんでした: $error';
+  }
 
   @override
   String payQueueDue(String date) {
@@ -1642,7 +1651,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get workflowDetailFallbackTitle => 'ワークフロー';
 
   @override
-  String get workflowDetailLoadError => 'ワークフローを読み込めませんでした';
+  String workflowDetailErrorPrefix(String error) {
+    return 'ワークフローを読み込めませんでした: $error';
+  }
 
   @override
   String get workflowDetailNoSteps => 'このワークフローにはステップがありません。';
@@ -2046,7 +2057,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get exceptionDetailTitle => '例外';
 
   @override
-  String get exceptionDetailNotFound => '例外が見つかりません';
+  String exceptionDetailErrorPrefix(String error) {
+    return '例外を読み込めませんでした: $error';
+  }
 
   @override
   String get exceptionDetailOverdue => '期限超過';
@@ -2611,7 +2624,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get inspectionsEmptyFiltered => 'この結果の検査はありません。';
 
   @override
-  String get inspectionsLoadError => '検査の読み込みに失敗しました';
+  String inspectionsLoadErrorPrefix(String error) {
+    return '検査の読み込みに失敗しました: $error';
+  }
 
   @override
   String get inspectionsResultPass => '合格';
@@ -3114,6 +3129,24 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoBilledBeyondTotal(
+    String billedAmount,
+    String poNumber,
+    String poTotal,
+  ) {
+    return '他の請求書が発注 $poNumber（合計 $poTotal）に対してすでに $billedAmount を請求しています — この請求書でその合計を超えます';
+  }
+
+  @override
+  String invoiceWarningPoBilledBeyondReceipt(
+    String totalBilled,
+    String poNumber,
+    String receivedValue,
+  ) {
+    return '発注 $poNumber の請求書は、この請求書を含めて $totalBilled を請求しています。入荷済みの物品は $receivedValue 分です';
+  }
+
+  @override
   String invoiceWarningPoAmountVariancePoCurrencyUnknown(
     String variancePct,
     String poNumber,
@@ -3275,6 +3308,23 @@ class AppLocalizationsJa extends AppLocalizations {
     String spendLimit,
   ) {
     return '累計支出 $cumulativeSpend が契約 $contractNumber の上限 $spendLimit を超えています（超過不可）';
+  }
+
+  @override
+  String invoiceWarningContractCurrencyMismatch(
+    String invoiceCurrency,
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return '請求書は $invoiceCurrency、契約 $contractNumber は $contractCurrency のため、支出上限を確認していません';
+  }
+
+  @override
+  String invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return '請求書に有効な通貨が記録されていないため、契約 $contractNumber の $contractCurrency 建て支出上限を確認していません';
   }
 
   @override
@@ -4291,4 +4341,458 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get grRecordReceiveLines => '少なくとも 1 つの明細に数量を入力してください';
+
+  @override
+  String get listShowingSavedCopy =>
+      '保存済みのコピーを表示中 — サーバーに接続できませんでした。「再試行」をタップしてください。';
+
+  @override
+  String get listRefreshFailed =>
+      '更新できませんでした — 最後に読み込んだ一覧を表示しています。「再試行」をタップしてください。';
+
+  @override
+  String exceptionsLoadErrorPrefix(String error) {
+    return '例外を読み込めませんでした: $error';
+  }
+
+  @override
+  String contractsLoadErrorPrefix(String error) {
+    return '契約を読み込めませんでした: $error';
+  }
+
+  @override
+  String get errorNetworkUnreachable => 'サーバーに接続できませんでした。接続を確認して、もう一度お試しください。';
+
+  @override
+  String errorRequestFailed(int status) {
+    return 'サーバーはリクエストを完了できませんでした (HTTP $status)。';
+  }
+
+  @override
+  String get errorUnexpected => '問題が発生しました。もう一度お試しください。';
+
+  @override
+  String payRunCreated(int count, String amount, String cfo) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件の支払い（合計 $amount）で支払いランを作成しました。実行する前に CFO の承認が必要です。',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件の支払い（合計 $amount）で支払いランを作成しました。',
+    );
+    String _temp2 = intl.Intl.selectLogic(cfo, {
+      'required': '$_temp0',
+      'other': '$_temp1',
+    });
+    return '$_temp2';
+  }
+
+  @override
+  String payRunCreatedPlain(String cfo) {
+    String _temp0 = intl.Intl.selectLogic(cfo, {
+      'required': '支払いランを作成しました。実行する前に CFO の承認が必要です。',
+      'other': '支払いランを作成しました。',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunApproved => 'CFO がランを承認しました';
+
+  @override
+  String payRunExecuted(
+    String provider,
+    int completed,
+    int inFlight,
+    int failed,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      completed,
+      locale: localeName,
+      other: '$completed 件',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      inFlight,
+      locale: localeName,
+      other: '$inFlight 件',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      failed,
+      locale: localeName,
+      other: '$failed 件',
+    );
+    return '$provider で支払いランを実行しました: 完了 $_temp0、処理中 $_temp1、失敗 $_temp2。';
+  }
+
+  @override
+  String get payRunExecutedPlain => '支払いランを実行しました。';
+
+  @override
+  String payRunExecutedCards(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'バーチャルカードを $count 枚発行しました。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String payRunCancelled(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '下書きランを取り消しました。$count 件の請求書がキューに戻りました。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunCancelledPlain => '支払いランを取り消しました。';
+
+  @override
+  String vendorSyncSummary(int created, int updated, int unchanged) {
+    String _temp0 = intl.Intl.pluralLogic(
+      created,
+      locale: localeName,
+      other: '$created 件',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      updated,
+      locale: localeName,
+      other: '$updated 件',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      unchanged,
+      locale: localeName,
+      other: '$unchanged 件',
+    );
+    return '同期しました: 新規 $_temp0、更新 $_temp1、変更なし $_temp2。';
+  }
+
+  @override
+  String get vendorSyncComplete => 'ERP の同期が完了しました。';
+
+  @override
+  String vendorSyncNotLinked(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件は未リンク (名前が複数の取引先に一致)。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorSyncUnlinked(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件のリンクを解除 (別の ERP 会社でリンク済み)。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorSyncRelinked(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件を再リンク (この ERP 会社が以前接続されていたときのリンク)。',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get authInvalidCredentials => '認証情報が正しくありません';
+
+  @override
+  String get authInvalidCode => 'コードが無効か期限切れです。もう一度お試しください。';
+
+  @override
+  String get authVerifyCodeFailed => 'コードを確認できませんでした。もう一度お試しください。';
+
+  @override
+  String get authEmailCodeFailed => 'メールのコードを送信できませんでした。もう一度お試しください。';
+
+  @override
+  String exceptionsFilteredEmpty(String status) {
+    String _temp0 = intl.Intl.selectLogic(status, {
+      'open': '未処理の例外はありません',
+      'escalated': 'エスカレーション済みの例外はありません',
+      'resolved': '解決済みの例外はありません',
+      'dismissed': '却下済みの例外はありません',
+      'other': '該当する例外はありません',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get contractsFilteredEmpty => '検索またはフィルターに一致する契約はありません。';
+
+  @override
+  String get vendorsFilteredEmpty => '検索またはフィルターに一致する取引先はありません。';
+
+  @override
+  String get commonShowAll => 'すべて表示';
+
+  @override
+  String get listLoadMore => 'さらに読み込む';
+
+  @override
+  String listShowingCount(int shown, int total) {
+    return '$total 件中 $shown 件を表示';
+  }
+
+  @override
+  String listShowingAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '全 $count 件を表示',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get listLoadMoreFailed => '続きを読み込めませんでした。';
+
+  @override
+  String invoicesLoadErrorPrefix(String error) {
+    return '請求書を読み込めませんでした: $error';
+  }
+
+  @override
+  String approvalsLoadErrorPrefix(String error) {
+    return '承認待ちの請求書を読み込めませんでした: $error';
+  }
+
+  @override
+  String get invoicesFilteredEmpty => 'この条件に一致する請求書はありません';
+
+  @override
+  String statusPillAnnounce(String label) {
+    return 'ステータス: $label';
+  }
+
+  @override
+  String get vendorStatusActive => '有効';
+
+  @override
+  String get vendorStatusUnverified => '未確認';
+
+  @override
+  String get vendorStatusInactive => '無効';
+
+  @override
+  String get vendorStatusRejected => '却下';
+
+  @override
+  String get contractStatusDraft => '下書き';
+
+  @override
+  String get contractStatusActive => '有効';
+
+  @override
+  String get contractStatusExpired => '期限切れ';
+
+  @override
+  String get contractStatusTerminated => '解約済み';
+
+  @override
+  String get contractStatusCancelled => 'キャンセル済み';
+
+  @override
+  String get contractTypePurchase => '購買';
+
+  @override
+  String get contractTypeService => 'サービス';
+
+  @override
+  String get contractTypeSubscription => 'サブスクリプション';
+
+  @override
+  String get contractTypeLease => 'リース';
+
+  @override
+  String get contractTypeSla => 'SLA';
+
+  @override
+  String get contractTypeMsa => '基本契約';
+
+  @override
+  String get contractTypeSow => '作業範囲記述書';
+
+  @override
+  String get contractTypeOther => 'その他';
+
+  @override
+  String get exceptionStatusOpen => '未対応';
+
+  @override
+  String get exceptionStatusEscalated => 'エスカレーション済み';
+
+  @override
+  String get exceptionStatusResolved => '解決済み';
+
+  @override
+  String get exceptionStatusDismissed => '却下済み';
+
+  @override
+  String get exceptionSeverityError => 'エラー';
+
+  @override
+  String get exceptionSeverityWarning => '警告';
+
+  @override
+  String get exceptionSeverityInfo => '情報';
+
+  @override
+  String get vendorSourceErp => 'ERP';
+
+  @override
+  String get vendorSourceAi => 'AI';
+
+  @override
+  String get vendorSourceManual => '手動';
+
+  @override
+  String get vendorSourceOther => 'その他のソース';
+
+  @override
+  String get notificationEventInvoiceAssigned => '請求書が割り当てられました';
+
+  @override
+  String get notificationEventInvoiceApproved => '請求書が承認されました';
+
+  @override
+  String get notificationEventInvoiceRejected => '請求書が却下されました';
+
+  @override
+  String get notificationEventInvoicePaid => '請求書が支払われました';
+
+  @override
+  String get notificationEventContractRenewalDue => '契約更新期限';
+
+  @override
+  String get notificationEventChatMessage => '新しいメッセージ';
+
+  @override
+  String get notificationEventOther => '通知';
+
+  @override
+  String get notificationUnread => '未読';
+
+  @override
+  String get relativeTimeJustNow => 'たった今';
+
+  @override
+  String relativeTimeMinutesAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count分前',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String relativeTimeHoursAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count時間前',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String relativeTimeDaysAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count日前',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String notificationBellUnread(int count) {
+    return '通知、未読 $count 件';
+  }
+
+  @override
+  String get cashFlowButtonLabel => 'キャッシュフロー予測';
+
+  @override
+  String get listRowSelected => '選択済み';
+
+  @override
+  String get listRowNotSelected => '未選択';
+
+  @override
+  String listRowInvoiceNumber(String number) {
+    return '請求書 $number';
+  }
+
+  @override
+  String listRowDue(String date) {
+    return '支払期日 $date';
+  }
+
+  @override
+  String listRowPastDue(String date) {
+    return '期日超過 $date';
+  }
+
+  @override
+  String listRowSeverity(String severity) {
+    return '重大度 $severity';
+  }
+
+  @override
+  String get listRowOverdue => '期限超過';
+
+  @override
+  String listRowContractNumber(String number) {
+    return '契約 $number';
+  }
+
+  @override
+  String listRowEnds(String date) {
+    return '終了日 $date';
+  }
+
+  @override
+  String listRowVendorCode(String code) {
+    return 'コード $code';
+  }
+
+  @override
+  String listRowVendorSource(String source) {
+    return 'ソース $source';
+  }
+
+  @override
+  String listRowInvoiceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '請求書 $count 件',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String listRowInvoiceCountShort(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '$_temp0';
+  }
 }

@@ -405,7 +405,10 @@ async def flag_repayment_payee_change(
     details change" for every route a change can take. Returns the code raised,
     if any.
     """
-    from app.api.vendors import flag_invoice_for_bank_change, reflag_voided_invoice_for_bank_change
+    from app.services.vendor_bank_change import (
+        flag_invoice_for_bank_change,
+        reflag_voided_invoice_for_bank_change,
+    )
 
     current_bank: dict | None = None
     if invoice.vendor_id is not None:

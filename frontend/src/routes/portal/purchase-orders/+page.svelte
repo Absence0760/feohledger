@@ -8,14 +8,17 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import UnverifiedMoney from '#lib/components/ui/UnverifiedMoney.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { isAllowed } from '#lib/api/actionVerdicts.ts';
-	import { poStatusLabel } from '#lib/types/purchaseOrder.ts';
+	import { poStatusLabel, poStatusTone } from '#lib/types/purchaseOrder.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
 	import { PO_TOTAL_UNVERIFIABLE, poFlipRefusalText } from '#lib/types/portalPurchaseOrder.ts';
 
 	// `flip_verdict` is the server's answer to "would the flip mint an invoice
@@ -116,7 +119,7 @@
 	{#if error}<div class="error" role="alert">{error}</div>{/if}
 
 	{#if loading && !items.length}
-		<div class="loading">{m('portal.common.loading')}</div>
+		<LoadingState label={m('portal.common.loading')} />
 	{:else if loadError}
 		<LoadError message={loadError} onretry={refresh} testId="portal-po-load-error" />
 	{:else if !items.length}
@@ -155,7 +158,9 @@
 								label={m('portal.po.totalUnverifiable')}
 							/>
 						</td>
-						<td><span class="status">{poStatusLabel(po.status, m)}</span></td>
+						<td><Badge tone={poStatusTone(po.status)} variant="status-badge {po.status}"
+								>{poStatusLabel(po.status, m)}</Badge
+							></td>
 						<td class="actions">
 							{#if isAllowed(po.flip_verdict)}
 								<button
@@ -191,24 +196,16 @@
 			</tbody>
 		</table>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button
-					type="button"
-					class="btn-load-more"
-					onclick={() => load({ append: true })}
-					disabled={loadingMore}
-				>
-					{loadingMore
-						? m('portal.common.loading')
-						: m('portal.po.loadMore', { shown: items.length, total })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('portal.po.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={() => load({ append: true })}
+			moreKey="portal.po.loadMore"
+			allKey="portal.po.showingAll"
+			loadingKey="portal.common.loading"
+		/>
 	{/if}
 </div>
 
@@ -282,22 +279,7 @@
 		font-size: 0.82rem;
 		white-space: normal;
 	}
-	.status {
-		padding: 2px 8px;
-		border-radius: 3px;
-		font-size: 0.75rem;
-		background: var(--bg);
-		border: 1px solid var(--border);
-	}
 	.empty,
-	.loading {
-		padding: 40px;
-		text-align: center;
-		background: var(--surface);
-		border: 1px dashed var(--border);
-		border-radius: 4px;
-		color: var(--text-muted);
-	}
 	.empty .hint {
 		font-size: 0.82rem;
 	}

@@ -81,6 +81,10 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'po_not_found': 'invoices.warning.poNotFound',
 	// Amount variance {variancePct}% vs PO {poNumber} (invoice {invoiceAmount} {currency} vs PO {poTotal} {currency})
 	'po_amount_variance': 'invoices.warning.poAmountVariance',
+	// Other invoices already bill {billedAmount} {currency} against PO {poNumber}, whose total is {poTotal} {currency} — this invoice takes it past that total
+	'po_billed_beyond_total': 'invoices.warning.poBilledBeyondTotal',
+	// Invoices on PO {poNumber} bill {totalBilled} {currency}, this one included; goods worth {receivedValue} {currency} have been received
+	'po_billed_beyond_receipt': 'invoices.warning.poBilledBeyondReceipt',
 	// Amount variance {variancePct}% vs PO {poNumber}, which records no currency (invoice {invoiceAmount} {currency} vs PO {poTotal})
 	'po_amount_variance_po_currency_unknown': 'invoices.warning.poAmountVariancePoCurrencyUnknown',
 	// Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared
@@ -127,6 +131,10 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'contract_spend_limit_exceeded': 'invoices.warning.contractSpendLimitExceeded',
 	// Cumulative spend {cumulativeSpend} {currency} exceeds contract {contractNumber} limit {spendLimit} {currency} (not-to-exceed)
 	'contract_spend_limit_exceeded_not_to_exceed': 'invoices.warning.contractSpendLimitExceededNotToExceed',
+	// Invoice is in {invoiceCurrency} but contract {contractNumber} is in {contractCurrency} — its spend limit was not checked
+	'contract_currency_mismatch': 'invoices.warning.contractCurrencyMismatch',
+	// The invoice records no valid currency, so the spend limit in {contractCurrency} of contract {contractNumber} was not checked
+	'contract_currency_mismatch_invoice_currency_unknown': 'invoices.warning.contractCurrencyMismatchInvoiceCurrencyUnknown',
 	// GL account {glAccount} is outside contract {contractNumber} allowed accounts
 	'contract_gl_not_allowed': 'invoices.warning.contractGlNotAllowed',
 	// Amounts don't add up: subtotal ({subtotal}) + tax ({tax}) + shipping ({shipping}) − discount ({discount}) = {expected}, but total is {amount}.
@@ -362,6 +370,8 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'price_variance_under': { deltaPct: 'percent', item: 'text', unitPrice: 'money', baselineUnitPrice: 'money', currency: 'currency' },
 	'po_not_found': { poNumber: 'text' },
 	'po_amount_variance': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'money', currency: 'currency' },
+	'po_billed_beyond_total': { billedAmount: 'money', poNumber: 'text', poTotal: 'money', currency: 'currency' },
+	'po_billed_beyond_receipt': { totalBilled: 'money', poNumber: 'text', receivedValue: 'money', currency: 'currency' },
 	'po_amount_variance_po_currency_unknown': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'number', currency: 'currency' },
 	'po_currency_mismatch': { invoiceCurrency: 'text', poNumber: 'text', poCurrency: 'text' },
 	'po_currency_mismatch_invoice_currency_unknown': { poNumber: 'text', poCurrencies: 'text' },
@@ -385,6 +395,8 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'contract_vendor_mismatch': { contractNumber: 'text' },
 	'contract_spend_limit_exceeded': { cumulativeSpend: 'money', contractNumber: 'text', spendLimit: 'money', currency: 'currency' },
 	'contract_spend_limit_exceeded_not_to_exceed': { cumulativeSpend: 'money', contractNumber: 'text', spendLimit: 'money', currency: 'currency' },
+	'contract_currency_mismatch': { invoiceCurrency: 'text', contractNumber: 'text', contractCurrency: 'text' },
+	'contract_currency_mismatch_invoice_currency_unknown': { contractNumber: 'text', contractCurrency: 'text' },
 	'contract_gl_not_allowed': { glAccount: 'text', contractNumber: 'text' },
 	'self_correction_total_reconciliation': { subtotal: 'number', tax: 'number', shipping: 'number', discount: 'number', expected: 'number', amount: 'number' },
 	'self_correction_date_ordering': { dueDate: 'date', invoiceDate: 'date' },

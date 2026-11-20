@@ -1167,3 +1167,32 @@ async def test_redeliver_claims_the_row_so_a_sweep_tick_cannot_double_send(reald
     finally:
         gate.set()
         await _cleanup(control_mk, sub.id)
+
+
+@pytest.mark.parametrize("currency", [None, ""])
+def test_an_unknown_invoice_currency_is_sent_as_null_never_usd(currency):
+    """An invoice that records no currency (an upload not yet extracted, or a
+    document naming none) is sent as `currency: null` on both invoice-bearing
+    event shapes, never a guessed USD (decisions §160 / §196 / §473)."""
+    from decimal import Decimal
+
+    from app.schemas.webhook_events import WebhookExceptionData, WebhookInvoiceData
+    from app.services.webhooks.dispatch import _invoice_fields
+
+    invoice = SimpleNamespace(
+        id=uuid.uuid4(),
+        invoice_number="NOCUR",
+        vendor_name="V",
+        amount=Decimal("10.00"),
+        currency=currency,
+        status=None,
+    )
+    fields = _invoice_fields(invoice)
+    assert fields["currency"] is None
+    assert WebhookInvoiceData(**fields).model_dump()["currency"] is None
+    assert (
+        WebhookExceptionData(
+            exception_id="x", exception_type="duplicate", currency=None, link="/exceptions"
+        ).currency
+        is None
+    )

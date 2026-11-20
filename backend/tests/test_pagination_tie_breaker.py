@@ -138,6 +138,7 @@ async def test_payment_list_pagination_survives_a_created_at_tie(realdb):
             inv = await c.post(
                 "/api/invoices",
                 json={
+                    "currency": "USD",
                     "invoice_number": f"TIE-PAY-{suffix}-{i}",
                     "vendor": "Acme",
                     "amount": "10.00",

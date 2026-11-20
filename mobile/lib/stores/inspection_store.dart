@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/goods_receipt.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
@@ -26,12 +27,23 @@ class InspectionStore extends ChangeNotifier with SequencedFetch {
 
   List<Inspection> _inspections = [];
   bool _loading = false;
-  String? _error;
+
+  /// The last **fetch** failure, as caught — the list screen words it with
+  /// `describeLoadError` and it alone drives the list's error state and
+  /// "couldn't refresh" banner. Recording an inspection never writes it.
+  Object? _loadError;
+
+  /// The last failed **action** (record / loading the record form's receipt
+  /// options), as a sentence ([describeApiError]). Kept apart from [loadError]
+  /// so a refused record over a loaded list is not reported as a failed
+  /// refresh.
+  String? _actionError;
   InspectionResult? _resultFilter;
 
   List<Inspection> get inspections => _inspections;
   bool get loading => _loading;
-  String? get error => _error;
+  Object? get loadError => _loadError;
+  String? get actionError => _actionError;
 
   /// The selected outcome chip, or null for "all".
   InspectionResult? get resultFilter => _resultFilter;
@@ -43,7 +55,8 @@ class InspectionStore extends ChangeNotifier with SequencedFetch {
   void reset() {
     _inspections = [];
     _loading = false;
-    _error = null;
+    _loadError = null;
+    _actionError = null;
     _resultFilter = null;
     debugResetSequence();
   }
@@ -58,51 +71,48 @@ class InspectionStore extends ChangeNotifier with SequencedFetch {
     // (e.g. two quick chip taps racing each other).
     final token = nextRequestToken();
     _loading = true;
-    _error = null;
+    _loadError = null;
     notifyListeners();
 
     try {
       final rows = await InspectionApi.list(result: _resultFilter?.value);
       if (!isCurrentRequest(token)) return;
       _inspections = rows;
-      _error = null;
       _loading = false;
       notifyListeners();
     } catch (e) {
       if (!isCurrentRequest(token)) return;
       _loading = false;
-      _error = e.toString();
+      _loadError = e;
       notifyListeners();
     }
   }
 
-  /// Fetch one inspection for the detail screen. Returns null and records the
-  /// error (the screen renders a "not found" fallback when the error is null).
-  Future<Inspection?> getById(String id) async {
-    try {
-      return await InspectionApi.getById(id);
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-      return null;
-    }
-  }
+  /// Fetch one inspection for the detail screen.
+  ///
+  /// Throws the caught error as-is (a 404 / 403 [ApiException], or a network
+  /// failure) for the detail screen to word with `describeLoadError` — the
+  /// server's reason or the connection sentence. It writes no store state: a
+  /// failed detail read is not a failed list load, and recording it in
+  /// [loadError] would put the list's error state over rows that loaded fine.
+  Future<Inspection> getById(String id) => InspectionApi.getById(id);
 
   /// Record an inspection (`POST /api/inspections`, admin / ap_manager).
   ///
   /// Returns the created row on success and refetches so the list reflects the
   /// active filter — the new row may not belong to it (recording a `pass` while
   /// the Fail chip is selected), and a blind prepend would put it there anyway.
-  /// Returns null with [error] set on failure, so the caller can surface the
-  /// server's own refusal (a 403 from `require_roles`, a quantity outside
-  /// `Numeric(12, 4)`).
+  /// Returns null with [actionError] set on failure, so the caller can
+  /// surface the server's own refusal (a 403 from `require_roles`, a quantity
+  /// outside `Numeric(12, 4)`).
   Future<Inspection?> record(InspectionDraft draft) async {
+    _actionError = null;
     try {
       final created = await InspectionApi.create(draft);
       await fetch();
       return created;
     } catch (e) {
-      _error = e.toString();
+      _actionError = describeApiError(e);
       notifyListeners();
       return null;
     }
@@ -114,13 +124,14 @@ class InspectionStore extends ChangeNotifier with SequencedFetch {
   /// One page, newest first — `GET /api/goods-receipts` offers no search, so
   /// this is the honest bound, and the `total` is what lets the form say there
   /// are more receipts than it is offering instead of implying the picker holds
-  /// every one. Returns null with [error] set on failure so the caller can say
-  /// why the form could not open.
+  /// every one. Returns null with [actionError] set on failure so the caller
+  /// can say why the form could not open.
   Future<({List<GoodsReceipt> items, int total})?> loadReceiptOptions() async {
+    _actionError = null;
     try {
       return await GoodsReceiptApi.list(pageSize: 50);
     } catch (e) {
-      _error = e.toString();
+      _actionError = describeApiError(e);
       notifyListeners();
       return null;
     }

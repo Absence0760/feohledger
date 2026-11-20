@@ -43,6 +43,7 @@ from app.services.erp_status_sync import (
 from app.services.exception_lifecycle import (
     ACTIONABLE_STATUSES,
     EXCEPTION_SEVERITY_RANK,
+    EXCEPTION_TYPE_LABELS,
     RESOLUTION_ACTIONS,
     invoices_for,
     needs_approval_chain,
@@ -53,32 +54,13 @@ from app.services.exception_lifecycle import (
     workflow_instances_for,
 )
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.search import ilike_contains
 
 router = APIRouter(prefix="/exceptions", tags=["exceptions"])
 
-#: Friendly label per ``Exception.exception_type`` for the queue UI. Must cover
-#: ``exception_lifecycle.EXCEPTION_TYPES`` exactly — a missing entry silently
-#: renders the raw snake_case key, and two of these types are the ones that block
-#: a payment run, so the queue must not label them like debug output.
-#: ``tests/test_exception_type_labels`` is the guard.
-EXCEPTION_TYPE_LABELS = {
-    "duplicate": "Duplicate Invoice",
-    "po_mismatch": "PO Mismatch",
-    "fraud_flag": "Fraud Flag",
-    "extraction_failed": "Extraction Failed",
-    "unverified_vendor": "Unverified Vendor",
-    "review_rejected": "Rejected",
-    "amount_exceeded": "Amount Exceeded",
-    "missing_data": "Missing Data",
-    "quality_hold": "Quality Hold",
-    "price_variance": "Price Variance",
-    "contract_noncompliant": "Contract Non-Compliant",
-    "erp_reconciliation": "ERP Reconciliation",
-    "line_total_mismatch": "Line Total Mismatch",
-    "payment_compliance_hold": "Compliance Hold",
-    "payment_reconciliation": "Payment Reconciliation",
-}
+# `EXCEPTION_TYPE_LABELS` (the queue's label per type) is owned by
+# `services/exception_lifecycle.py`, beside the roster it must cover.
 
 
 #: Who may act on the queue — the dependency on every `/api/exceptions`
@@ -895,7 +877,7 @@ async def record_erp_payment(
             stated_amount = Decimal(str(stated))
         except ArithmeticError:
             stated_amount = None
-        stated_currency = str(stated_currency_raw or "").strip().upper()
+        stated_currency = iso_currency_or_none(stated_currency_raw)
         if (
             stated_amount is None
             or (amount is not None and amount != stated_amount)
@@ -904,7 +886,7 @@ async def record_erp_payment(
             # invoice owes, the rule the sweep applies to the same facts
             # (§386); never compared as a bare number (§160, §196).
             or not stated_currency
-            or stated_currency != (invoice.currency or "").strip().upper()
+            or stated_currency != iso_currency_or_none(invoice.currency)
         ):
             raise HTTPException(
                 status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,

@@ -68,6 +68,7 @@ async function seed(page: Page, opts: { withLine: boolean }): Promise<Fixture> {
 			vendor: `${MARK} Vendor ${suffix}`,
 			invoice_number: `${MARK}-INV-${suffix}`,
 			amount: '42.00',
+			currency: 'USD',
 			gl_account: retiredCode
 		}
 	});

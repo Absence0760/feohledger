@@ -45,6 +45,9 @@ paths = [
     '''(?i)^docs/user-management\.md$''',
     '''(?i)^docs/authentication\.md$''',
     '''(?i)^backend/docs/api-reference\.md$''',
+    # Generated pytest-split timing baseline: parametrized test ids embed fake
+    # connection URLs from test parameters (see secret-scan.yml § Excluded paths).
+    '''^backend/\.test_durations$''',
 ]
 # Synthetic-credential regexes that may legitimately appear anywhere
 # in the codebase (fixtures + docs samples).

@@ -376,12 +376,36 @@ no normal pass/fail summary, matching the intended "diagnose, then die" shape.
 Most of the suite is mock-based. Tests that request the `realdb` fixture
 (`tests/conftest.py`) run against a live Postgres and a **pair of real tenant
 databases** — the only way to prove cross-tenant isolation, the SQL filters, and
-commit durability. Before each such test the harness truncates the tenant
+commit durability. Before each such test the harness empties the tenant
 business tables, restores the Default entity, resets the shared control-plane
 `Organization` row, and reaps every other backend on those databases.
 
+**The tenant reset DELETEs only the tables that hold a row; it does not
+TRUNCATE.** `_reset_tenant_tables` (`tests/conftest.py`) asks every tenant table
+`EXISTS (SELECT 1 …)` in one round trip and runs a plain `DELETE` on each
+non-empty one, inside a transaction-local `session_replication_role = replica`
+(FK triggers and the append-only `audit_log_no_delete` trigger off, so delete
+order doesn't matter and `audit_log` can be cleared; TRUNCATE never fired them
+either). It used to be one `TRUNCATE <all ~70 tenant tables> RESTART IDENTITY
+CASCADE`. That gives every table, index and TOAST table a new relfilenode, and
+Postgres fsyncs each freshly built empty index on the spot
+(`DataFileImmediateSync`), so the cost scaled with the schema, not with what the
+test wrote. The "before" profile (32 realdb tests, four files, dev laptop) showed the
+per-test reset dominating setup; the after-figures were not recorded before
+the round closed, so CI's shard times are the comparison. Rules that follow from it:
+
+- It needs the privilege to set `session_replication_role` (superuser, as the
+  Compose and CI `postgres` user is). Without it the reset falls back to the
+  old whole-schema TRUNCATE: slower, never wrong.
+- No tenant table may own a sequence: DELETE has no counterpart to RESTART
+  IDENTITY. If one is ever added, make the reset restart it;
+  `tests/test_realdb_reset.py` fails until then. The same file pins the
+  baseline (every tenant table empty but the one Default entity), that a write
+  to any table, `audit_log` included, is gone after a reset, and that every
+  physical table in a tenant DB is one the reset probes.
+
 **The tenant pair is exclusive to one pytest process.** Because the reset both
-TRUNCATEs and `pg_terminate_backend`s, two pytest runs sharing a pair delete each
+empties the tables and `pg_terminate_backend`s, two pytest runs sharing a pair delete each
 other's rows and kill each other's connections — which surfaces as
 `asyncpg.ConnectionDoesNotExistError` / `ConnectionResetError` in whatever
 unrelated file happened to be mid-query, i.e. as flakiness rather than as the
@@ -456,7 +480,7 @@ the orgs' sealed provider credentials and the seeded users' second factors
 leave every later test facing an account that had a factor), and — **on teardown, not setup** — the control-plane billing rows: every
 `Subscription` its own orgs hold, and every `Plan` that is not one of
 `DEFAULT_PLAN_CATALOG`'s tiers (`_reset_control_billing`). Those two tables live
-in the slot's control-plane database, which the per-test TRUNCATE never reaches
+in the slot's control-plane database, which the per-test tenant reset never reaches
 and `_rebuild_pytest_schema` clears only once per session, so a throwaway plan
 stayed visible to every later test in the run — and `GET /api/billing/plans` is
 a catalogue listing, so that is observable rather than inert. Six billing files
@@ -959,9 +983,9 @@ is what the sync sign-in completeness check (`is_sso_only`) reads.
 
 ## Exception types
 
-Canonical roster: `services/exception_lifecycle.EXCEPTION_TYPES` — `duplicate`, `po_mismatch`, `fraud_flag`, `extraction_failed`, `unverified_vendor`, `review_rejected`, `amount_exceeded` (legacy — no longer raised, kept for historical rows), `missing_data`, `quality_hold`, `price_variance`, `contract_noncompliant`, `erp_reconciliation`, `line_total_mismatch`, `payment_compliance_hold`. The `exception_type` column is a plain `String(50)`, so that tuple — not a DB enum — is the source of truth; `api/exceptions.EXCEPTION_TYPE_LABELS` must cover it exactly, and `tests/test_exception_type_labels.py` AST-scans `app/` to fail when a type is raised without joining the roster and getting a label.
+Canonical roster: `services/exception_lifecycle.EXCEPTION_TYPES` — `duplicate`, `po_mismatch`, `fraud_flag`, `extraction_failed`, `unverified_vendor`, `review_rejected`, `amount_exceeded` (legacy — no longer raised, kept for historical rows), `missing_data`, `quality_hold`, `price_variance`, `contract_noncompliant`, `erp_reconciliation`, `line_total_mismatch`, `payment_compliance_hold`. The `exception_type` column is a plain `String(50)`, so that tuple — not a DB enum — is the source of truth; `services/exception_lifecycle.EXCEPTION_TYPE_LABELS` must cover it exactly, and `tests/test_exception_type_labels.py` AST-scans `app/` to fail when a type is raised without joining the roster and getting a label.
 
-**Every lifecycle event is audited, and `record_decision` also enforces segregation of duties.** `services/exception_lifecycle` is the single chokepoint: `create_exception` writes `exception.raised`, and the human queue (`api/exceptions`, single + bulk), the agent coordinator, the compliance-hold release/dismiss path (`api/payments.py::_resolve_compliance_hold_exception`) and the supplier-resubmission path (`api/portal.py`) all resolve/escalate/dismiss through `record_decision`, which writes `exception.resolved` / `.escalated` / `.dismissed` (+ `exception.assigned` on routing). It is also where the queue's SoD refusal lives (`segregation_refusal` — see the root `CLAUDE.md`), precisely *because* there are that many doors: the two non-queue ones early-return (neither type is payment-blocking, and the portal's actor is a `VendorUser` with no control-plane id), so a refusal can never strand a supplier resubmission or desynchronise the queue from a released hold. Rows are correlation-keyed to the **invoice**, so they land on its SOX trail; an invoice-less exception self-correlates on its own id. `details` is PII-lean and carries a `payment_blocking` flag derived from `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES` itself — clearing any member of that tuple (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation` / `quality_hold` / `po_mismatch`) is the human sign-off that lets a payment run proceed, and the mutable `exceptions` row (single-valued, not WORM-shipped, no append-only trigger) can't be that record. Escalation records the note but never stamps `resolved_by` / `resolved_at`. Every `/api/exceptions` mutation is entity-scoped like the reads. See `docs/exception-lifecycle.md`.
+**Every lifecycle event is audited, and `record_decision` also enforces segregation of duties.** `services/exception_lifecycle` is the single chokepoint: `create_exception` writes `exception.raised`, and the human queue (`api/exceptions`, single + bulk), the agent coordinator, the compliance-hold release/dismiss path (`api/payments.py::_resolve_compliance_hold_exception`) and the supplier-resubmission path (`api/portal.py`) all resolve/escalate/dismiss through `record_decision`, which writes `exception.resolved` / `.escalated` / `.dismissed` (+ `exception.assigned` on routing). It is also where the queue's SoD refusal lives (`segregation_refusal` — see the root `CLAUDE.md`), precisely *because* there are that many doors: the two non-queue ones early-return (neither type is payment-blocking, and the portal's actor is a `VendorUser` with no control-plane id), so a refusal can never strand a supplier resubmission or desynchronise the queue from a released hold. Rows are correlation-keyed to the **invoice**, so they land on its SOX trail; an invoice-less exception self-correlates on its own id. `details` is PII-lean and carries a `payment_blocking` flag derived from `services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES` itself — clearing any member of that tuple (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation` / `quality_hold` / `po_mismatch`) is the human sign-off that lets a payment run proceed, and the mutable `exceptions` row (single-valued, not WORM-shipped, no append-only trigger) can't be that record. Escalation records the note but never stamps `resolved_by` / `resolved_at`. Every `/api/exceptions` mutation is entity-scoped like the reads. See `docs/exception-lifecycle.md`.
 
 Severity: `error`, `warning`, `info`. Auto-detected by `invoice_warnings.py`. `erp_reconciliation` is opened by the ERP webhook (`api/erp_webhook.py`) in two cases, both idempotent per open exception and PII-free: (1) the ERP reports an invoice VOIDED/CANCELLED that we already advanced past the point where `→ failed` is a legal transition (`sent_to_erp` / `posted_in_erp` / `payment_scheduled` / `paid`) — money may be in flight, so it is flagged for human reconciliation instead of auto-transitioned; (2) the ERP reports `Paid` for a `payment_scheduled` invoice whose `Payment.settled_amount` shows the rail settled SHORT of what AP authorized — the same `settlement_coverage` hold `payment_erp_sync` applies, so a validly-signed ERP `paid` can't walk a short-paid invoice to `paid` and strand `/settlement/accept`. It is also opened by `payment_erp_sync` on a failed sync leg, and by the QuickBooks write-back (`services/erp_payment_writeback`) when a settled payment cannot be posted as a BillPayment or leaves the bill partly open. QuickBooks status sync-back (`services/erp_status_sync.apply_bill_report`, decisions §295) opens the payment-BLOCKING `payment_reconciliation` when a bill is paid in QuickBooks while FeohLedger also has a payment scheduled, part-paid there, or deleted there while still payable here, and `erp_reconciliation` for the non-blocking cases. **An ERP reconciliation row's `description` is for an AP user (what to do, never an API path or id); its machine detail is `exceptions.erp_report`** (migration 0121). A `paid_not_recorded` row keeps the payment the ERP reported; clearing the blocker re-attempts it from `record_decision`, and a blocking one is recorded in one click (`POST /api/exceptions/{id}/record-erp-payment`, decisions §319). `payment_compliance_hold` is opened by `api/payments.py` whenever `_execute_single_payment` parks a payment at `pending_compliance` (no screenable vendor, or the sanctions/KYC adapter itself returns a `hold` verdict) — dedup'd per `(invoice_id, "payment_compliance_hold", "open")` so a retried execution never double-opens it, and resolved by `POST /api/payments/{id}/compliance/release` or `/dismiss`. See `backend/docs/payments.md` § Sanctions / compliance hold resolution.
 

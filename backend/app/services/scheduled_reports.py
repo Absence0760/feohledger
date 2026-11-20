@@ -54,6 +54,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scheduled_report import ScheduledReport
+from app.services.ap_commitments import aging_snapshot_buckets, commitment_rows
 from app.services.email_adapters import EmailMessage, get_email_adapter
 
 logger = logging.getLogger(__name__)
@@ -345,7 +346,6 @@ async def _materialise_rows(
         return exporter(rows.all())
 
     if schedule.report_type == "cashflow_forecast":
-        from app.api.analytics import _commitment_rows
         from app.config import settings
         from app.services.analytics import bucket_outflows
         from app.services.currency_conversion import resolve_reporting_currency
@@ -358,18 +358,17 @@ async def _materialise_rows(
         # raw across whatever currencies its suppliers happen to bill in. The
         # currency comes from the caller (see this function's docstring) so
         # this branch never reaches past the session it was handed.
-        commitment_rows = await _commitment_rows(
+        outflow_rows = await commitment_rows(
             db,
             today=today,
             horizon_days=settings.cashflow_copilot_default_horizon_days,
             include_pending=True,
             reporting_currency=reporting_currency or resolve_reporting_currency(None),
         )
-        periods = bucket_outflows(commitment_rows, granularity="week", today=today)
+        periods = bucket_outflows(outflow_rows, granularity="week", today=today)
         return exporter(periods)
 
     if schedule.report_type == "aging_snapshot":
-        from app.api.analytics import _aging_snapshot_buckets
         from app.services.currency_conversion import resolve_reporting_currency
 
         today = utc_today()
@@ -379,13 +378,13 @@ async def _materialise_rows(
         # the emailed snapshot and the downloaded one cannot disagree. They were
         # two hand-copied loops, and both summed raw `Invoice.amount` across
         # currencies. Whole-tenant (`entity_id=None`), like every branch here.
-        buckets = await _aging_snapshot_buckets(
+        buckets = await aging_snapshot_buckets(
             db,
             today=today,
             reporting_currency=reporting_currency or resolve_reporting_currency(None),
         )
         # Label the CSV with the SAME `today` the buckets were computed against
-        # (see api/analytics.py) rather than letting the exporter re-read the clock.
+        # (see services/ap_commitments.py) rather than letting the exporter re-read the clock.
         return exporter(buckets, snapshot_date=today)
 
     # Unreachable in practice — every key registered in EXPORTERS (checked by

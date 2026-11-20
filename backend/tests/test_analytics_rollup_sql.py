@@ -54,6 +54,8 @@ from sqlalchemy import select
 from app.models.entity import Entity
 from app.models.invoice import Invoice, InvoiceStatus
 from app.services.currency_conversion import (
+    invoice_currency_rollup_select,
+    rollup_from_grouped_rows,
     vendor_rollup_from_grouped_rows,
     vendor_rollup_to_reporting_currency,
     vendor_spend_grouped_select,
@@ -356,6 +358,62 @@ async def test_a_lock_amount_without_a_lock_currency_is_not_a_lock(realdb):
 
 
 @pytest.mark.asyncio
+async def test_an_unknown_currency_row_is_unconverted_beside_a_usd_row(realdb):
+    """NULL and blank invoice currencies are unknown (decisions §473): their
+    own group, counted as unconverted, never read as the reporting currency —
+    even when the row carries a 1:1 lock written before §473."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        for num, currency, rep_cur, rep_amt in (
+            ("NOCUR-1", "USD", None, None),
+            ("NOCUR-2", None, "USD", Decimal("40.00")),
+        ):
+            s.add(
+                Invoice(
+                    organization_id=org_id,
+                    entity_id=ent,
+                    invoice_number=num,
+                    vendor_name="No Currency Co",
+                    amount=Decimal("100.00") if currency else Decimal("40.00"),
+                    currency=currency,
+                    reporting_currency=rep_cur,
+                    reporting_amount=rep_amt,
+                    status=InvoiceStatus.approved,
+                    invoice_date=date.today(),
+                )
+            )
+        await s.commit()
+
+        rows = (
+            (
+                await s.execute(
+                    invoice_currency_rollup_select(reporting_currency="USD").where(
+                        Invoice.vendor_name == "No Currency Co"
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    rollup = rollup_from_grouped_rows([dict(r) for r in rows], reporting_currency="USD")
+    assert rollup.unconverted_count == 1
+    groups = {e.currency: e for e in rollup.by_currency}
+    assert set(groups) == {"USD", None}
+    assert groups[None].unconverted_count == 1
+    assert groups["USD"].unconverted_count == 0
+
+    entry = next(
+        e
+        for e in await _grouped(realdb, period_start=date.today() - timedelta(days=7))
+        if e.vendor == "No Currency Co"
+    )
+    assert entry.unconverted_count == 1
+    assert entry.currencies == ["USD"]
+
+
+@pytest.mark.asyncio
 async def test_cfo_concentration_reports_its_unconverted_count(realdb):
     await _seed_currency_cases(realdb)
     async with realdb.client(key=TENANT, role="cfo") as c:
@@ -561,7 +619,7 @@ _COLLAPSING_REDUCERS = {
     # verdict (captured / missed / still-capturable) rather than a per-currency
     # sum, so it could not become a plain `GROUP BY`. True of a per-currency
     # GROUP BY, but the verdict is two comparisons and expresses fine as a
-    # `CASE` — see `api/dashboard`, which now groups by that CASE and reduces
+    # `CASE` — see `services/dashboard_metrics`, which now groups by that CASE and reduces
     # via `discount_capture_from_grouped_rows`. Streaming every
     # discount-scheduled invoice into Python (no LIMIT, no date bound) is the
     # same unbounded shape as the five vendor-spend folds, so it is guarded the
@@ -571,7 +629,7 @@ _COLLAPSING_REDUCERS = {
 }
 
 #: The row-at-a-time CONVERTER. Unlike the reducers above it has legitimate
-#: uses — projecting one output row per input row (`_commitment_rows`' cash
+#: uses — projecting one output row per input row (`commitment_rows`' cash
 #: commitments, the dashboard's ten upcoming payments). What is never
 #: legitimate is using it to build a per-KEY TOTAL, because that is an
 #: aggregate a `GROUP BY` should have produced.

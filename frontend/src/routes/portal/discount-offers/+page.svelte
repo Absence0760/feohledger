@@ -3,16 +3,19 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { DISCOUNT_STATUS_TONES, type DiscountStatus } from '#lib/types/discounts.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { formatPercent } from '#lib/utils/percent.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import {
@@ -233,22 +236,19 @@
 		<p class="sub">{m('portal.discounts.subtitle')}</p>
 	</header>
 
-	<nav class="filters" aria-label={m('portal.discounts.filterAria')}>
-		{#each FILTERS as f (f.key)}
-			<button
-				type="button"
-				class="filter-chip"
-				class:active={activeFilter === f.key}
-				aria-pressed={activeFilter === f.key}
-				onclick={() => setFilter(f.key)}>{m(f.labelKey)}</button
-			>
-		{/each}
-	</nav>
+	<div class="filter-bar">
+		<FilterChips
+			ariaLabel={m('portal.discounts.filterAria')}
+			chips={FILTERS.map((f) => ({ key: f.key, label: m(f.labelKey) }))}
+			active={activeFilter}
+			onchange={setFilter}
+		/>
+	</div>
 
 	{#if error}<div class="error" role="alert">{error}</div>{/if}
 
 	{#if loading && !items.length}
-		<div class="loading">{m('portal.common.loading')}</div>
+		<LoadingState label={m('portal.common.loading')} />
 	{:else if loadError}
 		<LoadError message={loadError} onretry={refresh} testId="portal-discounts-load-error" />
 	{:else if !items.length}
@@ -347,24 +347,16 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button
-					type="button"
-					class="btn-load-more"
-					onclick={() => load({ append: true })}
-					disabled={loadingMore}
-				>
-					{loadingMore
-						? m('portal.common.loading')
-						: m('portal.discounts.loadMore', { shown: items.length, total })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('portal.discounts.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={() => load({ append: true })}
+			moreKey="portal.discounts.loadMore"
+			allKey="portal.discounts.showingAll"
+			loadingKey="portal.common.loading"
+		/>
 	{/if}
 </div>
 
@@ -434,28 +426,9 @@
 		color: var(--text-muted);
 		font-size: 0.85rem;
 	}
-	.filters {
-		display: flex;
-		gap: 8px;
+	/* The chips themselves are app.css's `.filter-chip`, owned by FilterChips. */
+	.filter-bar {
 		margin-bottom: 16px;
-		flex-wrap: wrap;
-	}
-	.filter-chip {
-		padding: 5px 12px;
-		border: 1px solid var(--border);
-		border-radius: 999px;
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.82rem;
-		cursor: pointer;
-	}
-	.filter-chip:hover {
-		color: var(--text);
-	}
-	.filter-chip.active {
-		background: var(--accent-strong);
-		border-color: var(--accent-strong);
-		color: #fff;
 	}
 	/* Table chrome (padding, borders, header, `.right`, `td.actions`) is
 	   app.css's `.grid-container`, owned by DataTable. Cells top-align: the
@@ -477,14 +450,6 @@
 		color: var(--text-muted);
 	}
 	.empty,
-	.loading {
-		padding: 40px;
-		text-align: center;
-		background: var(--surface);
-		border: 1px dashed var(--border);
-		border-radius: 4px;
-		color: var(--text-muted);
-	}
 	.link-btn {
 		background: none;
 		border: none;

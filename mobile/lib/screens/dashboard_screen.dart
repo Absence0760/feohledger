@@ -5,6 +5,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/stores/dashboard_store.dart';
 import 'package:feohledger_mobile/utils/money.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/cash_flow_button.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
 import 'package:feohledger_mobile/widgets/load_error_state.dart';
@@ -94,16 +95,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
       0,
       (n, v) => n + v.unconvertedCount,
     );
+    final overdue = data.overdue;
+    final dueSoon = data.dueSoon;
 
     return [
       // Status first: is the user looking at live figures?
       if (store.fromCache) ...[
-        _Banner(icon: Icons.cloud_off, message: l.dashboardCachedBanner),
+        StaleDataBanner(
+          icon: Icons.cloud_off,
+          message: l.dashboardCachedBanner,
+          onRetry: store.fetch,
+        ),
         const SizedBox(height: 12),
       ] else if (store.error != null) ...[
         // A refresh failed with no cached copy behind it: the figures below
         // are the last ones loaded, and the user should know.
-        _Banner(icon: Icons.sync_problem, message: l.dashboardRefreshFailed),
+        StaleDataBanner(
+          icon: Icons.sync_problem,
+          message: l.dashboardRefreshFailed,
+          onRetry: store.fetch,
+        ),
         const SizedBox(height: 12),
       ],
 
@@ -130,23 +141,49 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: KpiCard(
-              title: l.dashboardUpcoming,
-              value: data.upcoming.count.toString(),
-              subtitle: formatMoneyCompact(
-                data.upcoming.totalAmount,
-                currency: data.reportingCurrency,
-              ),
-              icon: Icons.schedule,
-              color: Colors.orange,
-            ),
+            // Upcoming means due soon: today through seven days out, counted
+            // over the whole book (`due_soon_*`). Only a payload predating
+            // those fields falls back to the capped upcoming list, which also
+            // holds the overdue rows.
+            child: dueSoon != null
+                ? KpiCard(
+                    title: l.dashboardUpcoming,
+                    value: dueSoon.count.toString(),
+                    subtitle: _perCurrency(dueSoon),
+                    icon: Icons.schedule,
+                    color: Colors.orange,
+                  )
+                : KpiCard(
+                    title: l.dashboardUpcoming,
+                    value: data.upcoming.count.toString(),
+                    subtitle: formatMoneyCompact(
+                      data.upcoming.totalAmount,
+                      currency: data.reportingCurrency,
+                    ),
+                    icon: Icons.schedule,
+                    color: Colors.orange,
+                  ),
           ),
         ],
       ),
-      // Each money KPI is a reporting-currency rollup that keeps an
-      // unconvertible row in at FACE value rather than drop it (dropping would
-      // understate what is due), so it says so beside itself when it happened.
-      if (data.upcoming.unconvertedCount > 0)
+      // Owed now, over the whole book (`overdue_*`, the predicate the web's
+      // /cfo overdue card reads). Absent, not `0`, when the payload predates
+      // the field.
+      if (overdue != null) ...[
+        const SizedBox(height: 12),
+        KpiCard(
+          title: l.dashboardOverdue,
+          value: overdue.count.toString(),
+          subtitle: _perCurrency(overdue),
+          icon: Icons.warning_amber_rounded,
+          color: Colors.red.shade700,
+        ),
+      ],
+      // The legacy Upcoming figure is a reporting-currency rollup that keeps
+      // an unconvertible row in at FACE value rather than drop it (dropping
+      // would understate what is due), so it says so beside itself when it
+      // happened. The due-soon figure is per currency and converts nothing.
+      if (dueSoon == null && data.upcoming.unconvertedCount > 0)
         PartialConversionNote(
           l.dashboardKpiUnconverted(
             l.dashboardUpcoming,
@@ -247,6 +284,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ];
   }
 
+  /// A due rollup's money, one figure per currency in the invoices' own code
+  /// (`€1.2K · $3.4K`), or `null` when nothing is due. Never one converted
+  /// total: the server did not convert these, and no sum crosses currencies.
+  String? _perCurrency(DueRollup rollup) {
+    if (rollup.byCurrency.isEmpty) return null;
+    return rollup.byCurrency
+        .map((c) => formatMoneyCompact(c.amount, currency: c.currency))
+        .join(' · ');
+  }
+
   Widget _vendorRow(AppLocalizations l, VendorSpend v, String? currency) {
     final figure = formatMoneyCompact(v.totalAmount, currency: currency);
     final detail = v.unconvertedCount > 0
@@ -283,45 +330,6 @@ class _SectionHeader extends StatelessWidget {
     return Semantics(
       header: true,
       child: Text(text, style: Theme.of(context).textTheme.titleMedium),
-    );
-  }
-}
-
-/// The amber "these figures aren't live" strip — the cached-copy notice and
-/// the failed-refresh notice share it. A live region, so the change is spoken
-/// when it appears over figures the user is already reading.
-class _Banner extends StatelessWidget {
-  final IconData icon;
-  final String message;
-
-  const _Banner({required this.icon, required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      liveRegion: true,
-      label: message,
-      excludeSemantics: true,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.amber.shade50,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.amber.shade200),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: Colors.amber.shade900),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

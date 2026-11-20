@@ -16,13 +16,6 @@ enum VendorStatus {
     );
   }
 
-  String get label => switch (this) {
-    VendorStatus.active => 'Active',
-    VendorStatus.unverified => 'Unverified',
-    VendorStatus.inactive => 'Inactive',
-    VendorStatus.rejected => 'Rejected',
-  };
-
   /// Verify/reject are only offered while the vendor is awaiting review —
   /// the backend `verify` endpoint 409s from any status other than
   /// `unverified`. (Reject also accepts `active` server-side, but the
@@ -96,12 +89,4 @@ class Vendor {
     final list = revocation[key];
     return list is List ? list.length : 0;
   }
-
-  /// `manual` / `erp_sync` / `ai_extracted` — display label for the source.
-  String get sourceLabel => switch (source) {
-    'erp_sync' => 'ERP',
-    'ai_extracted' => 'AI',
-    'manual' => 'Manual',
-    _ => source,
-  };
 }

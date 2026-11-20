@@ -506,7 +506,7 @@ retry-safe for the same reason (no order exists at the processor):
   re-attempt it — and its own payability gate keeps skipping the row (as
   `invoice_not_payable`) until the ERP push completes and the invoice reaches
   the payable `posted_in_erp`.
-- `api/payments.SCHEDULABLE_INVOICE_STATUSES` — the statuses the three dispatch
+- `services/payment_gates.SCHEDULABLE_INVOICE_STATUSES` — the statuses the three dispatch
   legs transition to `payment_scheduled` — is now **derived** from
   `workflow_engine.VALID_TRANSITIONS` rather than restated as a literal, so it
   can never again name a status the state machine refuses. It is
@@ -1297,7 +1297,7 @@ is seen by whichever of the two runs second.
 | stamped | same vendor, other bank fingerprint, or one that cannot be recomputed (no fingerprint, or its key in neither setting) | `payee_changed_since_paid` | every approver of a bank change since the stamp |
 | stamped | same vendor, same fingerprint | none | |
 | unstamped (paid before 0128) | a merge into its vendor since the payment was booked | `payee_unrecorded_after_merge` | the stewards of those merges |
-| unstamped | a bank change approved since the payment was booked | `vendor_bank_changed` (`api/vendors.reflag_voided_invoice_for_bank_change`) | every approver of those changes |
+| unstamped | a bank change approved since the payment was booked | `vendor_bank_changed` (`services/vendor_bank_change.reflag_voided_invoice_for_bank_change`) | every approver of those changes |
 
 The merge chain follows each retired vendor's own record; a merge from before
 0128 is read from its `vendor.merged` audit row (the earliest one naming the
@@ -2950,7 +2950,7 @@ section) and `tests/test_payment_create_cfo_gate.py`.
 
 Independently of the CFO threshold, `create_payment_run` refuses any invoice
 that still carries an **unresolved** (`open`/`escalated`) exception of a class
-listed in `payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`. This gate (along with
+listed in `payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`. This gate (along with
 the payable-status check, credit-memo netting, and the CFO-threshold
 computation above) lives in `services/payment_runs.py::create_payment_run_for_invoices`
 — `POST /api/payments/runs` and the AI Cash-Flow Copilot's
@@ -3026,7 +3026,7 @@ types already did.
 |---------|-------------|--------------|
 | an unresolved (`open`/`escalated`) payment-blocking exception | the exception **type** (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation` / `quality_hold` / `po_mismatch`) | `blocked: true` |
 | the invoice's vendor is not `active` — unverified, inactive or rejected (`payment_runs.inactive_vendor_statuses`; `vendor-management.md` § Vendor Lifecycle). Refused on every rail, so it outranks the card-rail pin. `POST /api/payments` 409s; dispatch fails a payment whose vendor stopped being active after booking as `vendor_not_active:<status>`, before the processor call and retry-safe; `/retry-failed` skips it | `vendor_not_active` | `blocked: true` |
-| the invoice records no currency — `invoices.currency` blank or whitespace (the invoice PATCH still keeps `""` as its legacy "no currency" value; `normalize_currency_code` → `None`). Refused on every rail, so it outranks the card-rail pin. Never read as USD (decisions §453 and the round-16 entry after it): the builder's 409 is prefixed `currency_unknown:`, a blank is left out of the mixed-currency 422 (it is no currency, not a second one), `POST /api/payments` 409s the same way, `POST /api/payments/corridor-quotes` refuses to price it, and `card_issuance.issue_card_for_invoice` refuses to mint a card for it before the provider call (`POST /api/cards/generate` refuses it first by name, `card_skip_currency_unknown`). Dispatch (`dispatch_preflight`) fails a payment whose invoice was blanked after booking as `currency_unknown`, before the processor call and retry-safe, so the order is never sent in a currency nobody recorded; `/retry-failed` skips it | `currency_unknown` | `blocked: true` |
+| the invoice records no currency — `invoices.currency` NULL, the one spelling of unknown since migration 0136 (decisions §473), or a legacy blank, whitespace-only or malformed value written before it; `payment_runs.payable_currency_code` → `None` for all of them, and the invoice PATCH refuses a blank or `null` with the coded 422 `invoice_currency_required` (§460). Refused on every rail, so it outranks the card-rail pin. Never read as USD (decisions §453 and the round-16 entry after it): the builder's 409 is prefixed `currency_unknown:`, a blank is left out of the mixed-currency 422 (it is no currency, not a second one), `POST /api/payments` 409s the same way, `POST /api/payments/corridor-quotes` refuses to price it, and `card_issuance.issue_card_for_invoice` refuses to mint a card for it before the provider call (`POST /api/cards/generate` refuses it first by name, `card_skip_currency_unknown`). Dispatch (`dispatch_preflight`) fails a payment whose invoice was blanked after booking as `currency_unknown`, before the processor call and retry-safe, so the order is never sent in a currency nobody recorded; `/retry-failed` skips it | `currency_unknown` | `blocked: true` |
 | an applied credit memo's vendor or currency no longer matches the invoice (a background re-extraction rewrote it after the apply) — netting it would credit the wrong supplier or subtract across currencies (`services/applied_credit_integrity`, decisions §214). Checked before `fully_credited`, whose net is computed from that same credit. `POST /api/payments` refuses it with a 409, and dispatch fails a payment booked before the change as `applied_credit_mismatch:<vendor\|currency>`, before the processor call and retry-safe. `/retry-failed` skips it. | `applied_credit_mismatch` | `blocked: true` |
 | applied credit memos cover the whole invoice — a `$0` payment a real rail rejects as `failed` | `fully_credited` | `blocked: true` |
 | a live virtual card already claims the invoice (`POST /api/cards/generate` mints one with no `Payment` row behind it) | `live_virtual_card` | `blocked: false`, `required_method: "virtual_card"` |

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
@@ -37,6 +38,7 @@
 	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import { PERM_VENDOR_MANAGE } from '#lib/types/admin.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { importVendorsCsv, type PortalInviteResult } from '#lib/api/vendors.ts';
 	import {
 		VENDOR_STATUS_TONES,
@@ -456,7 +458,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('vendors.toast.selectAllTruncated', { shown: res.ids.length, total: res.total }),
+					m('vendors.toast.selectAllTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -643,9 +645,6 @@
 	// matched nothing. Only the unfiltered case points at the CSV import — "import
 	// a CSV" is a non-sequitur when the filter is just narrow.
 	let noActiveFilters = $derived(!search.trim() && statusFilter === 'all');
-	let emptyMessage = $derived(
-		loading ? m('common.loading') : noActiveFilters ? m('vendors.empty.fresh') : m('vendors.empty')
-	);
 	// A brand-new tenant with zero vendors and no active filter gets the rich
 	// onboarding CTA (mirrors the dashboard / `/invoices` EmptyState) instead of
 	// the bare "no vendors" cell — gated on `loaded` (not mid-load) and no error.
@@ -767,7 +766,15 @@
 		/>
 	{:else}
 	<div class="vendor-table">
-	<DataTable isEmpty={vendors.length === 0} empty={emptyMessage} colspan={10} fixed>
+	<DataTable
+		isEmpty={vendors.length === 0}
+		{loading}
+		filtered={!noActiveFilters}
+		emptyFiltered={m('vendors.empty')}
+		empty={m('vendors.empty.fresh')}
+		colspan={10}
+		fixed
+	>
 		{#snippet header()}
 			<tr>
 				<th class="checkbox-col">
@@ -831,7 +838,7 @@
 					<td>
 						<span class="source-badge">{sourceLabel(v.source)}</span>
 					</td>
-					<td class="mono">{v.invoice_count}</td>
+					<td class="mono">{formatCount(v.invoice_count)}</td>
 					<td>
 						{#if v.erp_vendor_id}
 							<span
@@ -899,24 +906,22 @@
 	</DataTable>
 	</div>
 
-	{#if hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMoreVendors} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('vendors.loadMore', { shown: vendors.length, total })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('vendors.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={vendors.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		onloadmore={loadMoreVendors}
+		moreKey="vendors.loadMore"
+		allKey="vendors.showingAll"
+	/>
 	{/if}
 
 	{#if canManageVendors}
 		<BulkBar count={selected.size} onclear={clearSelection}>
 			{#snippet actions()}
 				{#if allSelected && !selectedAllMatching && total > vendors.length}
-					<button class="bulk-action-btn secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
+					<button class="btn-secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
 						{selectingAllMatching
 							? m('common.loading')
 							: m('common.selectAllMatching', { total })}
@@ -1245,31 +1250,6 @@
 	}
 
 	/* Bulk-bar "select all N matching" affordance — mirrors /expenses. */
-	.bulk-action-btn {
-		padding: 6px 14px;
-		border-radius: 6px;
-		border: 1px solid var(--accent-strong);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.bulk-action-btn:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-	.bulk-action-btn.secondary {
-		background: transparent;
-		color: var(--accent-strong);
-	}
-
 	.bulk-all-matching-note {
 		font-size: 0.82rem;
 		color: var(--text-muted);

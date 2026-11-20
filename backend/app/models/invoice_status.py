@@ -66,6 +66,28 @@ OPEN_AP_STATUSES: tuple[InvoiceStatus, ...] = (
     InvoiceStatus.payment_scheduled,
 )
 
+#: Approved and paid out, or finished: the money has left (or the invoice was
+#: closed as history), so it is no longer owed. Where a payee becomes history
+#: (vendor merge, the bank-change flag), what an open-items statement can no
+#: longer list, what retention may archive, and the importable statuses a CSV
+#: row can never leave for a live stage. `paid` is not terminal (a void takes
+#: it back to `approved`), so this is "settled now", not "settled for good".
+SETTLED_STATUSES: tuple[InvoiceStatus, ...] = (
+    InvoiceStatus.paid,
+    InvoiceStatus.done,
+)
+
+#: The statuses a payment may be created against: approved and able to move
+#: straight to `payment_scheduled` (or already there, a re-attempt). Not
+#: `sending_to_erp` / `sent_to_erp`: a push in flight must reach
+#: `posted_in_erp` first. `services/payment_gates.PAYABLE_INVOICE_STATUSES` is this set
+#: as strings.
+PAYABLE_STATUSES: tuple[InvoiceStatus, ...] = (
+    InvoiceStatus.approved,
+    InvoiceStatus.posted_in_erp,
+    InvoiceStatus.payment_scheduled,
+)
+
 #: Accepted into the books, whatever has happened since: still owed, paid, or
 #: finished. The "historically accepted" population every vendor baseline
 #: reads (coding, price and amount history, remit-to address, anomaly
@@ -80,8 +102,7 @@ OPEN_AP_STATUSES: tuple[InvoiceStatus, ...] = (
 #: `docs/decisions.md` §308.
 APPROVED_OR_BEYOND_STATUSES: tuple[InvoiceStatus, ...] = (
     *OPEN_AP_STATUSES,
-    InvoiceStatus.paid,
-    InvoiceStatus.done,
+    *SETTLED_STATUSES,
 )
 
 #: Past approval AND handed onward (ERP push started, payment scheduled, paid,

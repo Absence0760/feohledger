@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { en } from './locales/en';
-import { EN_FALLBACK, SLICE_LOADERS, SLICE_NAMES, SLICE_PREFIXES, sliceOf } from './catalogues';
+import { EN_FALLBACK, PRELOADED_SLICES, SLICE_LOADERS, SLICE_NAMES, SLICE_PREFIXES, sliceOf } from './catalogues';
 import { EN_SLICES } from './allMessages';
 import type { SliceName } from './messages';
 
@@ -20,6 +20,11 @@ import type { SliceName } from './messages';
  *     route's layouts and page; or
  *   - a component that itself calls `ensureSlices(…'S'…)` as it initialises
  *     (the ⓘ HelpTip, which appears on every page and owns the help slice).
+ *
+ * A PRELOADED slice (the refusal sentences) is the exception: the store asks
+ * for it at startup on every page and nothing awaits it, so "which route loads
+ * it" has no answer. Its keys may be named only by the files in
+ * PRELOADED_READERS below, each of which treats an unresolved key as absent.
  *
  * Both lists are read off the code, so there is nothing here to keep in step
  * with it. A failure means one of three things: load the slice on that route,
@@ -44,6 +49,23 @@ const NOT_RENDERED: { from: string; to: string; why: string }[] = [
 		from: '/src/lib/components/help/HelpTip.svelte',
 		to: '/src/lib/help/content.ts',
 		why: 'A tip reads only guidesForTerm() — guide ids and their plain-English titles — never the guide bodies whose {ui:…} references name settings keys.'
+	}
+];
+
+/**
+ * The only files that may name a preloaded slice's keys, each with why it is
+ * safe to read one before the slice has landed.
+ */
+const PRELOADED_READERS: { slice: SliceName; file: string; why: string }[] = [
+	{
+		slice: 'refusal',
+		file: '/src/lib/api/codedRefusals.ts',
+		why: 'codedRefusalText resolves through resolvedOnly(): a key m() cannot resolve yet makes the refusal null, and the caller shows the server\'s English sentence.'
+	},
+	{
+		slice: 'refusal',
+		file: '/src/lib/api/erpRefusals.ts',
+		why: 'erpRefusalText resolves through resolvedOnly() too: a sentence whose key m() cannot resolve yet is null, and the caller shows the server\'s sentence or last_error.'
 	}
 ];
 
@@ -189,6 +211,7 @@ const USES = [
 describe('catalogue slices', () => {
 	it('are loaded somewhere, and every loader names a real slice', () => {
 		for (const s of SLICE_NAMES) {
+			if (PRELOADED_SLICES.includes(s)) continue; // the store loads it: pinned below
 			expect((LOADING_DIRS.get(s) ?? []).length + (OWNERS.get(s) ?? []).length, `${s} is never loaded`).toBeGreaterThan(0);
 		}
 		for (const s of [...LOADING_DIRS.keys(), ...OWNERS.keys()]) expect(SLICE_NAMES, `ensureSlices('${s}')`).toContain(s);
@@ -264,10 +287,31 @@ describe('catalogue slices', () => {
 		}
 	});
 
+	it('that are preloaded are asked for at startup, and only by the store', () => {
+		const store = SOURCES['/src/lib/i18n/store.svelte.ts'];
+		expect(store).toMatch(/for \(const s of PRELOADED_SLICES\) wanted\.add\(s\);\s*startupLocale = setLocale\(next\);/);
+		for (const s of PRELOADED_SLICES) {
+			expect(LOADING_DIRS.get(s) ?? [], `${s} is preloaded; a route need not load it`).toEqual([]);
+			expect(OWNERS.get(s) ?? [], `${s} is preloaded; a component need not load it`).toEqual([]);
+		}
+		for (const r of PRELOADED_READERS) expect(PRELOADED_SLICES, r.file).toContain(r.slice);
+		// What makes a reader safe before its slice lands: it reads through
+		// resolvedOnly(), so an unresolved key is null, never a raw key on screen.
+		for (const r of PRELOADED_READERS) expect(SOURCES[r.file], r.file).toMatch(/\bresolvedOnly\(t\)/);
+	});
+
 	it('are rendered only where they are loaded', () => {
 		const failures: string[] = [];
 		for (const { file, keys } of USES) {
 			for (const [slice, list] of keys) {
+				if (PRELOADED_SLICES.includes(slice)) {
+					if (!PRELOADED_READERS.some((r) => r.slice === slice && r.file === file))
+						failures.push(
+							`${file} names ${slice}-slice key ${list[0]}, but that slice is preloaded and may still be loading: ` +
+								`state it through a PRELOADED_READERS module (api/codedRefusals.ts, api/erpRefusals.ts), or keep the key in the main catalogue`
+						);
+					continue;
+				}
 				const chain = uncoveredPath(file, slice);
 				if (chain)
 					failures.push(

@@ -41,6 +41,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.services.discount_roi import DiscountROI, compute_roi, days_between
+from app.utils.currency_code import iso_currency_or_none
 
 _ZERO = Decimal("0.00")
 
@@ -51,8 +52,10 @@ class OfferOpportunity:
 
     ``base_amount`` — the amount the discount applies to.
     ``currency`` — the currency ``base_amount`` is denominated in
-    (``DiscountOffer.currency``). Carried because every money figure this
-    module produces is a SUM across opportunities, and a sum is only a number
+    (``DiscountOffer.currency``), or ``None`` when that code is missing or
+    malformed — always unconvertible, whatever ``reporting_currency`` is.
+    Carried because every money figure this module produces is a SUM across
+    opportunities, and a sum is only a number
     when its terms share a currency — see ``optimize``'s ``reporting_currency``.
     ``discount_percent`` — the tier's discount (e.g. ``Decimal("2.00")``).
     ``pay_by`` — the discount/tier deadline (latest pay date that still earns
@@ -78,7 +81,7 @@ class OfferOpportunity:
     vendor_name: str | None
     invoice_number: str | None
     base_amount: Decimal
-    currency: str
+    currency: str | None
     tier_days: int
     discount_percent: Decimal
     pay_by: date  # discount/tier deadline — latest pay date that still earns the tier
@@ -181,12 +184,20 @@ def optimize(
     Returns a deterministic :class:`OptimizationResult`.
     """
     cost_of_capital_pct = Decimal(cost_of_capital_pct)
-    target_currency = reporting_currency.strip().upper() if reporting_currency else None
+    # A reporting currency that is set but not a code becomes "", which no
+    # offer matches: every offer is then unconvertible (fail closed), never
+    # read as "no reporting currency" (which converts nothing).
+    target_currency = (
+        (iso_currency_or_none(reporting_currency) or "") if reporting_currency else None
+    )
 
     def _unconvertible(opp: OfferOpportunity) -> bool:
-        return target_currency is not None and (
-            (opp.currency or "").strip().upper() != target_currency
-        )
+        code = iso_currency_or_none(opp.currency)
+        # An offer in no stated currency is in none of the totals' currency,
+        # even for a caller that passed no reporting currency (fail closed).
+        if code is None:
+            return True
+        return target_currency is not None and code != target_currency
 
     # Score every opportunity with the shared ROI primitive.
     scored: list[tuple[OfferOpportunity, DiscountROI, bool, bool]] = []

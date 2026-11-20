@@ -7,6 +7,7 @@
 		type PortalInvoiceListItem,
 	} from '#lib/portalApi.ts';
 	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { onMount, untrack } from 'svelte';
@@ -14,8 +15,10 @@
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import {
 		portalInvoiceStatusLabelKey,
+		portalInvoiceStatusTone,
 		PORTAL_INVOICE_PHASES,
 		type PortalInvoicePhase,
 	} from '#lib/types/portalStatus.ts';
@@ -24,6 +27,7 @@
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
 	import SupplierChatThread from '#lib/components/chat/SupplierChatThread.svelte';
 	import type { PortalChatThread } from '#lib/types/supplierChat.ts';
 	import {
@@ -403,7 +407,7 @@
 	/>
 
 	{#if loading && !items.length}
-		<div class="loading">{m('portal.common.loading')}</div>
+		<LoadingState label={m('portal.common.loading')} />
 	{:else if loadError}
 		<LoadError message={loadError} onretry={refresh} testId="portal-invoices-load-error" />
 	{:else if !items.length}
@@ -475,7 +479,9 @@
 						<td>{formatDate(inv.due_date, m('portal.common.dash'))}</td>
 						<td class="right"><Money amount={inv.amount} currency={inv.currency} mono /></td>
 						<td>
-							<span class="status s-{inv.status}">{m(portalInvoiceStatusLabelKey(inv.status))}</span>
+							<Badge tone={portalInvoiceStatusTone(inv.status)} variant="status-badge {inv.status}"
+								>{m(portalInvoiceStatusLabelKey(inv.status))}</Badge
+							>
 							{#if inv.waiting_on}
 								<div class="waiting-on">
 									{m(WAITING_ON_KEY[inv.waiting_on])}{#if (inv.waiting_on_days ?? 0) > 0}
@@ -556,24 +562,16 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button
-					type="button"
-					class="btn-load-more"
-					onclick={() => load({ append: true })}
-					disabled={loadingMore}
-				>
-					{loadingMore
-						? m('portal.common.loading')
-						: m('portal.invoices.loadMore', { shown: items.length, total })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('portal.invoices.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={() => load({ append: true })}
+			moreKey="portal.invoices.loadMore"
+			allKey="portal.invoices.showingAll"
+			loadingKey="portal.common.loading"
+		/>
 	{/if}
 </div>
 
@@ -647,21 +645,6 @@
 		cursor: default;
 		padding: 14px 16px;
 	}
-	.status {
-		padding: 2px 8px;
-		border-radius: 3px;
-		font-size: 0.75rem;
-		background: var(--bg);
-		border: 1px solid var(--border);
-	}
-	.s-paid {
-		background: color-mix(in srgb, var(--success) 15%, transparent);
-		border-color: color-mix(in srgb, var(--success) 40%, transparent);
-	}
-	.s-rejected {
-		background: color-mix(in srgb, var(--danger) 12%, transparent);
-		border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-	}
 	.reject-reason {
 		margin-top: 6px;
 		max-width: 22rem;
@@ -723,14 +706,6 @@
 		cursor: default;
 	}
 	.empty,
-	.loading {
-		padding: 40px;
-		text-align: center;
-		background: var(--surface);
-		border: 1px dashed var(--border);
-		border-radius: 4px;
-		color: var(--text-muted);
-	}
 	.empty .hint {
 		font-size: 0.82rem;
 	}

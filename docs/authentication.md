@@ -647,6 +647,13 @@ alone is **not** trusted to decide which tenant's data is read.
 
 For employee tokens (`typ` is anything other than `"vendor"`), the
 guard requires `payload["org"] == organization.id`. Mismatch → 403.
+A token with **no** `org` claim → the same 403 (`token_tenant_mismatch`):
+`get_current_user` resolves the account by `sub` alone and never
+compares its organization with the tenant, so a claim-less token would
+otherwise open whichever tenant the header named. Every access token
+the app mints carries `org`; the MFA challenge types
+(`mfa_challenge`, `vendor_mfa_challenge`) are not access tokens and
+stay exempt.
 Vendor-portal tokens (`typ="vendor"`) are exempt because `VendorUser`
 rows live in the per-tenant DB and a cross-tenant attempt fails
 naturally on the user-lookup query in
@@ -656,8 +663,13 @@ requests pass through to the downstream auth dep (which 401s).
 Without this guard, an authenticated user from tenant A could read
 or mutate tenant B's data simply by sending
 `X-Tenant-Slug: <other-tenant>` on the request. The guard is pinned
-by `backend/tests/test_tenant_isolation.py` (unit) and
-`frontend/tests-e2e/auth/tenant-isolation.spec.ts` (e2e).
+by `backend/tests/test_tenant_isolation.py` (unit),
+`backend/tests/test_tenant_auth_sweep.py` (every employee route that
+resolves a tenant, with a foreign token and a claim-less one, on the
+production dependency chain; plus the `/api/v1` key-only tenant rule)
+and `frontend/tests-e2e/auth/tenant-isolation.spec.ts` (e2e). The
+supplier portal's per-vendor scoping is swept over every by-id route in
+`backend/tests/test_portal_cross_vendor.py`.
 
 ## SAML SSO
 
@@ -941,6 +953,35 @@ the per-account MFA failure budget counts the miss whatever the status
 `api/refusals.MFA_EMAIL_CODE_INVALID_DETAIL`) — its own code because its
 sentence also covers an expired code — and is a `401` for the same reason
 (§465).
+
+**No auth refusal sends an exception's own text.** The auth routers
+(`api/auth.py`, `api/portal_auth.py`, `api/auth_sso.py`, `api/auth_saml.py`)
+used to answer several failures with `detail=str(exc)` — the validator's,
+decoder's or SSO service's English, which no client could translate. Each is a
+coded refusal now (`api/refusals.py` § auth refusals), status unchanged, with
+the exception class logged server-side instead:
+
+| Code | Status | Where |
+|------|--------|-------|
+| `password_too_short` (`min_length`), `password_needs_uppercase`, `password_needs_lowercase`, `password_needs_digit` | 422 | reset / change / set password, employee and portal (`PasswordError.code`) |
+| `mfa_challenge_invalid` | 401 | every route that redeems a login MFA challenge token, employee and portal — expired, spent, malformed and wrong-type fold into one |
+| `passkey_registration_failed` | 400 | `POST /api/auth/mfa/passkey/register/verify` |
+| `sso_session_expired` | 400 | OIDC callback state, SAML ACS RelayState |
+| `sso_login_rejected` | 400 | OIDC code exchange |
+| `sso_token_invalid` | 400 | OIDC ID-token validation (signature, claims, nonce) |
+| `sso_link_expired` | 400 | SAML bridge `/exchange` handoff code |
+
+Each code folds every case its raising function distinguishes, so none can tell
+a caller more than the step it failed at. `tests/test_no_exception_text_in_detail.py`
+keeps the auth routers clean and ratchets the remaining sites elsewhere in
+`app/api` (a per-file count that may only shrink).
+
+The password request schemas (`ChangePasswordRequest`, `ResetPasswordRequest`,
+`UpdateProfileRequest`) carry only a `max_length`: a schema `min_length`
+answered a short password with pydantic's English error list before the
+handler ran, so `password_too_short` was unreachable on the employee routes.
+The length rule is `utils/passwords.MIN_LENGTH`, applied by
+`validate_password_complexity` on every route (`tests/test_password_security.py`).
 
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
@@ -1535,7 +1576,7 @@ still receives the email. The approval refusal is what closes the chain.
 ### Segregation of duties on the exception queue
 
 Clearing a payment-**blocking** exception is a money-path authorisation, not
-queue hygiene. `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES` — `duplicate`,
+queue hygiene. `services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES` — `duplicate`,
 `fraud_flag`, `line_total_mismatch`, `payment_reconciliation`, `quality_hold`,
 `po_mismatch` — stops a payment run while the row is `open` **or** `escalated`, and invoice approval gates on
 none of them. So resolving or dismissing one is the human sign-off that lets a

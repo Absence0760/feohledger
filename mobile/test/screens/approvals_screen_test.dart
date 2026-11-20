@@ -46,6 +46,22 @@ Map<String, dynamic> _refusal(String code, [Map<String, dynamic>? params]) =>
 /// A fake that filters SERVER-side on `?status=`, the way the real
 /// `GET /api/invoices` does. The approvals queue is a server-filtered request
 /// now, so a fake that ignored the param would let a client-side filter pass.
+/// Page [number] of a queue of [total] pending invoices, in the canonical
+/// `{items, total, page, page_size}` envelope (20 a page).
+http.Response _page(int number, int total) {
+  final first = (number - 1) * 20;
+  final count = (total - first).clamp(0, 20).toInt();
+  return _json({
+    'items': [
+      for (var i = first; i < first + count; i++)
+        _invoiceJson('$i', vendor: 'Vendor $i', verdicts: _allowed),
+    ],
+    'total': total,
+    'page': number,
+    'page_size': 20,
+  });
+}
+
 MockClient _apiWith(List<Map<String, dynamic>> all) => MockClient((req) async {
       final status = req.url.queryParameters['status'];
       return _list(
@@ -184,7 +200,11 @@ void main() {
     expect(find.text('All caught up!'), findsNothing);
 
     // Pull-to-refresh re-issues the approvals request, not the Invoices one.
-    await tester.fling(find.byType(ListView), const Offset(0, 400), 1000);
+    await tester.fling(
+      find.byType(CustomScrollView),
+      const Offset(0, 400),
+      1000,
+    );
     await _pumpUntil(tester, find.byType(InvoiceListTile));
     expect(find.text('Vendor One'), findsOneWidget);
   });
@@ -205,9 +225,17 @@ void main() {
     );
 
     await tester.pumpWidget(_localized());
-    await _pumpUntil(tester, find.text('Could not load pending approvals'));
+    // Worded from the cause: the server answered, so its reason is framed in
+    // the screen's own sentence.
+    await _pumpUntil(
+      tester,
+      find.textContaining('Could not load pending approvals'),
+    );
 
-    expect(find.text('Could not load pending approvals'), findsOneWidget);
+    expect(
+      find.textContaining('Could not load pending approvals'),
+      findsOneWidget,
+    );
     expect(find.text('All caught up!'), findsNothing);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
@@ -526,5 +554,78 @@ void main() {
         .map((d) => d.direction)
         .toList();
     expect(directions, [DismissDirection.horizontal, DismissDirection.endToStart]);
+  });
+
+  // The queue fetched the default page (20) and counted what it held, so 57
+  // waiting invoices read as "20 invoices pending" and 37 were unreachable.
+  testWidgets('57 pending reads 57, and Load more appends the next page',
+      (tester) async {
+    final asked = <int>[];
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        final number = int.parse(req.url.queryParameters['page'] ?? '1');
+        asked.add(number);
+        return _page(number, 57);
+      }),
+    );
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byType(InvoiceListTile));
+
+    expect(find.text('57 invoices pending'), findsOneWidget);
+    expect(find.text('20 invoices pending'), findsNothing);
+    expect(store.pending, hasLength(20));
+
+    final loadMore = find.byKey(const ValueKey('list-load-more'));
+    await tester.scrollUntilVisible(
+      loadMore,
+      400,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    // scrollUntilVisible ends on a jump it never lays out; without a frame
+    // the tap below would aim at the button's pre-scroll position.
+    await tester.pump();
+    expect(find.text('Showing 20 of 57'), findsOneWidget);
+    // Material's 48dp target (WCAG 2.5.8).
+    expect(tester.getSize(loadMore).height, greaterThanOrEqualTo(48));
+
+    await tester.tap(loadMore);
+    for (var i = 0; i < 30 && store.pending.length < 40; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    expect(asked, [1, 2]);
+    expect(store.pending, hasLength(40));
+    // The count stays the server's, not the rows now held.
+    await tester.scrollUntilVisible(
+      find.text('Showing 40 of 57'),
+      400,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.text('Showing 40 of 57'), findsOneWidget);
+  });
+
+  testWidgets('a queue that fits one page says it shows them all',
+      (tester) async {
+    ApiClient().debugConfigure(
+      client: MockClient((req) async => _page(1, 3)),
+    );
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byType(InvoiceListTile));
+
+    expect(find.text('3 invoices pending'), findsOneWidget);
+    expect(find.text('Showing all 3'), findsOneWidget);
+    expect(find.byKey(const ValueKey('list-load-more')), findsNothing);
   });
 }

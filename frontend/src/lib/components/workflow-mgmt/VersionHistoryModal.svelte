@@ -2,6 +2,8 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
+	import { formatDate } from '#lib/utils/time.ts';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import type { WorkflowVersion, WorkflowDiff } from '#lib/types/workflow.ts';
 
@@ -90,14 +92,14 @@
 		}
 	}
 
+	// The active in-app locale, not a pinned 'en-US' (countFormatAudit.test.ts).
 	function fmtDate(iso: string): string {
-		if (!iso) return '—';
-		return new Date(iso).toLocaleString('en-US', {
+		return formatDate(iso, '—', {
 			month: 'short',
 			day: 'numeric',
 			year: 'numeric',
 			hour: 'numeric',
-			minute: '2-digit',
+			minute: '2-digit'
 		});
 	}
 
@@ -109,7 +111,7 @@
 <Modal {open} ariaLabel={m('workflows.mgmt.ver.aria')} title={m('workflows.mgmt.ver.title', { name: workflowName })} width="lg" {onclose}>
 	<div class="vh-body">
 		{#if loading}
-			<p class="vh-status">{m('workflows.mgmt.ver.loading')}</p>
+			<LoadingState label={m('workflows.mgmt.ver.loading')} />
 		{:else if error}
 			<p class="vh-status vh-error">{error}</p>
 		{:else if versions.length === 0}
@@ -132,7 +134,7 @@
 						{/each}
 					</select>
 				</label>
-				<button class="vh-diff-btn" disabled={diffing || !fromId || !toId} onclick={runDiff}>
+				<button class="btn-primary" disabled={diffing || !fromId || !toId} onclick={runDiff}>
 					{diffing ? m('workflows.mgmt.ver.comparing') : m('workflows.mgmt.ver.compare')}
 				</button>
 			</div>
@@ -230,23 +232,6 @@
 		border-radius: 6px;
 		background-color: var(--surface);
 		font-size: 0.82rem;
-	}
-
-	.vh-diff-btn {
-		padding: 7px 16px;
-		border-radius: 6px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.vh-diff-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	.vh-diff {
@@ -403,14 +388,4 @@
 		font-family: inherit;
 	}
 
-	.btn-cancel {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
 </style>

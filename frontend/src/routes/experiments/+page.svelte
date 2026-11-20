@@ -33,21 +33,16 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { formatPercent } from '#lib/utils/percent.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { page } from '$app/state';
 	import { afterNavigate, replaceState } from '$app/navigation';
 
 	const canMutate = $derived(auth.isAdmin);
-
-	// Counts group by the active locale ("1,234" / "1.234" / "1 234"), the
-	// same holder money, dates and `formatPercent` read.
-	function formatCount(n: number): string {
-		return new Intl.NumberFormat(getActiveFormatLocale()).format(n);
-	}
 
 	const METRICS: PrimaryMetric[] = [
 		'time_to_approval_days',
@@ -396,11 +391,10 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={filtered.length === 0}
-		empty={loading
-			? m('common.loading')
-			: experiments.length > 0
-				? m('experiments.table.emptyFiltered')
-				: m('experiments.table.empty')}
+		{loading}
+		filtered={experiments.length > 0}
+		emptyFiltered={m('experiments.table.emptyFiltered')}
+		empty={m('experiments.table.empty')}
 	>
 		{#snippet body()}
 			{#each filtered as exp (exp.id)}
@@ -547,7 +541,7 @@
 	onclose={() => (resultsFor = null)}
 >
 	{#if resultsLoading}
-		<p>{m('experiments.results.loading')}</p>
+		<LoadingState label={m('experiments.results.loading')} />
 	{:else if resultsError}
 		<p class="error-banner">{resultsError}</p>
 	{:else if results}

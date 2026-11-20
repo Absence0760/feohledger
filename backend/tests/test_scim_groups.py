@@ -39,10 +39,6 @@ def test_managed_role_names():
     assert sg.managed_role_names({}) == set()
 
 
-def test_affected_member_ids_union():
-    assert sg.affected_member_ids(["a", "b"], ["b", "c"], None) == {"a", "b", "c"}
-
-
 # --- JSONB storage ----------------------------------------------------------
 
 

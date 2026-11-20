@@ -25,6 +25,7 @@
 	 * regardless of what the page shows.
 	 */
 	import { api } from '#lib/api.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { MAX_PAGE_SIZE, appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -41,6 +42,7 @@
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { goodsReceiptTone } from '#lib/types/goodsReceipt.ts';
@@ -614,7 +616,8 @@
 			<DataTable
 				columns={COLUMNS}
 				isEmpty={grs.length === 0}
-				empty={loading ? m('common.loading') : m('goodsReceipts.empty')}
+				{loading}
+				empty={m('goodsReceipts.empty')}
 				colspan={6}
 			>
 				{#snippet body()}
@@ -644,19 +647,16 @@
 			</DataTable>
 			{/if}
 
-			{#if hasMore && !errored}
-				<div class="load-more-row">
-					<button class="btn-load-more" onclick={loadMore} disabled={loadingMore}>
-						{loadingMore
-							? m('common.loading')
-							: m('goodsReceipts.loadMore', { shown: grs.length, total })}
-					</button>
-				</div>
-			{:else if total > 0 && !errored}
-				<div class="load-more-row">
-					<span class="load-more-end">{m('goodsReceipts.showingAll', { total })}</span>
-				</div>
-			{/if}
+			<LoadMoreFooter
+				shown={grs.length}
+				{total}
+				{hasMore}
+				loading={loadingMore}
+				{errored}
+				onloadmore={loadMore}
+				moreKey="goodsReceipts.loadMore"
+				allKey="goodsReceipts.showingAll"
+			/>
 		</div>
 	{:else}
 		<div
@@ -677,7 +677,8 @@
 			<DataTable
 				columns={INSPECTION_COLUMNS}
 				isEmpty={inspections.length === 0}
-				empty={inspectionsLoading ? m('common.loading') : m('goodsReceipts.inspections.empty')}
+				loading={inspectionsLoading}
+				empty={m('goodsReceipts.inspections.empty')}
 				colspan={7}
 			>
 				{#snippet body()}
@@ -718,29 +719,16 @@
 				{/snippet}
 			</DataTable>
 
-			{#if hasMoreInspections}
-				<div class="load-more-row">
-					<button
-						class="btn-load-more"
-						onclick={loadMoreInspections}
-						disabled={loadingMoreInspections}
-						data-testid="load-more-inspections"
-					>
-						{loadingMoreInspections
-							? m('common.loading')
-							: m('goodsReceipts.inspections.loadMore', {
-									shown: inspections.length,
-									total: inspectionsTotal
-								})}
-					</button>
-				</div>
-			{:else if inspectionsTotal > 0}
-				<div class="load-more-row">
-					<span class="load-more-end">
-						{m('goodsReceipts.inspections.showingAll', { total: inspectionsTotal })}
-					</span>
-				</div>
-			{/if}
+			<LoadMoreFooter
+				shown={inspections.length}
+				total={inspectionsTotal}
+				hasMore={hasMoreInspections}
+				loading={loadingMoreInspections}
+				onloadmore={loadMoreInspections}
+				moreKey="goodsReceipts.inspections.loadMore"
+				allKey="goodsReceipts.inspections.showingAll"
+				testId="load-more-inspections"
+			/>
 		</div>
 	{/if}
 </PageHeader>
@@ -762,7 +750,7 @@
 
 	<div class="modal-body">
 		{#if detailLoading}
-			<div class="loading">{m('common.loading')}</div>
+			<LoadingState />
 		{:else if detail}
 			<dl class="meta">
 				<dt>{m('goodsReceipts.modal.po')}</dt><dd class="mono">{detail.po_number ?? '—'}</dd>
@@ -1085,10 +1073,5 @@
 		white-space: nowrap;
 	}
 
-	.loading {
-		padding: 40px;
-		text-align: center;
-		color: var(--text-muted);
-	}
 
 </style>

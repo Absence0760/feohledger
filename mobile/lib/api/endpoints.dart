@@ -82,7 +82,10 @@ class AuthApi {
 class InvoiceApi {
   static final _api = ApiClient();
 
-  static Future<List<Invoice>> list({
+  /// One page of invoices with the server's `total` for the whole filter — a
+  /// screen pages through it (`PagedFetch`) rather than stopping at the first
+  /// [pageSize] rows.
+  static Future<PagedResult<Invoice>> list({
     String? status,
     String? search,
     String? vendor,
@@ -123,10 +126,8 @@ class InvoiceApi {
     // gates for the page only when asked.
     if (includeReviewActions) params['include'] = 'review_actions';
 
-    final items = await _api.getList('/invoices', params);
-    return items
-        .map((e) => Invoice.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final result = await _api.getPage('/invoices', params);
+    return result.map((e) => Invoice.fromJson(e as Map<String, dynamic>));
   }
 
   /// `YYYY-MM-DD` — the backend parses these into `date` (FastAPI `date`

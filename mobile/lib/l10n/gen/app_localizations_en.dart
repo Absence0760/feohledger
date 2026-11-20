@@ -57,6 +57,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonRetry => 'Retry';
 
   @override
+  String get commonLoadErrorConnection =>
+      'Couldn\'t reach FeohLedger. Check your connection and tap Retry.';
+
+  @override
   String get commonAll => 'All';
 
   @override
@@ -115,6 +119,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get dashboardForReview => 'For Review';
 
   @override
+  String get dashboardOverdue => 'Overdue';
+
+  @override
   String get dashboardApproved => 'Approved';
 
   @override
@@ -145,7 +152,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get dashboardRefreshFailed =>
-      'Couldn\'t refresh — these are the last figures loaded. Pull down to try again.';
+      'Couldn\'t refresh — these are the last figures loaded. Tap Retry to try again.';
 
   @override
   String get dashboardNeedsAttention => 'Needs your attention';
@@ -303,13 +310,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notificationsEmpty => 'No notifications';
 
   @override
-  String get notificationsCaughtUp => 'You\'re all caught up';
-
-  @override
   String get notificationsNothingYet => 'Nothing here yet';
 
   @override
-  String get notificationsLoadError => 'Couldn\'t load notifications';
+  String notificationsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load notifications: $error';
+  }
 
   @override
   String get vendorsTitle => 'Vendors';
@@ -339,7 +345,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get vendorsEmpty => 'No vendors found';
 
   @override
-  String get vendorsLoadError => 'Could not load vendors';
+  String vendorsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load vendors: $error';
+  }
 
   @override
   String get vendorActionVerify => 'Verify';
@@ -445,8 +453,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get paymentsEmpty => 'No payments';
 
   @override
-  String paymentsErrorPrefix(String error) {
-    return 'Error: $error';
+  String paymentsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load payments: $error';
   }
 
   @override
@@ -472,9 +480,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get approvalsNoneWaiting => 'No invoices waiting for approval';
-
-  @override
-  String get approvalsLoadError => 'Could not load pending approvals';
 
   @override
   String approvalsPendingCount(int count) {
@@ -1227,10 +1232,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get payQueueEmpty => 'No invoices awaiting payment';
 
   @override
-  String get payQueueError => 'Could not load the payment queue';
+  String payQueueLoadErrorPrefix(String error) {
+    return 'Couldn\'t load the payment queue: $error';
+  }
 
   @override
-  String get payQueueRetry => 'Retry';
+  String payRunsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load payment runs: $error';
+  }
 
   @override
   String payQueueDue(String date) {
@@ -1755,7 +1764,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get workflowDetailFallbackTitle => 'Workflow';
 
   @override
-  String get workflowDetailLoadError => 'Could not load workflow';
+  String workflowDetailErrorPrefix(String error) {
+    return 'Could not load the workflow: $error';
+  }
 
   @override
   String get workflowDetailNoSteps => 'This workflow has no steps.';
@@ -2170,7 +2181,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get exceptionDetailTitle => 'Exception';
 
   @override
-  String get exceptionDetailNotFound => 'Exception not found';
+  String exceptionDetailErrorPrefix(String error) {
+    return 'Could not load the exception: $error';
+  }
 
   @override
   String get exceptionDetailOverdue => 'Overdue';
@@ -2742,7 +2755,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get inspectionsEmptyFiltered => 'No inspections with this outcome.';
 
   @override
-  String get inspectionsLoadError => 'Could not load inspections';
+  String inspectionsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load inspections: $error';
+  }
 
   @override
   String get inspectionsResultPass => 'Pass';
@@ -3276,6 +3291,24 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoBilledBeyondTotal(
+    String billedAmount,
+    String poNumber,
+    String poTotal,
+  ) {
+    return 'Other invoices already bill $billedAmount against PO $poNumber, whose total is $poTotal — this invoice takes it past that total';
+  }
+
+  @override
+  String invoiceWarningPoBilledBeyondReceipt(
+    String totalBilled,
+    String poNumber,
+    String receivedValue,
+  ) {
+    return 'Invoices on PO $poNumber bill $totalBilled, this one included; goods worth $receivedValue have been received';
+  }
+
+  @override
   String invoiceWarningPoAmountVariancePoCurrencyUnknown(
     String variancePct,
     String poNumber,
@@ -3437,6 +3470,23 @@ class AppLocalizationsEn extends AppLocalizations {
     String spendLimit,
   ) {
     return 'Cumulative spend $cumulativeSpend exceeds contract $contractNumber limit $spendLimit (not-to-exceed)';
+  }
+
+  @override
+  String invoiceWarningContractCurrencyMismatch(
+    String invoiceCurrency,
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return 'Invoice is in $invoiceCurrency but contract $contractNumber is in $contractCurrency — its spend limit was not checked';
+  }
+
+  @override
+  String invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+    String contractNumber,
+    String contractCurrency,
+  ) {
+    return 'The invoice records no valid currency, so the spend limit in $contractCurrency of contract $contractNumber was not checked';
   }
 
   @override
@@ -4472,4 +4522,485 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get grRecordReceiveLines => 'Enter a quantity on at least one line';
+
+  @override
+  String get listShowingSavedCopy =>
+      'Showing a saved copy — couldn\'t reach the server. Tap Retry to try again.';
+
+  @override
+  String get listRefreshFailed =>
+      'Couldn\'t refresh — showing the last list loaded. Tap Retry to try again.';
+
+  @override
+  String exceptionsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load exceptions: $error';
+  }
+
+  @override
+  String contractsLoadErrorPrefix(String error) {
+    return 'Couldn\'t load contracts: $error';
+  }
+
+  @override
+  String get errorNetworkUnreachable =>
+      'Couldn\'t reach the server. Check your connection and try again.';
+
+  @override
+  String errorRequestFailed(int status) {
+    return 'The server couldn\'t complete the request (HTTP $status).';
+  }
+
+  @override
+  String get errorUnexpected => 'Something went wrong. Please try again.';
+
+  @override
+  String payRunCreated(int count, String amount, String cfo) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'Payment run created with $count payments totalling $amount. CFO approval is required before it can be executed.',
+      one:
+          'Payment run created with $count payment totalling $amount. CFO approval is required before it can be executed.',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Payment run created with $count payments totalling $amount.',
+      one: 'Payment run created with $count payment totalling $amount.',
+    );
+    String _temp2 = intl.Intl.selectLogic(cfo, {
+      'required': '$_temp0',
+      'other': '$_temp1',
+    });
+    return '$_temp2';
+  }
+
+  @override
+  String payRunCreatedPlain(String cfo) {
+    String _temp0 = intl.Intl.selectLogic(cfo, {
+      'required': 'Payment run created. CFO approval is required before it can be executed.',
+      'other': 'Payment run created.',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunApproved => 'Run approved by CFO';
+
+  @override
+  String payRunExecuted(
+    String provider,
+    int completed,
+    int inFlight,
+    int failed,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      completed,
+      locale: localeName,
+      other: '$completed completed',
+      one: '$completed completed',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      inFlight,
+      locale: localeName,
+      other: '$inFlight in flight',
+      one: '$inFlight in flight',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      failed,
+      locale: localeName,
+      other: '$failed failed',
+      one: '$failed failed',
+    );
+    return 'Payment run executed via $provider: $_temp0, $_temp1, $_temp2.';
+  }
+
+  @override
+  String get payRunExecutedPlain => 'Payment run executed.';
+
+  @override
+  String payRunExecutedCards(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count virtual cards issued.',
+      one: '$count virtual card issued.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String payRunCancelled(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Draft run cancelled; $count invoices returned to the queue.',
+      one: 'Draft run cancelled; $count invoice returned to the queue.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get payRunCancelledPlain => 'Payment run cancelled.';
+
+  @override
+  String vendorSyncSummary(int created, int updated, int unchanged) {
+    String _temp0 = intl.Intl.pluralLogic(
+      created,
+      locale: localeName,
+      other: '$created new',
+      one: '$created new',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      updated,
+      locale: localeName,
+      other: '$updated updated',
+      one: '$updated updated',
+    );
+    String _temp2 = intl.Intl.pluralLogic(
+      unchanged,
+      locale: localeName,
+      other: '$unchanged unchanged',
+      one: '$unchanged unchanged',
+    );
+    return 'Synced $_temp0, $_temp1, $_temp2.';
+  }
+
+  @override
+  String get vendorSyncComplete => 'ERP sync complete.';
+
+  @override
+  String vendorSyncNotLinked(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count not linked (the name matches more than one vendor).',
+      one: '$count not linked (the name matches more than one vendor).',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorSyncUnlinked(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count unlinked (linked under another ERP company).',
+      one: '$count unlinked (linked under another ERP company).',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorSyncRelinked(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count relinked (linked when this ERP company was connected before).',
+      one:
+          '$count relinked (linked when this ERP company was connected before).',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get authInvalidCredentials => 'Invalid credentials';
+
+  @override
+  String get authInvalidCode => 'Invalid or expired code. Please try again.';
+
+  @override
+  String get authVerifyCodeFailed =>
+      'Could not verify the code. Please try again.';
+
+  @override
+  String get authEmailCodeFailed =>
+      'Could not send the email code. Please try again.';
+
+  @override
+  String exceptionsFilteredEmpty(String status) {
+    String _temp0 = intl.Intl.selectLogic(status, {
+      'open': 'No open exceptions',
+      'escalated': 'No escalated exceptions',
+      'resolved': 'No resolved exceptions',
+      'dismissed': 'No dismissed exceptions',
+      'other': 'No matching exceptions',
+    });
+    return '$_temp0';
+  }
+
+  @override
+  String get contractsFilteredEmpty =>
+      'No contracts match your search or filter.';
+
+  @override
+  String get vendorsFilteredEmpty => 'No vendors match your search or filter.';
+
+  @override
+  String get commonShowAll => 'Show all';
+
+  @override
+  String get listLoadMore => 'Load more';
+
+  @override
+  String listShowingCount(int shown, int total) {
+    return 'Showing $shown of $total';
+  }
+
+  @override
+  String listShowingAll(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Showing all $count',
+      one: 'Showing the only item',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get listLoadMoreFailed => 'Couldn\'t load more.';
+
+  @override
+  String invoicesLoadErrorPrefix(String error) {
+    return 'Couldn\'t load invoices: $error';
+  }
+
+  @override
+  String approvalsLoadErrorPrefix(String error) {
+    return 'Could not load pending approvals: $error';
+  }
+
+  @override
+  String get invoicesFilteredEmpty => 'No invoices match these filters';
+
+  @override
+  String statusPillAnnounce(String label) {
+    return 'Status: $label';
+  }
+
+  @override
+  String get vendorStatusActive => 'Active';
+
+  @override
+  String get vendorStatusUnverified => 'Unverified';
+
+  @override
+  String get vendorStatusInactive => 'Inactive';
+
+  @override
+  String get vendorStatusRejected => 'Rejected';
+
+  @override
+  String get contractStatusDraft => 'Draft';
+
+  @override
+  String get contractStatusActive => 'Active';
+
+  @override
+  String get contractStatusExpired => 'Expired';
+
+  @override
+  String get contractStatusTerminated => 'Terminated';
+
+  @override
+  String get contractStatusCancelled => 'Cancelled';
+
+  @override
+  String get contractTypePurchase => 'Purchase';
+
+  @override
+  String get contractTypeService => 'Service';
+
+  @override
+  String get contractTypeSubscription => 'Subscription';
+
+  @override
+  String get contractTypeLease => 'Lease';
+
+  @override
+  String get contractTypeSla => 'SLA';
+
+  @override
+  String get contractTypeMsa => 'MSA';
+
+  @override
+  String get contractTypeSow => 'SOW';
+
+  @override
+  String get contractTypeOther => 'Other';
+
+  @override
+  String get exceptionStatusOpen => 'Open';
+
+  @override
+  String get exceptionStatusEscalated => 'Escalated';
+
+  @override
+  String get exceptionStatusResolved => 'Resolved';
+
+  @override
+  String get exceptionStatusDismissed => 'Dismissed';
+
+  @override
+  String get exceptionSeverityError => 'Error';
+
+  @override
+  String get exceptionSeverityWarning => 'Warning';
+
+  @override
+  String get exceptionSeverityInfo => 'Info';
+
+  @override
+  String get vendorSourceErp => 'ERP';
+
+  @override
+  String get vendorSourceAi => 'AI';
+
+  @override
+  String get vendorSourceManual => 'Manual';
+
+  @override
+  String get vendorSourceOther => 'Other source';
+
+  @override
+  String get notificationEventInvoiceAssigned => 'Invoice assigned';
+
+  @override
+  String get notificationEventInvoiceApproved => 'Invoice approved';
+
+  @override
+  String get notificationEventInvoiceRejected => 'Invoice rejected';
+
+  @override
+  String get notificationEventInvoicePaid => 'Invoice paid';
+
+  @override
+  String get notificationEventContractRenewalDue => 'Contract renewal due';
+
+  @override
+  String get notificationEventChatMessage => 'New message';
+
+  @override
+  String get notificationEventOther => 'Notification';
+
+  @override
+  String get notificationUnread => 'Unread';
+
+  @override
+  String get relativeTimeJustNow => 'just now';
+
+  @override
+  String relativeTimeMinutesAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count minutes ago',
+      one: '$count minute ago',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String relativeTimeHoursAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count hours ago',
+      one: '$count hour ago',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String relativeTimeDaysAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count days ago',
+      one: '$count day ago',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String notificationBellUnread(int count) {
+    return 'Notifications, $count unread';
+  }
+
+  @override
+  String get cashFlowButtonLabel => 'Cash flow forecast';
+
+  @override
+  String get listRowSelected => 'Selected';
+
+  @override
+  String get listRowNotSelected => 'Not selected';
+
+  @override
+  String listRowInvoiceNumber(String number) {
+    return 'invoice $number';
+  }
+
+  @override
+  String listRowDue(String date) {
+    return 'due $date';
+  }
+
+  @override
+  String listRowPastDue(String date) {
+    return 'past due $date';
+  }
+
+  @override
+  String listRowSeverity(String severity) {
+    return '$severity severity';
+  }
+
+  @override
+  String get listRowOverdue => 'Overdue';
+
+  @override
+  String listRowContractNumber(String number) {
+    return 'contract $number';
+  }
+
+  @override
+  String listRowEnds(String date) {
+    return 'ends $date';
+  }
+
+  @override
+  String listRowVendorCode(String code) {
+    return 'code $code';
+  }
+
+  @override
+  String listRowVendorSource(String source) {
+    return 'source $source';
+  }
+
+  @override
+  String listRowInvoiceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invoices',
+      one: '$count invoice',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String listRowInvoiceCountShort(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count inv',
+      one: '$count inv',
+    );
+    return '$_temp0';
+  }
 }

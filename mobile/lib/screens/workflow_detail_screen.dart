@@ -2,8 +2,10 @@ import 'package:material_ui/material_ui.dart';
 
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/workflow.dart';
 import 'package:feohledger_mobile/screens/workflows_screen.dart' show WorkflowStatusBadge;
+import 'package:feohledger_mobile/widgets/load_error_state.dart';
 
 /// Read-only detail for one workflow definition — its configured steps (type,
 /// name, enabled flag) and a brief per-step config summary. No editing: the
@@ -21,7 +23,9 @@ class WorkflowDetailScreen extends StatefulWidget {
 class _WorkflowDetailScreenState extends State<WorkflowDetailScreen> {
   WorkflowDefinition? _workflow;
   bool _loading = true;
-  String? _error;
+  // The caught error, worded at render time by [describeLoadError] —
+  // `AppLocalizations.of(context)` isn't available from initState.
+  Object? _error;
 
   @override
   void initState() {
@@ -44,7 +48,7 @@ class _WorkflowDetailScreenState extends State<WorkflowDetailScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -64,18 +68,11 @@ class _WorkflowDetailScreenState extends State<WorkflowDetailScreen> {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null || _workflow == null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.red.shade700),
-            const SizedBox(height: 12),
-            Text(l.workflowDetailLoadError),
-            const SizedBox(height: 12),
-            FilledButton(onPressed: _load, child: Text(l.commonRetry)),
-          ],
-        ),
+    final error = _error;
+    if (error != null) {
+      return LoadErrorState(
+        message: describeLoadError(l, error, l.workflowDetailErrorPrefix),
+        onRetry: _load,
       );
     }
 

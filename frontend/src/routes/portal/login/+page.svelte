@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
 	import { portalBrand } from '#lib/stores/portalBrand.svelte.ts';
 	import BrandMark from '#lib/components/ui/BrandMark.svelte';
@@ -47,7 +48,7 @@
 				afterAuth();
 			}
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('portal.login.failed');
+			error = apiErrorMessage(err, m('portal.login.failed'));
 		} finally {
 			loading = false;
 		}
@@ -62,7 +63,7 @@
 			await portalAuth.completeMfa(mfaChallenge, mfaCode, mfaMethod);
 			afterAuth();
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('portal.login.mfa.failed');
+			error = apiErrorMessage(err, m('portal.login.mfa.failed'));
 		} finally {
 			loading = false;
 		}
@@ -78,7 +79,7 @@
 			mfaCode = '';
 			emailSent = true;
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('portal.login.mfa.sendFailed');
+			error = apiErrorMessage(err, m('portal.login.mfa.sendFailed'));
 		} finally {
 			emailSending = false;
 		}

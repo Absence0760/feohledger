@@ -3,6 +3,7 @@
 	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -260,7 +261,7 @@
 	{#if !info && portalCompany.error}
 		<LoadError message={portalCompany.error} onretry={load} testId="portal-company-load-error" />
 	{:else if !info}
-		<p class="note">{m('portal.common.loading')}</p>
+		<LoadingState label={m('portal.common.loading')} />
 	{:else}
 		{#if pending}
 			<div class="banner">
@@ -379,7 +380,7 @@
 					{m('portal.company.taxForm.onFileNote')}
 					<button
 						type="button"
-						class="btn-link"
+						class="btn-ghost"
 						onclick={downloadTaxForm}
 						disabled={downloadingForm}
 					>
@@ -436,7 +437,7 @@
 							maxlength="8"
 						/>
 					</label>
-					<div class="btn-row">
+					<div class="action-row">
 						<button
 							type="button"
 							class="btn-cancel"
@@ -446,7 +447,7 @@
 								mfaErr = '';
 							}}>{m('portal.company.mfa.cancel')}</button
 						>
-						<button type="submit" class="btn-danger" disabled={mfaBusy || !disableCode}>
+						<button type="submit" class="btn-danger" class:armed={!!disableCode} disabled={mfaBusy || !disableCode}>
 							{mfaBusy ? m('portal.company.mfa.turningOff') : m('portal.company.mfa.turnOffBtn')}
 						</button>
 					</div>
@@ -468,7 +469,7 @@
 							maxlength="8"
 						/>
 					</label>
-					<div class="btn-row">
+					<div class="action-row">
 						<button
 							type="button"
 							class="btn-cancel"
@@ -563,32 +564,10 @@
 		color: var(--text);
 		font-size: 0.9rem;
 	}
-	.btn-primary {
+	/* Layout only: a lone action in a column form keeps its own width. */
+	.btn-primary,
+	.btn-danger {
 		align-self: flex-start;
-		padding: 8px 16px;
-		border: none;
-		border-radius: 4px;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		cursor: pointer;
-	}
-	.btn-primary:disabled {
-		opacity: 0.55;
-		cursor: default;
-	}
-	.btn-link {
-		background: none;
-		border: none;
-		color: var(--accent);
-		cursor: pointer;
-		padding: 0;
-		font-size: inherit;
-		text-decoration: underline;
-	}
-	.btn-link:disabled {
-		opacity: 0.55;
-		cursor: default;
 	}
 	select {
 		padding: 8px 10px;
@@ -616,30 +595,7 @@
 		margin-bottom: 10px;
 		font-size: 0.85rem;
 	}
-	.btn-danger {
-		align-self: flex-start;
-		padding: 8px 16px;
-		border: 1px solid color-mix(in srgb, var(--danger) 50%, transparent);
-		border-radius: 4px;
-		background: transparent;
-		color: var(--danger);
-		font-size: 0.85rem;
-		cursor: pointer;
-	}
-	.btn-danger:disabled {
-		opacity: 0.55;
-		cursor: default;
-	}
-	.btn-cancel {
-		padding: 8px 16px;
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		background: transparent;
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-	}
-	.btn-row {
+	.action-row {
 		display: flex;
 		gap: 8px;
 	}

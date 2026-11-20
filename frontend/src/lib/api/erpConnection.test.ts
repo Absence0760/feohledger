@@ -14,7 +14,10 @@ vi.mock('#lib/tenant.ts', () => ({
 	getTenantSlug: () => 'acme'
 }));
 vi.mock('#lib/entity.ts', () => ({ getSelectedEntityId: () => null }));
-vi.mock('#lib/i18n/store.svelte.ts', () => ({ m: (key: string) => key }));
+vi.mock('#lib/i18n/store.svelte.ts', () => ({
+	m: (key: string) => key,
+	localeReady: () => Promise.resolve()
+}));
 
 const fetchMock = vi.fn();
 

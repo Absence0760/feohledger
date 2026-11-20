@@ -30,12 +30,12 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO, require_roles
 from app.database import get_control_db
+from app.models.exception import Exception as APException
 from app.models.expense import Expense, ExpenseReport
 from app.models.gl_account import GLAccount
 from app.models.invoice import Invoice, InvoiceStatus
-from app.models.invoice_status import IN_REVIEW_STATUSES
 from app.models.organization import Organization
-from app.models.payment import Payment, PaymentSchedule
+from app.models.payment import Payment
 from app.models.procurement import GoodsReceipt, PurchaseOrder, po_currency_code
 from app.models.user import User
 from app.models.virtual_card import CardRebate, VirtualCard
@@ -58,6 +58,7 @@ from app.services.analytics import (
     detect_threshold_breaches,
     value_received_goods,
 )
+from app.services.ap_commitments import aging_snapshot_buckets, commitment_rows
 from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.cashflow import (
     CashThresholds,
@@ -71,14 +72,12 @@ from app.services.currency_conversion import (
     invoice_currency_rollup_select,
     invoice_reporting_amount_sql,
     payment_reporting_amount_sql,
-    reporting_amount_for_row,
     resolve_reporting_currency,
     rollup_from_grouped_rows,
     vendor_rollup_from_grouped_rows,
     vendor_spend_grouped_select,
 )
 from app.services.fx_adapters import get_fx_adapter
-from app.services.payment_schedules import LATEST_SCHEDULE_ORDER
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -103,8 +102,8 @@ _CFO_ROLES = (ROLE_ADMIN, ROLE_CFO)
 # (`api/cash_flow.COPILOT_ROLES`) and by the `cashflow_forecast` CSV export
 # below, so refusing them here only made the REST read disagree with the
 # copilot about who may see the org's cash position. Not imported from
-# `cash_flow` (that module imports this one through the assistant tools); kept
-# equal to it by `tests/test_cash_flow_alerts.py`'s drift guard instead.
+# `cash_flow` (one router importing another for a constant); kept equal to it
+# by `tests/test_cash_flow_alerts.py`'s drift guard instead.
 CASH_FORECAST_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
 
 
@@ -112,238 +111,9 @@ CASH_FORECAST_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
 # Predictive cash-flow forecasting
 # ---------------------------------------------------------------------------
 #
-# Committed = firm AP commitment (approved → payment_scheduled). Pending =
-# still-in-flight pipeline (new / pending / ready_for_review) — projected,
-# lower-certainty outflow. Everything else (rejected / paid / done /
-# failed) is excluded: terminal, already-paid, or never going to pay.
-# Both are the shared sets (`models/invoice_status`), named here rather than
-# re-listed: committed IS the open-AP population the aging and AP balance read.
-_COMMITTED_STATUSES = OPEN_AP_STATUSES
-_PENDING_STATUSES = tuple(s.value for s in IN_REVIEW_STATUSES)
-
-
-async def _commitment_rows(
-    db: AsyncSession,
-    *,
-    today: date,
-    horizon_days: int,
-    include_pending: bool,
-    entity_id: uuid.UUID | None = None,
-    reporting_currency: str | None = None,
-) -> list[dict]:
-    """Pull open invoices that represent future AP outflows and shape them
-    into the commitment-row dicts the pure-math layer consumes.
-
-    Outflow timing comes from the `PaymentSchedule` row when present
-    (`due_date` / `discount_date` / `discount_percent`); otherwise we fall
-    back to `Invoice.due_date` with no discount. Rows are bounded on the
-    effective due date at the FUTURE edge only (`due <= today + horizon_days`,
-    in SQL), and a row with no due date is left out because it cannot be timed.
-
-    **A row already past due is kept and flagged `overdue: True`.** It is the
-    most certain outflow the business has — the AP it is already late paying —
-    and dropping it made the forecast, the cash-position curve, the what-if,
-    every copilot planning tool and the shortfall sweep overstate cash by
-    exactly that amount. Its `due_date` stays the real one; it is
-    `services.analytics.bucket_outflows` that times a flagged row on `today`
-    (it cannot be paid in the past) and reports it on the first period's
-    `overdue_amount` / `overdue_count`, never silently inside the committed or
-    pending figure.
-
-    **Every `amount` is expressed in the org's REPORTING currency**, via the
-    rate locked on the invoice (`Invoice.reporting_amount`) — never the raw
-    `Invoice.amount`, which is in the invoice's own currency. The consumers
-    all subtract these rows from an opening balance that
-    `cashflow.resolve_opening_balance` guarantees is in the reporting
-    currency (it REFUSES a provider balance in any other, on exactly this
-    ground). Subtracting a raw ¥10,000,000 invoice from a $250,000 opening
-    balance projected a −$9.75M shortfall that does not exist — and the
-    shortfall sweep emails finance leaders about it, the copilot re-times
-    payments around it, and a draft payment run gets staged off that plan.
-    A foreign invoice with no usable lock is counted at its face value and
-    flagged, so "we could not convert this" is visible rather than silent.
-
-    Scoped to ``entity_id`` (the invoice's subsidiary) when set; ``None`` is
-    the consolidated view (multi-entity Phase 2b)."""
-    statuses = list(_COMMITTED_STATUSES)
-    if include_pending:
-        statuses += list(_PENDING_STATUSES)
-    horizon_end = today + timedelta(days=horizon_days)
-
-    # ONE schedule row per invoice, newest first. A bare
-    # `outerjoin(PaymentSchedule)` fans an invoice out to one row per schedule,
-    # and the loop below appends a commitment row per result — so an invoice
-    # with two schedules was counted TWICE at its FULL amount: in the forecast,
-    # the cash-position curve, the what-if, every copilot planning tool and the
-    # `plan_id` hash, all at once, with nothing on any surface to show it.
-    # Unreachable today only because nothing but `scripts/seed.py` constructs a
-    # `PaymentSchedule` — an accident of the current feature set, not a
-    # guarantee, and this query is the single source every cash projection reads.
-    #
-    # `DISTINCT ON` with `services/payment_schedules.LATEST_SCHEDULE_ORDER`, the
-    # same rule the discount engine's `latest_schedule` reads — so its idea of an
-    # invoice's due date and the cash forecast's cannot diverge. `id` is the
-    # tiebreak, so two rows written in one transaction (identical `created_at`)
-    # still resolve deterministically rather than letting the plan hash flap.
-    latest_schedule = (
-        select(
-            PaymentSchedule.invoice_id.label("invoice_id"),
-            PaymentSchedule.due_date.label("sched_due"),
-            PaymentSchedule.discount_date.label("discount_date"),
-            PaymentSchedule.discount_percent.label("discount_percent"),
-        )
-        .distinct(PaymentSchedule.invoice_id)
-        .order_by(PaymentSchedule.invoice_id, *LATEST_SCHEDULE_ORDER)
-        .subquery()
-    )
-
-    # The effective due date the loop below times each row on: the latest
-    # schedule's, else the invoice's own. Bounded here at the future edge only
-    # — no lower bound, because a past-due row is an overdue outflow, not one
-    # to drop — so a horizon's worth of open AP is what crosses the wire rather
-    # than every open invoice with a far-future date. A NULL effective due date
-    # fails `<=` and is excluded: it cannot be timed into any period.
-    effective_due = func.coalesce(latest_schedule.c.sched_due, Invoice.due_date)
-
-    result = await db.execute(
-        apply_entity_scope(
-            select(
-                Invoice.id,
-                Invoice.amount,
-                Invoice.status,
-                Invoice.due_date,
-                latest_schedule.c.sched_due,
-                latest_schedule.c.discount_date,
-                latest_schedule.c.discount_percent,
-                Invoice.currency,
-                Invoice.reporting_amount,
-                Invoice.reporting_currency,
-            )
-            .outerjoin(latest_schedule, latest_schedule.c.invoice_id == Invoice.id)
-            .where(Invoice.status.in_(statuses))
-            .where(effective_due <= horizon_end),
-            Invoice,
-            entity_id,
-        )
-    )
-    committed_set = set(_COMMITTED_STATUSES)
-    # `resolve_reporting_currency(None)` is the canonical platform fallback —
-    # never a literal, so the default lives in one place.
-    target_currency = (reporting_currency or resolve_reporting_currency(None)).upper()
-    rows: list[dict] = []
-    for (
-        inv_id,
-        amount,
-        status,
-        inv_due,
-        sched_due,
-        discount_date,
-        discount_percent,
-        inv_currency,
-        rep_amount,
-        rep_currency,
-    ) in result.all():
-        due = sched_due or inv_due
-        # The SQL bound above already excludes these; kept so the loop's own
-        # contract does not depend on the query's (a NULL due date cannot be
-        # timed, a date past the horizon is out of scope).
-        if due is None or due > horizon_end:
-            continue
-        status_value = status.value if hasattr(status, "value") else status
-        # Same helper every sibling rollup in this module uses, so a cash
-        # projection and a spend report can't disagree about what an invoice
-        # is worth. No FX call on a read: the rate was locked when the invoice
-        # was booked, which is also what keeps the curve deterministic.
-        converted, unconverted = reporting_amount_for_row(
-            amount=Decimal(str(amount or 0)),
-            currency=inv_currency,
-            reporting_currency=target_currency,
-            persisted_reporting_currency=rep_currency,
-            persisted_reporting_amount=rep_amount,
-        )
-        rows.append(
-            {
-                "invoice_id": str(inv_id),
-                "due_date": due,
-                "amount": converted,
-                "currency": target_currency,
-                "unconverted": unconverted,
-                "committed": status_value in committed_set,
-                # Past due as of `today`: carried into the first period as
-                # overdue (see the docstring), not dropped.
-                "overdue": due < today,
-                "discount_date": discount_date,
-                "discount_percent": discount_percent,
-            }
-        )
-    return rows
-
-
-_AGING_BANDS = ("current", "days_30", "days_60", "days_90", "days_90_plus")
-
-
-async def _aging_snapshot_buckets(
-    db: AsyncSession,
-    *,
-    today: date,
-    reporting_currency: str,
-    entity_id: uuid.UUID | None = None,
-) -> dict:
-    """The aging snapshot's five bands, in the org's REPORTING currency — the
-    one builder behind `GET /api/analytics/export/aging_snapshot` and the
-    emailed `aging_snapshot` scheduled report.
-
-    Both used to sum the raw `Invoice.amount` across currencies into columns
-    that name no currency at all, so a ¥1,000,000 open invoice landed in a band
-    as "1000000.00" beside dollars — while the dashboard's `aging_reporting`
-    and the AP-balance rollup this snapshot reconciles with (F-4) both
-    converted. Each row now goes through `invoice_reporting_amount_sql`, the
-    rule every sibling reporting figure uses: the rate locked on the invoice,
-    else face value — and those face-value fallbacks are COUNTED on
-    `unconverted_count`, so a band that is part-converted says so.
-
-    Population and band edges are the dashboard's exactly: `OPEN_AP_STATUSES`
-    with no `due_date` filter (a NULL due date is `current` — unknowable, so
-    not overdue), days past due computed by Postgres `date - date` against the
-    caller's `today`, and 0 / 30 / 60 / 90 as inclusive upper edges.
-    """
-    rep = invoice_reporting_amount_sql(
-        reporting_currency=reporting_currency,
-        amount=Invoice.amount,
-        currency=Invoice.currency,
-        persisted_reporting_amount=Invoice.reporting_amount,
-        persisted_reporting_currency=Invoice.reporting_currency,
-    )
-    days_past = today - Invoice.due_date
-    band = case(
-        (Invoice.due_date.is_(None), "current"),
-        (days_past <= 0, "current"),
-        (days_past <= 30, "days_30"),
-        (days_past <= 60, "days_60"),
-        (days_past <= 90, "days_90"),
-        else_="days_90_plus",
-    )
-    result = await db.execute(
-        apply_entity_scope(
-            select(
-                band.label("band"),
-                func.coalesce(func.sum(rep.amount), 0),
-                func.coalesce(func.sum(rep.unconverted), 0),
-            )
-            .where(Invoice.status.in_(OPEN_AP_STATUSES))
-            .group_by(band),
-            Invoice,
-            entity_id,
-        )
-    )
-    buckets: dict = {name: Decimal("0") for name in _AGING_BANDS}
-    unconverted = 0
-    for name, total, unconv in result.all():
-        buckets[name] = Decimal(str(total))
-        unconverted += int(unconv or 0)
-    buckets["reporting_currency"] = reporting_currency.strip().upper()
-    buckets["unconverted_count"] = unconverted
-    return buckets
+# The commitment rows and the aging snapshot are built by
+# `services/ap_commitments` (`commitment_rows`, `aging_snapshot_buckets`), which
+# the copilot, the shortfall sweep and the scheduled reports share.
 
 
 def _money(value: Decimal | int | None) -> str | None:
@@ -403,9 +173,9 @@ async def get_cashflow_forecast(
     (the in-flight approval pipeline; drop it with `include_pending=false`)
     and reports the discount-eligible slice. AP already past due is carried
     into the FIRST period on its own `overdue_amount` / `overdue_count`
-    (`scheduled = committed + pending + overdue`) — see `_commitment_rows`."""
+    (`scheduled = committed + pending + overdue`) — see `ap_commitments.commitment_rows`."""
     today = utc_today()
-    rows = await _commitment_rows(
+    rows = await commitment_rows(
         db,
         today=today,
         horizon_days=horizon_days,
@@ -425,7 +195,7 @@ async def get_cashflow_forecast(
         "count": sum(p["count"] for p in periods),
         "overdue_count": sum(p["overdue_count"] for p in periods),
         # Rows counted at FACE VALUE because their reporting-currency figure
-        # could not be established (see `_commitment_rows`). A count, not
+        # could not be established (see `ap_commitments.commitment_rows`). A count, not
         # money. Non-zero means the totals above mix currencies.
         "unconverted_count": sum(p["unconverted_count"] for p in periods),
     }
@@ -471,7 +241,7 @@ async def get_cashflow_whatif(
     discount captured, amount-weighted average days-to-pay, and the
     bucketed period breakdown."""
     today = utc_today()
-    rows = await _commitment_rows(
+    rows = await commitment_rows(
         db,
         today=today,
         horizon_days=horizon_days,
@@ -575,7 +345,7 @@ async def get_cash_position(
     and the top-level `overdue_amount` / `overdue_count`), so the curve
     starts from the cash actually left once the late bills are paid."""
     today = utc_today()
-    rows = await _commitment_rows(
+    rows = await commitment_rows(
         db,
         today=today,
         horizon_days=horizon_days,
@@ -1112,24 +882,22 @@ async def get_cfo_analytics(
                 )
             )
         )
-        exc_count = 0
-        try:
-            from app.models.exception import Exception as APException
-
-            exc_count_q = await db.execute(
-                _exc(
-                    select(func.count(APException.id)).where(
-                        APException.created_at
-                        >= datetime.combine(month_start, datetime.min.time()).replace(tzinfo=UTC),
-                        APException.created_at
-                        <= datetime.combine(month_end, datetime.max.time()).replace(tzinfo=UTC),
-                    ),
-                    APException,
-                )
+        # No `except` here: a failed count used to report 0 exceptions, which
+        # the trend then stated as a 0% fraud rate — a confident claim, not a
+        # safe default. It fails loudly like every sibling figure (the rebate
+        # yield below says the same).
+        exc_count_q = await db.execute(
+            _exc(
+                select(func.count(APException.id)).where(
+                    APException.created_at
+                    >= datetime.combine(month_start, datetime.min.time()).replace(tzinfo=UTC),
+                    APException.created_at
+                    <= datetime.combine(month_end, datetime.max.time()).replace(tzinfo=UTC),
+                ),
+                APException,
             )
-            exc_count = int(exc_count_q.scalar() or 0)
-        except Exception:  # noqa: BLE001
-            exc_count = 0
+        )
+        exc_count = int(exc_count_q.scalar() or 0)
         fraud_rows.append(
             {
                 "month": month_start.strftime("%Y-%m"),
@@ -1652,21 +1420,17 @@ async def _entity_metrics(
         reporting_currency=reporting_currency,
     )
 
-    # Open-exceptions count (entity-scoped) — fails soft to 0.
-    open_exceptions = 0
-    try:
-        from app.models.exception import Exception as APException
-
-        exc_q = await db.execute(
-            apply_entity_scope(
-                select(func.count(APException.id)).where(APException.status == "open"),
-                APException,
-                entity_id,
-            )
+    # Open-exceptions count (entity-scoped). Fails loudly like the figures
+    # beside it: the soft-fail to 0 it once had told a CFO an entity had no open
+    # exceptions when the count had merely not been taken.
+    exc_q = await db.execute(
+        apply_entity_scope(
+            select(func.count(APException.id)).where(APException.status == "open"),
+            APException,
+            entity_id,
         )
-        open_exceptions = int(exc_q.scalar() or 0)
-    except Exception:  # noqa: BLE001
-        open_exceptions = 0
+    )
+    open_exceptions = int(exc_q.scalar() or 0)
 
     # Open-PO accrual — the same per-currency grouping `/cfo`'s accruals card
     # renders (entity-scoped), so the consolidated row and that card agree.
@@ -1948,7 +1712,7 @@ async def export_report(
 
     if report == "cashflow_forecast":
         today = utc_today()
-        rows = await _commitment_rows(
+        rows = await commitment_rows(
             db,
             today=today,
             horizon_days=horizon_days,
@@ -2017,8 +1781,8 @@ async def export_report(
         today = utc_today()
         # Same open-payable population as the AP balance, so the bands sum to
         # its reporting rollup (F-4), and in the same currency — see
-        # `_aging_snapshot_buckets`, shared with the scheduled report.
-        buckets = await _aging_snapshot_buckets(
+        # `ap_commitments.aging_snapshot_buckets`, shared with the scheduled report.
+        buckets = await aging_snapshot_buckets(
             db,
             today=today,
             reporting_currency=resolve_reporting_currency(org.settings if org else None),

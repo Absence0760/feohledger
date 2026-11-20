@@ -220,7 +220,7 @@ async def test_cashflow_forecast_money_is_exact_string_and_deterministic(realdb)
 
 async def test_copilot_tools_carry_overdue_ap_into_the_first_period(realdb):
     """The followups probe through the copilot: USD 1,000 due yesterday + USD
-    200 due in five days. Every planning tool reads `_commitment_rows`, so all
+    200 due in five days. Every planning tool reads `commitment_rows`, so all
     of them used to answer as if the late thousand did not exist — the
     forecast, the running position the copilot narrates a shortfall from, the
     what-if, and the plan a user can enact."""
@@ -1807,7 +1807,7 @@ async def test_capture_discounts_skips_an_offer_whose_invoice_was_paid(realdb):
     async def _optimizer_blind(_db, _offer):
         return None
 
-    with patch("app.api.discounts.settled_invoice_status", _optimizer_blind):
+    with patch("app.services.discount_opportunities.settled_invoice_status", _optimizer_blind):
         async with realdb.client(key="a", role="admin") as c:
             r1 = await c.post(f"/api/cash-flow/plans/{plan.plan_id}/capture-discounts", json=body)
     assert r1.status_code == 200, r1.text

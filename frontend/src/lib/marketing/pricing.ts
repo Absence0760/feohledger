@@ -15,6 +15,7 @@
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 import { formatMoney } from '#lib/utils/money.ts';
+import { formatCount } from '#lib/utils/count.ts';
 import { PLAN_CURRENCY, PLANS, type CatalogPlan, type PlanFeature } from './plans.generated.ts';
 
 /**
@@ -102,10 +103,6 @@ export function formatOveragePrice(amount: string, locale?: string): string {
 	return formatMoney(amount, { currency: PLAN_CURRENCY, locale: locale ?? getActiveFormatLocale() });
 }
 
-export function formatCount(n: number, locale?: string): string {
-	return new Intl.NumberFormat(locale ?? getActiveFormatLocale()).format(n);
-}
-
 /** The grid, one tier per catalogue plan, in catalogue order. */
 export function pricingTiers(
 	plans: readonly CatalogPlan[] = PLANS,
@@ -123,7 +120,7 @@ export function pricingTiers(
 			tagline: TAGLINE_KEYS[plan.code] ?? null,
 			price: formatPlanPrice(plan.monthlyPrice, locale),
 			included: plan.includedAiInvoices,
-			includedLabel: formatCount(plan.includedAiInvoices, locale),
+			includedLabel: formatCount(plan.includedAiInvoices, { locale }),
 			overage:
 				plan.overageUnitPrice === null ? null : formatOveragePrice(plan.overageUnitPrice, locale),
 			buildsOn: previous?.name ?? null,

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import type {
 		Invoice,
 		InvoiceStatus,
@@ -20,6 +21,8 @@
 	import type { ImportResult } from '#lib/types/csvImport.ts';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import BulkDeleteButton from '#lib/components/ui/BulkDeleteButton.svelte';
+	import BulkBar from '#lib/components/ui/BulkBar.svelte';
+	import MenuButton from '#lib/components/ui/MenuButton.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
@@ -39,6 +42,7 @@
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { page } from '$app/state';
 	import { afterNavigate, replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
@@ -163,7 +167,7 @@
 			const batch = Array.from(files).slice(i, i + BATCH);
 			uploadProgress =
 				total > 1
-					? m('invoices.action.uploadingProgress', { done: Math.min(i + BATCH, total), total })
+					? m('invoices.action.uploadingProgress', { done: formatCount(Math.min(i + BATCH, total)), total: formatCount(total) })
 					: m('invoices.action.uploading');
 			const results = await Promise.allSettled(
 				batch.map((file) => api.upload<{ id: string; status: string }>('/api/invoices/upload', file))
@@ -571,16 +575,22 @@
 		void refreshInvoiceList().catch(() => {});
 	}
 
-	let hasAdvancedFilters = $derived(
-		advancedFilters.vendor !== '' ||
-		advancedFilters.invoice_number !== '' ||
-		advancedFilters.po_number !== '' ||
-		advancedFilters.description !== '' ||
-		advancedFilters.amount_min !== '' ||
-		advancedFilters.amount_max !== '' ||
-		advancedFilters.due_date_from !== '' ||
-		advancedFilters.due_date_to !== ''
+	// How many advanced-search fields are set (statuses are the chips', not
+	// counted here). The dot shows it; the button's description says it,
+	// since a dot announces nothing to a screen reader.
+	let advancedFilterCount = $derived(
+		[
+			advancedFilters.vendor,
+			advancedFilters.invoice_number,
+			advancedFilters.po_number,
+			advancedFilters.description,
+			advancedFilters.amount_min,
+			advancedFilters.amount_max,
+			advancedFilters.due_date_from,
+			advancedFilters.due_date_to
+		].filter((v) => v !== '').length
 	);
+	let hasAdvancedFilters = $derived(advancedFilterCount > 0);
 
 	let totalCount = $derived(
 		Object.values(invoiceStore.statusCounts).reduce((a, b) => a + b, 0)
@@ -629,15 +639,6 @@
 			!invoiceStore.loading &&
 			!invoiceStore.errored &&
 			noActiveFilters
-	);
-	let emptyMessage = $derived(
-		invoiceStore.loading
-			? m('common.loading')
-			: invoiceStore.errored
-				? m('invoices.empty.errored')
-				: noActiveFilters
-					? m('invoices.empty.fresh')
-					: m('invoices.empty')
 	);
 
 	function statusCount(status: InvoiceStatus): number {
@@ -762,7 +763,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('invoices.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
+					m('invoices.toast.selectedTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -857,7 +858,14 @@
 		}
 	}
 
-	async function bulkExport(format: string) {
+	// Format names, not prose: they read the same in every locale.
+	const BULK_EXPORT_FORMATS = [
+		{ value: 'csv', label: 'CSV' },
+		{ value: 'json', label: 'JSON' },
+		{ value: 'xml', label: 'XML' }
+	] as const;
+
+	async function bulkExport(format: (typeof BULK_EXPORT_FORMATS)[number]['value']) {
 		bulkBusy = true;
 		try {
 			// Through the shared client (`api.downloadBlobPost`), not a hand-rolled
@@ -944,7 +952,7 @@
 		     create an invoice, and `POST /api/invoices/upload` takes the same
 		     entry roles as `POST /api/invoices` (`api/invoice_entry.py`). -->
 		{#if canEnterInvoices}
-			<button class="btn-primary btn-upload" disabled={uploading} onclick={() => fileInput.click()}>
+			<button class="btn-primary btn-upload upload-action" disabled={uploading} onclick={() => fileInput.click()}>
 				{uploading ? uploadProgress || m('invoices.action.uploading') : m('invoices.action.upload')}
 			</button>
 		{/if}
@@ -977,10 +985,10 @@
 				ariaLabel={m('invoices.search.aria')}
 			/>
 			<button
-				class="advanced-btn"
-				class:has-filters={hasAdvancedFilters}
+				class="btn-icon advanced-btn advanced-toggle"
 				onclick={() => { advancedFilters = { ...advancedFilters, statuses: [...activeStatuses] }; showAdvancedSearch = true; }}
 				aria-label={m('invoices.search.advanced')}
+				aria-describedby={hasAdvancedFilters ? 'advanced-filters-set' : undefined}
 			>
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 					<line x1="4" y1="6" x2="20" y2="6" />
@@ -989,9 +997,14 @@
 					<circle cx="6" cy="12" r="2" /><circle cx="10" cy="18" r="2" /><circle cx="8" cy="6" r="2" />
 				</svg>
 				{#if hasAdvancedFilters}
-					<span class="dot"></span>
+					<span class="dot" aria-hidden="true"></span>
 				{/if}
 			</button>
+			{#if hasAdvancedFilters}
+				<span id="advanced-filters-set" class="visually-hidden" data-testid="advanced-filters-set">
+					{m('invoices.search.filtersSet', { n: advancedFilterCount })}
+				</span>
+			{/if}
 		</div>
 		<div class="assignee-group">
 			<button
@@ -1024,7 +1037,7 @@
 				aria-pressed={activeStatuses.length === 0}
 				onclick={() => (activeStatuses = [])}
 			>
-				{m('common.all')} <span class="count">{totalCount}</span>
+				{m('common.all')} <span class="count">{formatCount(totalCount)}</span>
 			</button>
 			{#each chipStatuses as s}
 				<button
@@ -1040,11 +1053,14 @@
 		</nav>
 	</div>
 
-	{#if selected.size > 0}
-		<div class="bulk-bar">
-			<span class="bulk-count">{m('invoices.bulk.selected', { n: selected.size })}</span>
+	<BulkBar
+		count={selected.size}
+		countLabel={m('invoices.bulk.selected', { n: selected.size })}
+		onclear={() => { selected = new Set(); selectedAllMatching = false; }}
+	>
+		{#snippet lead()}
 			{#if allSelected && !selectedAllMatching && invoiceStore.total > selectableInvoices.length}
-				<button class="bulk-select-all-matching" disabled={selectingAllMatching} onclick={selectAllMatching}>
+				<button type="button" class="btn-secondary bulk-select-all-matching" disabled={selectingAllMatching} onclick={selectAllMatching}>
 					{selectingAllMatching
 						? m('common.loading')
 						: m('common.selectAllMatching', { total: invoiceStore.total })}
@@ -1052,9 +1068,8 @@
 			{:else if selectedAllMatching}
 				<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 			{/if}
-			<button class="bulk-clear" onclick={() => { selected = new Set(); selectedAllMatching = false; }}>{m('common.clear')}</button>
-			<div class="bulk-divider"></div>
-
+		{/snippet}
+		{#snippet actions()}
 			{#if canManageInvoices}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<span class="bulk-btn-wrap" title={hasImmutableSelected ? m('invoices.bulk.cannotDelete') : ''}>
@@ -1072,7 +1087,7 @@
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<span class="bulk-btn-wrap" title={validBulkTransitions.length === 0 ? m('invoices.bulk.noTransitions') : ''}>
 						<button
-							class="bulk-action-btn"
+							class="btn-secondary"
 							disabled={bulkBusy || validBulkTransitions.length === 0}
 							onclick={(e) => { e.stopPropagation(); showBulkStatusSelect = !showBulkStatusSelect; }}
 						>
@@ -1098,7 +1113,7 @@
 								/>
 							{/if}
 							<button
-								class="btn-primary bulk-apply-btn"
+								class="btn-primary bulk-apply"
 								disabled={bulkBusy || (bulkNeedsReason && !bulkRejectReason.trim())}
 								onclick={bulkStatusChange}
 							>{m('common.apply')}</button>
@@ -1109,11 +1124,17 @@
 
 			<div class="bulk-divider"></div>
 
-			<button class="bulk-action-btn" disabled={bulkBusy} onclick={() => bulkExport('csv')}>CSV</button>
-			<button class="bulk-action-btn" disabled={bulkBusy} onclick={() => bulkExport('json')}>JSON</button>
-			<button class="bulk-action-btn" disabled={bulkBusy} onclick={() => bulkExport('xml')}>XML</button>
-		</div>
-	{/if}
+			<!-- One trigger, not three buttons: the three formats on their own
+			     wrapped the bar to three rows at 375px. -->
+			<MenuButton
+				label={m('invoices.bulk.export')}
+				items={BULK_EXPORT_FORMATS}
+				busy={bulkBusy}
+				onselect={(format) => bulkExport(format)}
+				testId="invoices-bulk-export"
+			/>
+		{/snippet}
+	</BulkBar>
 
 	{#if deepLinkFailedId}
 		<LoadError
@@ -1145,7 +1166,18 @@
 			testId="invoices-load-error"
 		/>
 	{:else}
-	<DataTable isEmpty={invoiceStore.all.length === 0} empty={emptyMessage} colspan={10} fixed stickyHeader>
+	<DataTable
+		isEmpty={invoiceStore.all.length === 0}
+		loading={invoiceStore.loading}
+		errored={invoiceStore.errored}
+		emptyErrored={m('invoices.empty.errored')}
+		filtered={!noActiveFilters}
+		emptyFiltered={m('invoices.empty')}
+		empty={m('invoices.empty.fresh')}
+		colspan={10}
+		fixed
+		stickyHeader
+	>
 		{#snippet header()}
 			<tr>
 				<th class="checkbox-col"><input type="checkbox" aria-label={m('invoices.selectAllAria')} checked={allSelected} onchange={toggleSelectAll} /></th>
@@ -1256,17 +1288,16 @@
 	</DataTable>
 	{/if}
 
-	{#if invoiceStore.hasMore && !invoiceStore.errored}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMoreInvoices} disabled={invoiceStore.loading}>
-				{invoiceStore.loading ? m('common.loading') : m('invoices.loadMore', { shown: invoiceStore.all.length, total: invoiceStore.total })}
-			</button>
-		</div>
-	{:else if invoiceStore.total > 0 && !invoiceStore.errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('invoices.showingAll', { total: invoiceStore.total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={invoiceStore.all.length}
+		total={invoiceStore.total}
+		hasMore={invoiceStore.hasMore}
+		loading={invoiceStore.loading}
+		errored={invoiceStore.errored}
+		onloadmore={loadMoreInvoices}
+		moreKey="invoices.loadMore"
+		allKey="invoices.showingAll"
+	/>
 </PageHeader>
 
 {#if editing}
@@ -1339,32 +1370,15 @@
 		gap: 6px;
 	}
 
-	.advanced-btn {
-		position: relative;
-		display: grid;
-		place-items: center;
+	/* Size only: the shared `.btn-icon` paints it and positions the dot's
+	   anchor. `.advanced-btn` stays on the button as the e2e hook, no CSS. */
+	.advanced-toggle {
 		width: 34px;
 		height: 34px;
-		border-radius: 50%;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		cursor: pointer;
-		transition: border-color 0.15s;
-		flex-shrink: 0;
 	}
 
-	.advanced-btn:hover {
-		border-color: var(--accent);
-		color: var(--text);
-	}
-
-	.advanced-btn.has-filters {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
-	.advanced-btn .dot {
+	/* The dot says advanced filters are set. */
+	.advanced-toggle .dot {
 		position: absolute;
 		top: 4px;
 		right: 4px;
@@ -1478,8 +1492,9 @@
 	}
 
 	/* Colour, hover and disabled come from the shared `.btn-primary`; this
-	   only keeps the label on one line in the header's action row. */
-	.btn-upload {
+	   only keeps the label on one line in the header's action row.
+	   (`.btn-upload` stays on the button as the e2e hook, with no CSS.) */
+	.upload-action {
 		white-space: nowrap;
 		flex-shrink: 0;
 	}
@@ -1500,73 +1515,7 @@
 
 	/* --- Bulk action bar --- */
 
-	/* Floats above the page so selecting rows doesn't shove the table down.
-	   Bottom-centered so it lands in the natural eye line for an "I'm
-	   acting on the selection" affordance. */
-	.bulk-bar {
-		position: fixed;
-		left: 50%;
-		bottom: 24px;
-		transform: translateX(-50%);
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 10px 16px;
-		background: var(--surface);
-		border: 1px solid var(--accent);
-		border-radius: 8px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-		flex-wrap: wrap;
-		z-index: 50;
-		max-width: calc(100vw - 48px);
-	}
-
-	.bulk-count {
-		font-size: 0.85rem;
-		font-weight: 600;
-		color: var(--accent);
-		white-space: nowrap;
-	}
-
-	.bulk-clear {
-		padding: 4px 10px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.bulk-clear:hover {
-		color: var(--text);
-		background: var(--bg);
-	}
-
-	.bulk-select-all-matching {
-		padding: 4px 10px;
-		border-radius: 4px;
-		border: 1px solid var(--accent);
-		background: transparent;
-		color: var(--accent);
-		font-size: 0.8rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.bulk-select-all-matching:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-
-	.bulk-select-all-matching:not(:disabled):hover {
-		background: var(--accent);
-		color: var(--surface);
-	}
-
+	/* The bar itself is the shared <BulkBar>; these place what it holds. */
 	.bulk-all-matching-note {
 		font-size: 0.8rem;
 		color: var(--text-muted);
@@ -1583,30 +1532,6 @@
 		background: var(--border);
 	}
 
-	.bulk-action-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		padding: 5px 12px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.8rem;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-
-	.bulk-action-btn:hover {
-		border-color: var(--accent);
-		color: var(--accent);
-	}
-
-	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
 
 	/* --- Bulk status dropdown --- */
 
@@ -1642,10 +1567,9 @@
 		min-width: 220px;
 	}
 
-	/* Fill, text colour, hover and disabled are the shared `.btn-primary`'s;
-	   only the metrics shrink to sit beside the dropdown's compact select. */
-	.bulk-apply-btn {
+	/* Everything but the padding is the shared `.btn-primary`'s; the
+	   padding shrinks so it sits beside the dropdown's compact select. */
+	.bulk-apply {
 		padding: 5px 12px;
-		font-size: 0.8rem;
 	}
 </style>

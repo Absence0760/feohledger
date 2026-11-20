@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show IOException;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 import 'package:feohledger_mobile/config.dart';
+import 'package:feohledger_mobile/l10n/ambient_localizations.dart';
 import 'package:feohledger_mobile/services/session.dart';
 
 class ApiException implements Exception {
@@ -23,14 +26,50 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
-/// User-facing text for anything thrown out of [ApiClient].
+/// User-facing text for anything thrown out of [ApiClient] — the one way a
+/// store turns a caught error into its `error` string.
 ///
-/// [ApiException.toString] prefixes the status code (`ApiException(403): ...`),
-/// which belongs in a log, not in a snackbar. Use this wherever an error is
-/// rendered to a person; [ApiException.message] is already the server's
-/// human-readable `detail` (see [ApiClient.errorMessage]).
-String describeApiError(Object error) =>
-    error is ApiException ? error.message : error.toString();
+/// [ApiException.toString] prefixes the status code (`ApiException(403): ...`)
+/// and any other exception's `toString` names its Dart type
+/// (`ClientException: ...`); both belong in a log, not in a snackbar. So:
+///
+/// * a refusal that carried the server's own `detail` → that sentence
+///   ([ApiException.message], see [ApiClient.errorMessage]); a screen that can
+///   state a coded refusal in the reader's language reads
+///   [ApiException.detail] instead;
+/// * a refusal with no `detail` (a bare 500, an HTML error page) → a localized
+///   "the server couldn't complete the request (HTTP n)";
+/// * the request never got an answer (offline, DNS, timeout, TLS) → a
+///   localized "couldn't reach the server";
+/// * anything else (an unreadable reply) → a localized generic failure.
+///
+/// Stores have no `BuildContext`, so the localized sentences come from
+/// [ambientLocalizations]. `test/stores/store_error_text_guard_test.dart` bans
+/// `e.toString()` / `$e` into a store's error field.
+String describeApiError(Object error) {
+  if (error is ApiException) {
+    if (error.detail != null) return error.message;
+    return ambientLocalizations().errorRequestFailed(error.statusCode);
+  }
+  if (error is IOException ||
+      error is http.ClientException ||
+      error is TimeoutException) {
+    return ambientLocalizations().errorNetworkUnreachable;
+  }
+  return ambientLocalizations().errorUnexpected;
+}
+
+/// One page of a list read: its [items] and the server's [total] count of
+/// every row the request matches (at least `items.length`).
+class PagedResult<T> {
+  final List<T> items;
+  final int total;
+
+  const PagedResult(this.items, this.total);
+
+  PagedResult<R> map<R>(R Function(T item) convert) =>
+      PagedResult(items.map(convert).toList(), total);
+}
 
 class ApiClient {
   static final ApiClient _instance = ApiClient._();
@@ -241,6 +280,15 @@ class ApiClient {
   Future<List<dynamic>> getList(
     String path, [
     Map<String, String>? params,
+  ]) async => (await getPage(path, params)).items;
+
+  /// One page of a paginated list, with the server's `total` — the count of
+  /// every row matching the request, not just this page. A list read that
+  /// keeps only the items cannot say "57 pending" when it holds 20, nor know
+  /// whether a next page exists (`app/api/pagination.py` is the envelope).
+  Future<PagedResult<dynamic>> getPage(
+    String path, [
+    Map<String, String>? params,
   ]) async {
     final response = await _http
         .get(_uri(path, params), headers: _headers)
@@ -385,7 +433,9 @@ class ApiClient {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<List<dynamic>> _handleListResponse(http.Response response) async {
+  Future<PagedResult<dynamic>> _handleListResponse(
+    http.Response response,
+  ) async {
     if (response.statusCode == 401) {
       await _handleUnauthorized();
       throw ApiException(401, 'Unauthorized');
@@ -393,15 +443,22 @@ class ApiClient {
     if (response.statusCode >= 400) {
       throw _failure(response);
     }
-    if (response.body.isEmpty) return [];
+    if (response.body.isEmpty) return const PagedResult([], 0);
     final decoded = jsonDecode(response.body);
-    if (decoded is List) return decoded;
-    // Backend wraps lists in { "items": [...] } or { "invoices": [...] }
+    if (decoded is List) return PagedResult(decoded, decoded.length);
+    // Backend wraps lists in { "items": [...], "total": N } (the canonical
+    // envelope) or, on a few older routes, { "invoices": [...] }.
     if (decoded is Map<String, dynamic>) {
-      for (final value in decoded.values) {
-        if (value is List) return value;
-      }
+      final items = decoded['items'] is List
+          ? decoded['items'] as List<dynamic>
+          : decoded.values.whereType<List<dynamic>>().firstOrNull ?? const [];
+      final total = decoded['total'];
+      // No total (an unpaginated route) means this is the whole list.
+      return PagedResult(
+        items,
+        total is int && total >= items.length ? total : items.length,
+      );
     }
-    return [];
+    return const PagedResult([], 0);
   }
 }

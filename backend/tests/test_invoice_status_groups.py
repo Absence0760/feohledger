@@ -11,7 +11,10 @@ This file pins:
 * the groups against `VALID_TRANSITIONS`, so a new state-machine edge that
   changes what a group should contain fails here instead of in production;
 * the source tree, so a literal tuple/list/set of statuses equal to one of the
-  groups anywhere under `app/` fails — import the named set instead;
+  groups anywhere under `app/` fails — import the named set instead. Two-member
+  literals count too, since `SETTLED_STATUSES` (`paid`, `done`) is the set most
+  often spelled out by hand; the same scan holds `PaymentStatus` literals to
+  `payment_adapters/base.TERMINAL_STATUSES`;
 * the single enum: `schemas.invoice.InvoiceStatus` IS the model's.
 """
 
@@ -28,12 +31,15 @@ from app.models.invoice_status import (
     FINANCIALLY_LOCKED_STATUSES,
     IN_REVIEW_STATUSES,
     OPEN_AP_STATUSES,
+    PAYABLE_STATUSES,
     POST_APPROVAL_LOCKED_STATUSES,
     PRE_APPROVAL_STATUSES,
+    SETTLED_STATUSES,
     InvoiceStatus,
     financially_locked,
     was_ever_approved,
 )
+from app.services.payment_adapters.base import TERMINAL_STATUSES as PAYMENT_TERMINAL_STATUSES
 from app.services.workflow_engine import VALID_TRANSITIONS
 
 APP = Path(__file__).resolve().parents[1] / "app"
@@ -122,6 +128,24 @@ def test_the_only_edges_back_before_approval_are_the_recalls():
     }
 
 
+def test_settled_is_approved_or_beyond_past_open_ap():
+    """Approval reaches open AP, then settles: `paid` (which a void can still
+    take back to `approved`) or `done`, which nothing leaves."""
+    assert set(SETTLED_STATUSES) == set(APPROVED_OR_BEYOND_STATUSES) - set(OPEN_AP_STATUSES)
+    assert len(SETTLED_STATUSES) == len(set(SETTLED_STATUSES))
+    assert VALID_TRANSITIONS[S.done] == set()
+
+
+def test_payable_is_what_can_move_to_payment_scheduled():
+    """A payment may be booked against an approved invoice that can step to
+    `payment_scheduled` now, or one already there (a re-attempt)."""
+    can_schedule = {
+        s for s in APPROVED_OR_BEYOND_STATUSES if S.payment_scheduled in VALID_TRANSITIONS[s]
+    }
+    assert set(PAYABLE_STATUSES) == can_schedule | {S.payment_scheduled}
+    assert set(PAYABLE_STATUSES) <= set(OPEN_AP_STATUSES)
+
+
 def test_post_approval_locked_is_approved_or_beyond_minus_approved():
     assert POST_APPROVAL_LOCKED_STATUSES == set(APPROVED_OR_BEYOND_STATUSES) - {S.approved}
 
@@ -167,11 +191,25 @@ def test_financially_locked_reads_the_wire_string_too():
 
 
 def test_consumers_read_the_owner():
-    from app.api import analytics as api_analytics
     from app.api import invoice_entry
     from app.api import invoices as api_invoices
+    from app.api import payments as api_payments
+    from app.api import vendor_statement_recon as api_statement_recon
+    from app.api import vendors as api_vendors
     from app.services import analytics as svc_analytics
-    from app.services import budget_service, gl_recode, invoice_warnings
+    from app.services import (
+        ap_commitments,
+        budget_service,
+        csv_import,
+        erp_status_sync,
+        gl_recode,
+        invoice_warnings,
+        payment_gates,
+        payment_reconciler,
+        retention_sweep,
+        vendor_merge,
+    )
+    from app.services.payment_adapters import base as payment_base
 
     assert api_invoices.IMMUTABLE_STATUSES is POST_APPROVAL_LOCKED_STATUSES
     # One financial-lock predicate, one approval read (decisions §370).
@@ -180,8 +218,20 @@ def test_consumers_read_the_owner():
     assert gl_recode._IMMUTABLE_STATUSES is POST_APPROVAL_LOCKED_STATUSES
     assert invoice_warnings._PRE_APPROVAL_STATUSES is PRE_APPROVAL_STATUSES
     assert svc_analytics.OPEN_AP_STATUSES == tuple(s.value for s in OPEN_AP_STATUSES)
-    assert api_analytics._COMMITTED_STATUSES == svc_analytics.OPEN_AP_STATUSES
+    assert ap_commitments.COMMITTED_STATUSES == svc_analytics.OPEN_AP_STATUSES
     assert set(budget_service.REALISED_INVOICE_STATUSES) == set(APPROVED_OR_BEYOND_STATUSES)
+    assert api_statement_recon._LEDGER_EXCLUDED_STATUSES is SETTLED_STATUSES
+    assert retention_sweep._ARCHIVABLE_INVOICE_STATES is SETTLED_STATUSES
+    assert vendor_merge._MONEY_MOVED_STATUSES is SETTLED_STATUSES
+    assert csv_import._HISTORICAL_INVOICE_STATUSES == {s.value for s in SETTLED_STATUSES}
+    assert csv_import._IMPORTABLE_INVOICE_STATUSES == {"new", "rejected", "paid", "done"}
+    assert set(svc_analytics.TOUCHLESS_REVIEW_EVIDENCE_STATUSES) == {"paid", "done", "failed"}
+    assert invoice_warnings._ERP_SYNC_SKIPPED_STATUSES == ("paid", "done")
+    assert erp_status_sync.PAYABLE_HERE == frozenset(PAYABLE_STATUSES)
+    assert payment_reconciler.TERMINAL_STATUSES is payment_base.TERMINAL_STATUSES
+    assert payment_gates.PAYABLE_INVOICE_STATUSES == tuple(s.value for s in PAYABLE_STATUSES)
+    assert api_payments.PAYABLE_INVOICE_STATUSES is payment_gates.PAYABLE_INVOICE_STATUSES
+    assert api_vendors._MONEY_MOVED_STATUSES == frozenset(SETTLED_STATUSES)
 
 
 # ---------------------------------------------------------------------------
@@ -198,8 +248,20 @@ _GROUPS = {
         "APPROVED_OR_BEYOND_STATUSES",
         "POST_APPROVAL_LOCKED_STATUSES",
         "FINANCIALLY_LOCKED_STATUSES",
+        "SETTLED_STATUSES",
+        "PAYABLE_STATUSES",
     )
 }
+
+#: Restatements a later change repoints at the named set; each entry is
+#: `(path relative to backend/, group)`. Shrink only: an entry whose literal is
+#: gone fails `test_awaiting_repoint_entries_are_still_live`.
+_AWAITING_REPOINT: frozenset[tuple[str, str]] = frozenset()
+
+#: `PaymentStatus` members by name; matched only in attribute form, since
+#: `"failed"` is an invoice status string too.
+_PAYMENT_TERMINAL = frozenset(s.name for s in PAYMENT_TERMINAL_STATUSES)
+_PAYMENT_OWNER = APP / "services" / "payment_adapters" / "base.py"
 
 
 def _status_value(node: ast.expr) -> str | None:
@@ -218,30 +280,63 @@ def _status_value(node: ast.expr) -> str | None:
     return None
 
 
-def _literal_restatements() -> list[str]:
-    hits: list[str] = []
-    for path in sorted(APP.rglob("*.py")):
-        if path == OWNER:
+def _payment_status_name(node: ast.expr) -> str | None:
+    """`PaymentStatus.completed` → `"completed"`; anything else → None."""
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "PaymentStatus"
+    ):
+        return node.attr
+    return None
+
+
+def _restatements_in(tree: ast.AST) -> list[tuple[int, str]]:
+    """`(lineno, group)` for every literal collection in `tree` equal to a group."""
+    hits: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Tuple | ast.List | ast.Set) or len(node.elts) < 2:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Tuple | ast.List | ast.Set) or len(node.elts) < 3:
-                continue
-            values = [_status_value(e) for e in node.elts]
-            if any(v is None for v in values):
-                continue
+        values = [_status_value(e) for e in node.elts]
+        if not any(v is None for v in values):
             for name, members in _GROUPS.items():
                 if frozenset(values) == members:
-                    rel = path.relative_to(APP.parent)
-                    hits.append(f"{rel}:{node.lineno} restates {name}")
+                    hits.append((node.lineno, name))
+        names = [_payment_status_name(e) for e in node.elts]
+        if not any(n is None for n in names) and frozenset(names) == _PAYMENT_TERMINAL:
+            hits.append((node.lineno, "payment_adapters.base.TERMINAL_STATUSES"))
+    return hits
+
+
+def _literal_restatements() -> list[tuple[str, int, str]]:
+    hits: list[tuple[str, int, str]] = []
+    for path in sorted(APP.rglob("*.py")):
+        if path in (OWNER, _PAYMENT_OWNER):
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        rel = str(path.relative_to(APP.parent))
+        hits += [(rel, line, name) for line, name in _restatements_in(tree)]
     return hits
 
 
 def test_no_module_restates_a_status_group():
-    assert _literal_restatements() == [], (
-        "Import the named set from app/models/invoice_status.py instead of "
-        "listing its members again (issue #575)."
+    hits = [
+        f"{rel}:{line} restates {name}"
+        for rel, line, name in _literal_restatements()
+        if (rel, name) not in _AWAITING_REPOINT
+    ]
+    assert hits == [], (
+        "Import the named set from app/models/invoice_status.py (or "
+        "payment_adapters/base.TERMINAL_STATUSES) instead of listing its "
+        "members again (issue #575)."
     )
+
+
+def test_awaiting_repoint_entries_are_still_live():
+    """The allowance only shrinks: once a file imports the named set, its
+    entry has to go too."""
+    found = {(rel, name) for rel, _line, name in _literal_restatements()}
+    assert _AWAITING_REPOINT <= found, sorted(_AWAITING_REPOINT - found)
 
 
 def test_scan_catches_a_restatement(tmp_path):
@@ -256,3 +351,29 @@ def test_scan_catches_a_restatement(tmp_path):
     )
     node = tree.body[0].value
     assert frozenset(_status_value(e) for e in node.elts) == _GROUPS["IN_REVIEW_STATUSES"]
+
+
+def test_scan_catches_the_new_groups():
+    """Two-member settled literals, in every spelling, the payable set, and a
+    hand-listed copy of the payment rails' terminal set are all found; a pair
+    that is not a group, and a mixed collection, are not."""
+    src = "\n".join(
+        [
+            "A = (InvoiceStatus.paid, InvoiceStatus.done)",
+            'B = frozenset({"done", "paid"})',
+            "C = [InvoiceStatus.done.value, InvoiceStatus.paid.value]",
+            "D = (InvoiceStatus.approved.value, InvoiceStatus.posted_in_erp.value,"
+            " InvoiceStatus.payment_scheduled.value)",
+            "E = (PaymentStatus.completed, PaymentStatus.failed, PaymentStatus.cancelled)",
+            'F = ("paid", "rejected")',
+            'G = ("paid", "done", other)',
+            'H = ("completed", "failed", "cancelled")',
+        ]
+    )
+    assert sorted(_restatements_in(ast.parse(src))) == [
+        (1, "SETTLED_STATUSES"),
+        (2, "SETTLED_STATUSES"),
+        (3, "SETTLED_STATUSES"),
+        (4, "PAYABLE_STATUSES"),
+        (5, "payment_adapters.base.TERMINAL_STATUSES"),
+    ]

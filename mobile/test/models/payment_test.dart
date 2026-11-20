@@ -17,15 +17,10 @@ void main() {
       expect(PaymentMethod.fromString('bitcoin'), PaymentMethod.ach);
       expect(PaymentStatus.fromString('???'), PaymentStatus.pending);
     });
-
-    test('payment method labels are human-readable', () {
-      expect(PaymentMethod.ach.label, 'ACH');
-      expect(PaymentMethod.virtualCard.label, 'Virtual Card');
-    });
   });
 
   group('Payment.fromJson', () {
-    test('parses a payment and coerces amount to double', () {
+    test('parses a payment and keeps the amount as a display string', () {
       final payment = Payment.fromJson({
         'id': 'p1',
         'invoice_id': 'inv1',
@@ -37,7 +32,8 @@ void main() {
       });
       expect(payment.id, 'p1');
       expect(payment.invoiceId, 'inv1');
-      expect(payment.amount, 500.0);
+      // A display string, never a double the device could do sums with.
+      expect(payment.amountDisplay, '500');
       expect(payment.method, PaymentMethod.wire);
       expect(payment.status, PaymentStatus.completed);
       expect(payment.reference, 'WIRE-1');
@@ -54,8 +50,8 @@ void main() {
         'status': 'pending',
         'created_at': '2026-01-01T12:00:00',
       });
-      expect(discounted.amount, 980.0);
-      expect(discounted.discountAmount, 20.0);
+      expect(discounted.amountDisplay, '980.0');
+      expect(discounted.discountAmountDisplay, '20');
 
       final full = Payment.fromJson({
         'id': 'p3',
@@ -66,7 +62,31 @@ void main() {
         'status': 'pending',
         'created_at': '2026-01-01T12:00:00',
       });
-      expect(full.discountAmount, isNull);
+      expect(full.discountAmountDisplay, isNull);
+    });
+
+    test('toJson round-trips through fromJson (the offline cache shape)', () {
+      final original = Payment.fromJson({
+        'id': 'p9',
+        'invoice_id': 'inv9',
+        'amount': '1234.56',
+        'currency': 'EUR',
+        'discount_amount': '10.00',
+        'method': 'virtual_card',
+        'status': 'processing',
+        'reference': 'VC-1',
+        'created_at': '2026-01-01T12:00:00',
+      });
+      final back = Payment.fromJson(original.toJson());
+      expect(back.id, 'p9');
+      expect(back.invoiceId, 'inv9');
+      expect(back.amountDisplay, '1234.56');
+      expect(back.currency, 'EUR');
+      expect(back.discountAmountDisplay, '10.00');
+      expect(back.method, PaymentMethod.virtualCard);
+      expect(back.status, PaymentStatus.processing);
+      expect(back.reference, 'VC-1');
+      expect(back.createdAt, DateTime(2026, 1, 1, 12));
     });
 
     test('reference is optional', () {

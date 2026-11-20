@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { RecurringTemplate } from '#lib/types/recurring.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import {
 		RECURRING_STATUSES,
@@ -46,6 +47,7 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { daysUntil } from './relativeRun.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	const canCreate = $derived(auth.isManager);
 
@@ -542,11 +544,10 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={!loading && templates.length === 0}
-		empty={loading
-			? m('common.loading')
-			: noActiveFilters
-				? m('recurring.empty.fresh')
-				: m('recurring.empty')}
+		{loading}
+		filtered={!noActiveFilters}
+		emptyFiltered={m('recurring.empty')}
+		empty={m('recurring.empty.fresh')}
 		colspan={8}
 	>
 		{#snippet body()}
@@ -577,7 +578,7 @@
 							<span class="rel">{relativeRun(template.next_run_on)}</span>
 						{/if}
 					</td>
-					<td class="right mono">{template.generated_count}</td>
+					<td class="right mono">{formatCount(template.generated_count)}</td>
 					<td>
 						<!-- The 6px that used to live on `.badge.skipped`'s own margin now
 						     lives on this row: `<Badge>` owns colour and pill metrics, the
@@ -665,17 +666,15 @@
 	</DataTable>
 	{/if}
 
-	{#if hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={() => load({ append: true })} disabled={loadingMore}>
-				{loadingMore ? m('common.loading') : m('recurring.loadMore', { shown: templates.length, total })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('recurring.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={templates.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		onloadmore={() => load({ append: true })}
+		moreKey="recurring.loadMore"
+		allKey="recurring.showingAll"
+	/>
 </PageHeader>
 
 {#if showCreate}

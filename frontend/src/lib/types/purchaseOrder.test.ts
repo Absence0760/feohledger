@@ -10,7 +10,13 @@ import { describe, expect, it } from 'vitest';
 import { EN_ALL, loadAllMessages } from '#lib/i18n/allMessages.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import { interpolate } from '#lib/i18n/interpolate.ts';
-import { PO_STATUS_LABEL_KEYS, poStatusLabel, poStatusLabelKey } from './purchaseOrder.ts';
+import {
+	PO_STATUS_LABEL_KEYS,
+	PO_STATUS_TONES,
+	poStatusLabel,
+	poStatusLabelKey,
+	poStatusTone
+} from './purchaseOrder.ts';
 import {
 	PO_ALREADY_INVOICED,
 	PO_NOT_INVOICEABLE,
@@ -80,5 +86,22 @@ describe('poFlipRefusalText', () => {
 		);
 		expect(poFlipRefusalText(null, en)).toBe('');
 		expect(poFlipRefusalText(undefined, en)).toBe('');
+	});
+});
+
+describe('poStatusTone', () => {
+	it('tones only statuses that have a label', () => {
+		for (const status of Object.keys(PO_STATUS_TONES)) {
+			expect(poStatusLabelKey(status), status).not.toBeNull();
+		}
+	});
+
+	it('keeps a cancelled PO (muted tint) apart from an unknown one (flat neutral)', () => {
+		expect(poStatusTone('cancelled')).toBe('muted');
+		expect(poStatusTone('open')).toBe('accent');
+		expect(poStatusTone('some_erp_status')).toBe('neutral');
+		expect(poStatusTone(null)).toBe('neutral');
+		// A free-form column: an inherited Object key must not resolve.
+		expect(poStatusTone('constructor')).toBe('neutral');
 	});
 });

@@ -12,7 +12,7 @@
 	import { brand } from '#lib/stores/brand.svelte.ts';
 	import Spinner from '#lib/components/ui/Spinner.svelte';
 	// Aliased: the page's own `errorMessage` state already has the name.
-	import { errorMessage as apiErrorText } from '#lib/utils/apiError.ts';
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 
 	interface CompleteResponse {
 		status: string;
@@ -118,7 +118,7 @@
 				phase = 'expired';
 			} else {
 				phase = 'error';
-				errorMessage = apiErrorText(err, m('auth.verify.failed'));
+				errorMessage = apiErrorMessage(err, m('auth.verify.failed'));
 				existingWorkspaceUrl =
 					err instanceof ApiError && err.code === SIGNUP_EMAIL_HAS_WORKSPACE
 						? ownWorkspaceSignInUrl(err.params)

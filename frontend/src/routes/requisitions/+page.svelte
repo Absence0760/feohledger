@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Requisition, RequisitionStatus } from '#lib/types/requisition.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import {
 		REQUISITION_FILTER_STATUSES,
 		REQUISITION_STATUS_LABEL_KEYS,
@@ -139,7 +140,6 @@
 	// it; the empty state had to say so. Now the server searches the whole
 	// filtered set, so the plain empty message is true again and `total` /
 	// Load more describe the MATCHES rather than the unfiltered list.
-	const emptyMessage = $derived(loading ? m('common.loading') : m('requisitions.empty'));
 
 	// KPIs from `GET /api/requisitions/summary` — the WHOLE filtered set, over
 	// the SAME status/search filters. They used to reduce over `requisitions`,
@@ -480,7 +480,8 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={requisitions.length === 0}
-		empty={emptyMessage}
+		{loading}
+		empty={m('requisitions.empty')}
 	>
 		{#snippet body()}
 			{#each requisitions as r (r.id)}
@@ -548,23 +549,16 @@
 	</DataTable>
 	{/if}
 
-	{#if hasMore && !errored}
-		<div class="load-more-row">
-			<button
-				class="btn-load-more"
-				onclick={() => load({ append: true })}
-				disabled={loadingMore}
-			>
-				{loadingMore
-					? m('common.loading')
-					: m('requisitions.loadMore', { shown: requisitions.length, total })}
-			</button>
-		</div>
-	{:else if total > 0 && !errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('requisitions.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={requisitions.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		{errored}
+		onloadmore={() => load({ append: true })}
+		moreKey="requisitions.loadMore"
+		allKey="requisitions.showingAll"
+	/>
 </PageHeader>
 
 {#if showCreate}

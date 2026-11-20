@@ -150,8 +150,17 @@ def threshold_currency_for(policy: Any, default_currency: str) -> str:
     of every row created before the column existed: a tenant-DB migration cannot
     read the control-plane org settings, so the unit is resolved here, at
     evaluation time, from live config rather than frozen to a guess at upgrade
-    time. Never raises."""
-    return normalize_currency(getattr(policy, "threshold_currency", None), default=default_currency)
+    time. Never raises.
+
+    Only an UNSET column (NULL or blank) falls back. A set value that fails the
+    ISO 4217 rule returns ``""``, which no expense converts into, so every
+    comparison against that policy is unresolved and counts as a breach (fail
+    closed) rather than being silently re-denominated in the reporting
+    currency."""
+    raw = getattr(policy, "threshold_currency", None)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return normalize_currency(default_currency) or ""
+    return normalize_currency(raw) or ""
 
 
 @dataclass(frozen=True)
@@ -337,9 +346,9 @@ def evaluate_expense(
     category = getattr(expense, "category", None)
     receipt_key = getattr(expense, "receipt_file_key", None)
     covered = _as_decimal(approved_preapproval_amount)
-    expense_currency = normalize_currency(
-        getattr(expense, "currency", None), default=default_threshold_currency
-    )
+    # Display only (violation messages / params); the comparison itself goes
+    # through `expense_amount_in_currency`, which refuses an unusable code.
+    expense_currency = normalize_currency(getattr(expense, "currency", None)) or ""
 
     violations: list[dict] = []
     for policy in policies:

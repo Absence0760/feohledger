@@ -185,20 +185,124 @@ void main() {
     expect(find.byType(InvoiceListTile), findsNothing);
   });
 
-  testWidgets('falls back to the empty state on a network error with no cache',
+  // A failed first load used to render "No invoices found" — on a dropped
+  // connection the user was told they had no invoices.
+  testWidgets('a failed load with no cache shows the error + Retry, not empty',
       (tester) async {
+    var calls = 0;
     ApiClient().debugConfigure(
-      client: MockClient((req) async => throw Exception('offline')),
+      client: MockClient((req) async {
+        calls++;
+        if (calls == 1) throw Exception('offline');
+        return _list([_invoiceJson('1')]);
+      }),
     );
 
     await tester.pumpWidget(_localized(const InvoicesScreen()));
-    await _pumpUntil(tester, find.text('No invoices found'));
+    await _pumpUntil(tester, find.widgetWithText(FilledButton, 'Retry'));
 
-    // No cached rows exist, so the store ends with an empty list + error set,
-    // and the screen shows its empty placeholder (not a spinner).
-    expect(find.text('No invoices found'), findsOneWidget);
-    expect(store.error, isNotNull);
+    expect(find.text('No invoices found'), findsNothing);
+    expect(store.loadError, isNotNull);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+    // No server answered, so the connection sentence — never the exception.
+    expect(find.textContaining('Exception'), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+    await _pumpUntil(tester, find.byType(InvoiceListTile));
+    expect(find.byType(InvoiceListTile), findsOneWidget);
+    expect(store.loadError, isNull);
+  });
+
+  testWidgets('a filter that matches nothing says so, and Show all clears it',
+      (tester) async {
+    final statuses = <String?>[];
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        final status = req.url.queryParameters['status'];
+        statuses.add(status);
+        return _list(status == null ? [_invoiceJson('1')] : []);
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const InvoicesScreen()));
+    await _pumpUntil(tester, find.byType(InvoiceListTile));
+
+    // The chips are a horizontal scroll row; at the test window's width
+    // "Paid" sits past the right edge, so scroll to it as a user would.
+    final paid = find.widgetWithText(FilterChip, 'Paid');
+    await tester.ensureVisible(paid);
+    await tester.pump();
+    await tester.tap(paid);
+    await _pumpUntil(tester, find.text('No invoices match these filters'));
+
+    expect(find.text('No invoices match these filters'), findsOneWidget);
+    // "No invoices found" under a chip would claim the whole list is empty.
+    expect(find.text('No invoices found'), findsNothing);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Show all'));
+    await _pumpUntil(tester, find.byType(InvoiceListTile));
+
+    expect(store.statusFilter, isNull);
+    expect(store.isFiltered, isFalse);
+    expect(statuses.last, isNull);
+    expect(find.byType(InvoiceListTile), findsOneWidget);
+  });
+
+  testWidgets('a paged list offers Load more and appends the next page',
+      (tester) async {
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        final number = int.parse(req.url.queryParameters['page'] ?? '1');
+        final first = (number - 1) * 20;
+        final count = (25 - first).clamp(0, 20).toInt();
+        return http.Response(
+          jsonEncode({
+            'items': [
+              for (var i = first; i < first + count; i++) _invoiceJson('$i'),
+            ],
+            'total': 25,
+            'page': number,
+            'page_size': 20,
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const InvoicesScreen()));
+    await _pumpUntil(tester, find.byType(InvoiceListTile));
+
+    final loadMore = find.byKey(const ValueKey('list-load-more'));
+    await tester.scrollUntilVisible(
+      loadMore,
+      400,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.text('Showing 20 of 25'), findsOneWidget);
+
+    await tester.tap(loadMore);
+    for (var i = 0; i < 30 && store.invoices.length < 25; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    expect(store.invoices, hasLength(25));
+    await tester.scrollUntilVisible(
+      find.text('Showing all 25'),
+      400,
+      scrollable: find
+          .descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.byKey(const ValueKey('list-load-more')), findsNothing);
   });
 
   testWidgets('renders the search bar, status filter chips and camera action',

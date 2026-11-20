@@ -1,5 +1,6 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	// Sanctions-screening review queue — the vendors flagged `match` / `review`
 	// by the screening engine, awaiting a human decision. A separate sub-route
 	// from the vendors LIST page (/vendors) so the two don't collide.
@@ -46,6 +47,7 @@
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BLOCK } from '#lib/types/admin.ts';
@@ -424,11 +426,14 @@
 			unblockArmedFor = selected.vendor_id;
 			return;
 		}
-		unblockArmedFor = null;
 		// Bind the action to the vendor that was on screen when it was fired.
 		// Everything after the first await must read THIS, never `selected` —
 		// the modal can be closed and re-opened on another vendor mid-flight.
 		const target = selected;
+		// The arm is held through the request, not dropped before it: a busy
+		// commit keeps `.armed` (ui-patterns § `.armed`, the third look), and
+		// dropping it here repainted an in-flight unblock as the muted unarmed
+		// secondary. `finally` releases it.
 		busy = { vendorId: target.vendor_id, action: 'block' };
 		try {
 			const updated = target.payments_blocked
@@ -454,12 +459,18 @@
 			toast(errorMessage(err, m('vendors.screening.queue.toast.actionFailed')), 'error');
 		} finally {
 			if (busy?.vendorId === target.vendor_id) busy = null;
+			if (unblockArmedFor === target.vendor_id) unblockArmedFor = null;
 		}
 	}
 
 	async function rescreen() {
 		if (!selected) return;
 		const target = selected;
+		// A fresh screen can change the verdict the Confirm unblock was armed
+		// against, and while it runs the commit cannot be pressed — a red fill
+		// on a disabled button reads as "ready". Disarm; the reviewer re-arms
+		// against the new result.
+		if (unblockArmedFor === target.vendor_id) unblockArmedFor = null;
 		busy = { vendorId: target.vendor_id, action: 'rescreen' };
 		try {
 			const updated = await screenVendor(target.vendor_id);
@@ -545,11 +556,10 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
-		empty={loading
-			? m('common.loading')
-			: search.trim()
-					? m('vendors.screening.queue.empty.filtered')
-					: m('vendors.screening.queue.empty.clean')}
+		{loading}
+		filtered={!!search.trim()}
+		emptyFiltered={m('vendors.screening.queue.empty.filtered')}
+		empty={m('vendors.screening.queue.empty.clean')}
 	>
 		{#snippet body()}
 			{#each items as it (it.vendor_id)}
@@ -592,19 +602,16 @@
 	<!-- `showingAll` is rendered ONLY behind `total > 0`: `total` is the server's
 	     whole-set count, so stating it while a later page is unfetched would be
 	     the same claim the KPIs used to make wrongly. -->
-	{#if hasMore}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={loadMore} disabled={loadingMore || loading}>
-				{loadingMore
-					? m('common.loading')
-					: m('vendors.loadMore', { shown: items.length, total })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('vendors.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={items.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		disabled={loading}
+		onloadmore={loadMore}
+		moreKey="vendors.loadMore"
+		allKey="vendors.showingAll"
+	/>
 	{/if}
 </PageHeader>
 
@@ -686,8 +693,7 @@
 						/>
 					{/if}
 					<button
-						class="btn-block"
-						class:unblock={selected.payments_blocked}
+						class={selected.payments_blocked && !unblockArmed ? 'btn-secondary' : 'btn-danger'}
 						class:armed={unblockArmed}
 						onclick={toggleBlock}
 						disabled={selectedBusy !== null}
@@ -725,7 +731,7 @@
 				testId="screening-history-error"
 			/>
 		{:else if historyLoading || !historyIsForSelected}
-			<p class="muted" data-testid="screening-history-loading">{m('common.loading')}</p>
+			<LoadingState testId="screening-history-loading" />
 		{:else if history.length === 0}
 			<p class="muted" data-testid="screening-history-empty">
 				{m('vendors.screening.queue.history.empty')}
@@ -822,42 +828,6 @@
 		outline: none;
 		border-color: var(--accent);
 		box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
-	}
-	/* Tinted buttons take the `-tint` fill and its `-on-tint` text partner — the
-	   base token on its own tint is the pairing the colour rules forbid (it
-	   drops under 4.5:1 in the light theme). Hover thickens the border rather
-	   than deepening the fill, so the text pairing never changes. */
-	.btn-block {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--danger-on-tint);
-		background: var(--danger-tint);
-		color: var(--danger-on-tint);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-	.btn-block:hover:not(:disabled) {
-		box-shadow: inset 0 0 0 1px var(--danger-on-tint);
-	}
-	.btn-block.unblock {
-		border-color: var(--success-on-tint);
-		background: var(--success-tint);
-		color: var(--success-on-tint);
-	}
-	.btn-block.unblock:hover:not(:disabled) {
-		box-shadow: inset 0 0 0 1px var(--success-on-tint);
-	}
-	/* Armed (one click from releasing payments): a heavier ring, not a new
-	   colour, so the text/fill pairing stays the audited one. */
-	.btn-block.unblock.armed {
-		box-shadow: inset 0 0 0 2px var(--success-on-tint);
-	}
-	.btn-block:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 	.no-perm-note {
 		font-size: 0.82rem;

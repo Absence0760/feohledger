@@ -1,10 +1,17 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:feohledger_mobile/l10n/app_localizations_delegates.dart';
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
+import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/contract.dart';
 import 'package:feohledger_mobile/widgets/contract_status_badge.dart';
 
-Widget _host(Widget child) => MaterialApp(home: Scaffold(body: child));
+Widget _host(Widget child) => MaterialApp(
+      localizationsDelegates: appLocalizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: child),
+    );
 
 void main() {
   testWidgets('renders the status label text', (tester) async {
@@ -18,7 +25,7 @@ void main() {
       (tester) async {
     for (final status in ContractStatus.values) {
       await tester.pumpWidget(_host(ContractStatusBadge(status: status)));
-      expect(find.text(status.label), findsOneWidget,
+      expect(find.text(contractStatusLabel(lookupAppLocalizations(const Locale('en')), status)), findsOneWidget,
           reason: 'missing label for ${status.value}');
     }
   });

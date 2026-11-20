@@ -153,7 +153,8 @@ export const messages = {
 	'org.chat.webhook.saving': 'Enregistrement…',
 	'org.chat.webhook.remove': 'Supprimer le webhook',
 	'org.chat.webhook.confirmRemove': 'Confirmer la suppression',
-	'org.chat.webhook.removeAria': 'Supprimer l’URL de webhook entrant de discussion',
+	'org.chat.webhook.removeAria': 'Supprimer le webhook : URL de webhook entrant de discussion',
+	'org.chat.webhook.confirmRemoveAria': 'Confirmer la suppression : URL de webhook entrant de discussion',
 	'org.chat.webhook.rotateHint':
 		'Le remplacement prend effet immédiatement, sans période de recouvrement — nous publions vers une seule URL, donc garder l’ancienne active continuerait d’y publier. Supprimez aussi l’ancien webhook chez votre fournisseur : lui seul peut le révoquer.',
 	'org.chat.webhook.toast.saved': 'Webhook de discussion enregistré',
@@ -187,6 +188,7 @@ export const messages = {
 	'org.emailIntake.rotateConfirm': 'Confirmer la rotation',
 	'org.emailIntake.rotating': 'Rotation…',
 	'org.emailIntake.rotateAria': 'Faire tourner l’adresse de réception par e-mail',
+	'org.emailIntake.rotateConfirmAria': 'Confirmer la rotation de l’adresse de réception par e-mail',
 	'org.emailIntake.rotateWarning':
 		'La rotation remplace cette adresse immédiatement. L’adresse actuelle cesse d’accepter les e-mails dès que vous confirmez — tout ce qu’un fournisseur y enverra ensuite sera ignoré, sans retour à l’expéditeur ni facture. Communiquez la nouvelle adresse à tous vos fournisseurs avant leur prochaine facturation.',
 	'org.emailIntake.rotated.aria': 'Nouvelle adresse de réception par e-mail',
@@ -969,7 +971,6 @@ export const messages = {
 	'admin.partner.join.generate': 'Générer un code de liaison',
 	'admin.partner.join.copy': 'Copier',
 	'admin.partner.join.expiresIn': 'Expire dans {minutes} min',
-	'admin.partner.loading': 'Chargement…',
 	'admin.partner.loadFailed': 'Échec du chargement de l\'aperçu partenaire.',
 	'admin.partner.notPartner':
 		'Cet espace de travail n\'administre encore aucun locataire enfant. Lorsqu\'un locataire est lié à cet espace de travail en tant que partenaire, ses enfants apparaissent ici.',

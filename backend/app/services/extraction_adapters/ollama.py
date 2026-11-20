@@ -13,6 +13,7 @@ import json
 
 import httpx
 
+from app.services import pdf_reader
 from app.services.extraction_adapters.base import (
     STATEMENT_REASON_EMPTY_FILE,
     STATEMENT_REASON_NO_TEXT_LAYER,
@@ -22,7 +23,6 @@ from app.services.extraction_adapters.base import (
     ExtractionAdapter,
     ExtractionResult,
     StatementExtractionResult,
-    pdf_text_layer,
 )
 from app.services.extraction_adapters.claude_vision import EXTRACTION_PROMPT, _parse_field
 from app.services.extraction_adapters.dispatcher import register_extraction_adapter
@@ -120,49 +120,6 @@ class OllamaAdapter(ExtractionAdapter):
 
     provider_name = "ollama"
 
-    @staticmethod
-    def _extract_pdf_text(pdf_bytes: bytes) -> str | None:
-        """Extract text from a PDF. Returns None if no text layer (scanned doc).
-
-        Kept as a staticmethod because `openai_vision` calls it by this name;
-        the implementation lives in `base.pdf_text_layer` so the statement
-        reader and the invoice reader can't drift on what "has a text layer"
-        means.
-        """
-        return pdf_text_layer(pdf_bytes)
-
-    @staticmethod
-    def _pdf_to_images(pdf_bytes: bytes, max_pages: int = 20) -> list[bytes]:
-        """Convert all pages of a PDF to PNG images. Fallback for scanned PDFs.
-
-        Returns a list of PNG byte buffers (one per page), capped at max_pages
-        to avoid blowing up token budgets on unusually long documents. Pages
-        are passed through :func:`image_preprocess.auto_rotate_pages` so
-        90/180/270-off-upright scans are sent to the vision adapter the right
-        way up. The rotation pass is gated on ``settings.extraction_auto_rotate``
-        and degrades to a no-op when Tesseract is not available on the host.
-        """
-        try:
-            import pymupdf  # PyMuPDF
-
-            doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-            images = []
-            for i, page in enumerate(doc):
-                if i >= max_pages:
-                    break
-                pix = page.get_pixmap(dpi=200)
-                images.append(pix.tobytes("png"))
-        except Exception:
-            return []
-
-        from app.config import settings
-
-        if settings.extraction_auto_rotate and images:
-            from app.services.image_preprocess import auto_rotate_pages
-
-            images = auto_rotate_pages(images)
-        return images
-
     def _org_base_url(self) -> str:
         """The per-org ``base_url`` (BYOK config), or "" when none is set."""
         return str(self.config.get("base_url") or "").strip()
@@ -218,12 +175,12 @@ class OllamaAdapter(ExtractionAdapter):
         page_images: list[bytes] = []
         if is_pdf:
             # Try to extract text first — much faster and more accurate
-            pdf_text = self._extract_pdf_text(file_bytes)
+            pdf_text = await pdf_reader.pdf_text(file_bytes)
             if pdf_text:
                 use_vision = False
             else:
                 # Scanned PDF — convert ALL pages to images for vision model
-                page_images = self._pdf_to_images(file_bytes)
+                page_images = await pdf_reader.rasterize_pages(file_bytes)
                 if not page_images:
                     return ExtractionResult(
                         success=False,
@@ -416,13 +373,13 @@ class OllamaAdapter(ExtractionAdapter):
         is_pdf = mime_type == "application/pdf" or file_key.lower().endswith(".pdf")
         message: dict = {"role": "user", "content": STATEMENT_EXTRACTION_PROMPT}
         if is_pdf:
-            pdf_text = self._extract_pdf_text(file_bytes)
+            pdf_text = await pdf_reader.pdf_text(file_bytes)
             if pdf_text:
                 message["content"] = (
                     f"{STATEMENT_EXTRACTION_PROMPT}\n\nHere is the statement text:\n\n{pdf_text}"
                 )
             else:
-                page_images = self._pdf_to_images(file_bytes)
+                page_images = await pdf_reader.rasterize_pages(file_bytes)
                 if not page_images:
                     return StatementExtractionResult(
                         available=True,

@@ -6,6 +6,7 @@ Uses the extraction adapter pattern — supports platform (Claude Vision) and BY
 Tracks usage for billing when platform mode is used.
 """
 
+import asyncio
 import functools
 import logging
 import re
@@ -733,8 +734,9 @@ async def run_extraction(
         # Factur-X file is routed to the deterministic `einvoice` adapter,
         # overriding the org's configured vision adapter. Everything else
         # (incl. plain scanned PDFs) falls through unchanged. This is the one
-        # detect site every ingress (upload + email-intake) reaches.
-        structured_format = _detect_structured_format(file_bytes, file_key)
+        # detect site every ingress (upload + email-intake) reaches. The probe
+        # opens a PDF (Factur-X attachment sniff), so it runs on a worker thread.
+        structured_format = await asyncio.to_thread(_detect_structured_format, file_bytes, file_key)
         extract_mime_type = "application/pdf"
         if structured_format is not None:
             config = {"program_type": "platform", "provider": "einvoice"}
@@ -770,12 +772,12 @@ async def run_extraction(
         # or the tenant has no embeddings yet.
         from app.services.rag import (
             build_few_shot_prompt,
-            extract_invoice_text,
             neighbors_to_metadata,
+            read_invoice_text,
             retrieve_similar,
         )
 
-        invoice_text = extract_invoice_text(file_bytes)
+        invoice_text = await read_invoice_text(file_bytes)
         neighbors = await retrieve_similar(db, invoice_text, exclude_invoice_id=invoice_id)
         if neighbors:
             config["few_shot_prompt"] = build_few_shot_prompt(neighbors)
@@ -1279,8 +1281,11 @@ async def run_extraction(
                     **(token_usage.as_columns() if token_usage else {}),
                 )
             )
-        except Exception:
-            pass
+        except Exception as meter_exc:  # noqa: BLE001 — losing the meter must not cost the exception record
+            # The class only: the message can quote provider or document text.
+            logger.warning(
+                "[extraction] Failed-usage row not recorded: %s", type(meter_exc).__name__
+            )
 
         # Create exception record (shared chokepoint → emits `exception.raised`)
         from app.services.exception_service import create_exception
@@ -1498,7 +1503,7 @@ def _clean_decimal_and_codes(
         return None, frozenset()
     try:
         return Decimal(apply_convention(core, convention)), codes
-    except Exception:
+    except Exception:  # noqa: BLE001 — an unparseable token is "no amount read", never an error
         return None, frozenset()
 
 
@@ -1531,8 +1536,9 @@ class CurrencyEvidence:
       ``None``. The writer then leaves every header amount unread rather than
       label it with a currency the document itself contradicts;
     * neither speaks → ``None`` and no conflict. The row keeps whatever
-      currency it already had (the upload's placeholder — see
-      `docs/followups.md` on the ``USD`` column default).
+      currency it already had: NULL ("currency unknown") for a fresh upload,
+      which is created that way — there is no placeholder code and no ``USD``
+      column default (`decisions.md` §473).
     """
 
     field_currency: str | None

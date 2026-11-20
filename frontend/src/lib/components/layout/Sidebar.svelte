@@ -52,6 +52,14 @@
 		if (sidebar.overlay) sidebar.collapse();
 	});
 
+	function onProfileFocusOut(e: FocusEvent) {
+		if (!showProfile) return;
+		const next = e.relatedTarget as Node | null;
+		const wrapper = e.currentTarget as HTMLElement;
+		if (next && wrapper.contains(next)) return;
+		showProfile = false;
+	}
+
 	function onWindowKeydown(e: KeyboardEvent) {
 		if (e.key !== 'Escape') return;
 		// An open modal dialog owns Escape: its own `focusTrap` handler closes
@@ -220,11 +228,45 @@
 		{#if !collapsed}<span class="help-label">{m('shell.help')}</span>{/if}
 	</a>
 
-	<div class="profile-wrapper">
+	<!--
+		Focus leaving the disclosure closes it (WCAG 2.4.11 Focus Not Obscured):
+		left open, Shift+Tab from the trigger lands on the Help link, which the
+		popover is drawn over, and in the collapsed rail it covers the icon
+		column. Focus is not moved — it is already where the reader sent it. A
+		null `relatedTarget` (focus going to the page body or another window)
+		closes it too: nothing inside the wrapper holds focus any more.
+	-->
+	<div class="profile-wrapper" onfocusout={onProfileFocusOut}>
 		{#if showProfile}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div class="profile-backdrop" onclick={() => (showProfile = false)} onkeydown={() => {}}></div>
-			<div class="profile-popover">
+		{/if}
+		<button
+			bind:this={profileBtn}
+			class="profile-btn"
+			class:collapsed
+			title={collapsed ? m('shell.profile') : ''}
+			aria-label={collapsed
+				? m('shell.profileMenu')
+				: m('shell.profileMenuNamed', { name: auth.user?.full_name ?? m('shell.profile') })}
+			aria-expanded={showProfile}
+			aria-controls={showProfile ? 'sidebar-profile-popover' : undefined}
+			onclick={() => (showProfile = !showProfile)}
+		>
+			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+			{#if !collapsed}
+				<span class="profile-label">{auth.user?.full_name ?? m('shell.profile')}</span>
+			{/if}
+		</button>
+		<!--
+			A disclosure, not an ARIA menu (WAI-ARIA APG § Disclosure): it holds
+			the signed-in identity, two links and Log out, so the trigger states
+			only `aria-expanded` (no `aria-haspopup="menu"`, which promises
+			menuitems and arrow keys). It follows its trigger in the DOM so Tab
+			moves into it; it is drawn above the trigger by `bottom: 100%`.
+		-->
+		{#if showProfile}
+			<div class="profile-popover" id="sidebar-profile-popover">
 				<div class="profile-info">
 					<div class="profile-name">{auth.user?.full_name ?? '—'}</div>
 					<div class="profile-email">{auth.user?.email ?? '—'}</div>
@@ -253,23 +295,6 @@
 				<button class="profile-logout" onclick={() => auth.logout()}>{m('shell.logOut')}</button>
 			</div>
 		{/if}
-		<button
-			bind:this={profileBtn}
-			class="profile-btn"
-			class:collapsed
-			title={collapsed ? m('shell.profile') : ''}
-			aria-label={collapsed
-				? m('shell.profileMenu')
-				: m('shell.profileMenuNamed', { name: auth.user?.full_name ?? m('shell.profile') })}
-			aria-haspopup="menu"
-			aria-expanded={showProfile}
-			onclick={() => (showProfile = !showProfile)}
-		>
-			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-			{#if !collapsed}
-				<span class="profile-label">{auth.user?.full_name ?? m('shell.profile')}</span>
-			{/if}
-		</button>
 	</div>
 
 	<button bind:this={toggleBtn} class="collapse-btn" class:collapsed onclick={() => sidebar.toggle()} aria-label={collapsed ? m('shell.expandSidebar') : m('shell.collapseSidebar')}>

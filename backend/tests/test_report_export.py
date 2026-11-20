@@ -19,6 +19,8 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.branding import get_brand_context
 from app.services.report_export import (
     EXPORTERS,
@@ -173,6 +175,26 @@ def test_invoice_register_emits_one_data_row_per_invoice():
     assert rows[1][1] == "INV-001"
     assert rows[1][3] == "123.45"
     assert rows[1][5] == "approved"
+
+
+@pytest.mark.parametrize("currency", [None, ""])
+def test_invoice_register_leaves_an_unknown_currency_blank(currency):
+    """An invoice that records no currency exports a blank cell, never a
+    guessed USD (decisions §160 / §196 / §473)."""
+    inv = SimpleNamespace(
+        id=uuid.uuid4(),
+        invoice_number="NOCUR",
+        vendor_name="V",
+        amount=Decimal("1"),
+        currency=currency,
+        status="new",
+        invoice_date=None,
+        due_date=None,
+        created_at=None,
+        po_number=None,
+    )
+    rows = _read(export_invoice_register([inv]))
+    assert rows[1][4] == ""
 
 
 def test_invoice_register_handles_enum_status():

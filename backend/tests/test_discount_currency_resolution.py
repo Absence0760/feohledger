@@ -52,6 +52,7 @@ from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.vendor import Vendor
 from app.schemas import discount as discount_schemas
+from app.services import discount_opportunities
 from app.utils.dates import utc_today
 
 _DISCOUNTS_SOURCE = pathlib.Path(inspect.getfile(discounts_api))
@@ -193,21 +194,33 @@ def test_the_canonical_resolver_is_called_from_exactly_one_place():
     )
 
 
-#: The ONLY currency-code literal allowed in `api/discounts`, with the reason.
-#: `_build_opportunity` reads `offer.currency or "USD"` for an in-memory offer;
-#: `discount_offers.currency` is `nullable=False` with a server-side default,
-#: so the fallback is unreachable from a persisted row. Every figure a caller
-#: sees is labelled from `_org_currency`.
-_ALLOWED_CURRENCY_LITERALS = {("_build_opportunity", "USD"): 1}
+#: The ONLY currency-code literals allowed, per module, with the reason. None:
+#: `build_opportunity` used to read `offer.currency or "USD"`; it now carries
+#: `iso_currency_or_none(offer.currency)`, so a missing or malformed code is
+#: `None` and the optimizer reads it as unconvertible (decisions §473). Every
+#: figure a caller sees is labelled from `_org_currency`, so the router itself
+#: names no code at all.
+_ALLOWED_CURRENCY_LITERALS = {
+    "api/discounts": {},
+    "services/discount_opportunities": {},
+}
 
 _CURRENCY_LITERALS = {"USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF"}
 
 
-def test_no_new_hardcoded_currency_literal_reaches_the_money_path():
+def _source_for(label: str) -> pathlib.Path:
+    if label == "api/discounts":
+        return _DISCOUNTS_SOURCE
+    return pathlib.Path(inspect.getfile(discount_opportunities))
+
+
+@pytest.mark.parametrize("label", sorted(_ALLOWED_CURRENCY_LITERALS))
+def test_no_new_hardcoded_currency_literal_reaches_the_money_path(label):
     """A hardcoded code is how the bug got in: `... or "USD"` at the one place
     that decided what every discount figure was denominated in."""
-    tree = _module_ast()
-    owners: dict[str, str] = {}
+    source = _source_for(label)
+    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    owners: dict[int, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             for child in ast.walk(node):
@@ -219,9 +232,9 @@ def test_no_new_hardcoded_currency_literal_reaches_the_money_path():
             key = (owners.get(id(node), "<module>"), node.value)
             found[key] = found.get(key, 0) + 1
 
-    assert found == _ALLOWED_CURRENCY_LITERALS, (
-        "hardcoded currency literals in api/discounts changed: "
-        f"{found} != {_ALLOWED_CURRENCY_LITERALS}. Resolve the org's currency "
+    assert found == _ALLOWED_CURRENCY_LITERALS[label], (
+        f"hardcoded currency literals in {label} changed: "
+        f"{found} != {_ALLOWED_CURRENCY_LITERALS[label]}. Resolve the org's currency "
         "through _org_currency (which delegates to resolve_reporting_currency) "
         "rather than naming a code here."
     )

@@ -7,7 +7,6 @@ from app.models.invoice_status import (
     InvoiceStatus,  # the one enum; see that module
     financially_locked,
 )
-from app.schemas.currency import CurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.services.storage import invoice_file_url
 from app.services.vendor_consolidation import mask_tax_id
@@ -17,7 +16,8 @@ from app.services.vendor_consolidation import mask_tax_id
 #: verbatim turned a save that changed nothing into an `invoice.edited` row
 #: recording `null -> ""` on the SOX trail (the modal's Send to ERP saves the
 #: form first). `vendor` and `invoice_number` are NOT NULL columns and
-#: `currency` has a default, so they are not in this list.
+#: `currency` is checked through `api/refusals.invoice_currency`, so they are
+#: not in this list.
 OPTIONAL_TEXT_FIELDS = (
     "payment_terms",
     "po_number",
@@ -55,7 +55,13 @@ class InvoiceBase(BaseModel):
     invoice_number: str = Field(..., max_length=100)
     # Digits match `invoices.amount` Numeric(15, 2).
     amount: Decimal = Field(..., ge=0, max_digits=15, decimal_places=2)
-    currency: CurrencyCode = "USD"
+    # Required, with no default: an omitted code used to book the invoice in
+    # USD (decisions §473). Raw here, like `InvoiceUpdate.currency`, so the
+    # create handler's `api/refusals.invoice_currency(..., creating=True)`
+    # answers an omitted, blank or malformed code with the coded 422
+    # `invoice_currency_required` / `invoice_currency_invalid` a client can
+    # state, not Pydantic's field list.
+    currency: str | None = None
     invoice_date: date | None = None
     received_date: date | None = None
     due_date: date | None = None
@@ -184,7 +190,9 @@ class InvoiceResponse(BaseModel):
     vendor_id: str | None = None
     invoice_number: str
     amount: MoneyAmount
-    currency: str
+    # `None` = currency unknown (an upload before extraction, or a document
+    # that names none). Never defaulted: clients render it without a symbol.
+    currency: str | None
     invoice_date: str | None
     received_date: str | None
     due_date: str | None
@@ -447,24 +455,6 @@ class BulkRecodeGLRequest(BaseModel):
     vendor_ids: list[str] = Field(default_factory=list)
     include_ai_fallback: bool = False
     dry_run: bool = True
-
-
-class InvoiceLineItemResponse(BaseModel):
-    id: str
-    line_number: int | None
-    item_code: str | None
-    description: str | None
-    quantity: float | None
-    # Money stays `Decimal` in Python and serialises to the same JSON number —
-    # matching what `GET /api/invoices/{id}/line-items` actually emits, which
-    # builds its dict through `schemas.money.json_money`. `quantity` above is a
-    # count, not money, so it is honestly a float.
-    unit_price: OptionalMoneyAmount
-    tax: OptionalMoneyAmount
-    total: OptionalMoneyAmount
-    gl_account: str | None
-
-    model_config = {"from_attributes": True}
 
 
 class RouteIntercompanyRequest(BaseModel):

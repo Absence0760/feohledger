@@ -9,12 +9,19 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import Money from '#lib/components/ui/Money.svelte';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { portalPaymentStatusLabelKey, PORTAL_PAYMENT_PHASES } from '#lib/types/portalStatus.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
+	import {
+		portalPaymentStatusLabelKey,
+		portalPaymentStatusTone,
+		PORTAL_PAYMENT_PHASES
+	} from '#lib/types/portalStatus.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
 	import PortalListFilters from '#lib/components/portal/PortalListFilters.svelte';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { paymentMethodLabelKey } from '#lib/types/payment.ts';
@@ -199,7 +206,7 @@
 	/>
 
 	{#if loading && !items.length}
-		<div class="loading">{m('portal.common.loading')}</div>
+		<LoadingState label={m('portal.common.loading')} />
 	{:else if loadError}
 		<LoadError message={loadError} onretry={refresh} testId="portal-payments-load-error" />
 	{:else if !items.length}
@@ -238,7 +245,9 @@
 						<td>{formatDate(p.completed_at, m('portal.common.dash'))}</td>
 						<td>{methodLabel(p.method)}</td>
 						<td class="right"><Money amount={p.amount} currency={p.currency} mono /></td>
-						<td><span class="status s-{p.status}">{m(portalPaymentStatusLabelKey(p.status))}</span></td>
+						<td><Badge tone={portalPaymentStatusTone(p.status)} variant="status-badge {p.status}"
+								>{m(portalPaymentStatusLabelKey(p.status))}</Badge
+							></td>
 						<td>{p.reference || m('portal.common.dash')}</td>
 						<td class="actions">
 							{#if p.status === 'completed'}
@@ -257,24 +266,16 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button
-					type="button"
-					class="btn-load-more"
-					onclick={() => load({ append: true })}
-					disabled={loadingMore}
-				>
-					{loadingMore
-						? m('portal.common.loading')
-						: m('portal.payments.loadMore', { shown: items.length, total })}
-				</button>
-			</div>
-		{:else if total > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('portal.payments.showingAll', { total })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			{total}
+			{hasMore}
+			loading={loadingMore}
+			onloadmore={() => load({ append: true })}
+			moreKey="portal.payments.loadMore"
+			allKey="portal.payments.showingAll"
+			loadingKey="portal.common.loading"
+		/>
 	{/if}
 </div>
 
@@ -309,30 +310,7 @@
 		opacity: 0.6;
 		cursor: default;
 	}
-	.status {
-		padding: 2px 8px;
-		border-radius: 3px;
-		font-size: 0.75rem;
-		background: var(--bg);
-		border: 1px solid var(--border);
-	}
-	.s-completed {
-		background: color-mix(in srgb, var(--success) 15%, transparent);
-		border-color: color-mix(in srgb, var(--success) 40%, transparent);
-	}
-	.s-failed {
-		background: color-mix(in srgb, var(--danger) 12%, transparent);
-		border-color: color-mix(in srgb, var(--danger) 35%, transparent);
-	}
 	.empty,
-	.loading {
-		padding: 40px;
-		text-align: center;
-		background: var(--surface);
-		border: 1px dashed var(--border);
-		border-radius: 4px;
-		color: var(--text-muted);
-	}
 	.empty .hint {
 		font-size: 0.82rem;
 	}

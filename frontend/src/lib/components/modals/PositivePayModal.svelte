@@ -31,6 +31,7 @@
 	} from '#lib/api/positivePay.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	interface RunOption {
 		id: string;
@@ -336,7 +337,7 @@
 		<div class="totals-row">
 			<div class="total-box">
 				<span class="total-label">{m('positivePay.modal.items')}</span>
-				<span class="total-value">{detail.item_count}</span>
+				<span class="total-value">{formatCount(detail.item_count)}</span>
 			</div>
 			<div class="total-box">
 				<span class="total-label">{m('positivePay.modal.totalAmount')}</span>

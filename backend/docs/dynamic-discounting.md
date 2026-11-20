@@ -66,7 +66,7 @@ bulk offer spans many invoices and has no single net due date, so for one with
 no `valid_until` either there is **nothing to accelerate against** — the APR has
 no value, not a value of zero.
 
-`_build_opportunity` used to end its due-date chain at `or pay_by`, substituting
+`build_opportunity` (`services/discount_opportunities.py`) used to end its due-date chain at `or pay_by`, substituting
 the discount deadline for the missing due date. That is `days_accelerated == 0`,
 and the object it produced contradicted itself:
 
@@ -147,6 +147,14 @@ genuinely worthwhile foreign discount from an unconstrained recommendation
 would be a functional loss, not a safety gain. Nothing is converted here — a
 rate fetched at read time would make a ranking move under the reader
 (`../../docs/decisions.md` §18).
+
+An offer whose own code is missing or malformed carries `currency: null`
+(`build_opportunity` uses `iso_currency_or_none`, never a USD fallback) and is
+unconvertible whatever `reporting_currency` is, including `None`
+(`../../docs/decisions.md` §473, round 31). An invoice-scoped offer on an
+invoice whose currency is unknown is refused at create with the 409
+`discount_offer_invoice_currency_unknown`, even when the caller names a
+currency.
 
 `services/cash_flow_plan.assemble_plan` honours the same flag: an
 `unconvertible` offer is never re-timed onto the plan's cash curve (the curve
@@ -262,7 +270,7 @@ every accept path. All four now ask one gate,
 `discount_auto_trigger.settled_invoice_status`: `POST /offers/{id}/accept` and
 the supplier portal's accept answer `409` naming the status, while the
 auto-accept sweep and the copilot's `capture-discounts` skip the offer and leave
-it `offered`. The optimizer's candidate builder (`api/discounts._build_opportunity`
+it `offered`. The optimizer's candidate builder (`discount_opportunities.build_opportunity`
 — behind `POST /optimize`, the dashboard's `projected_savings` and the copilot's
 plans) drops such an offer too, so it is never ranked, selected or summed into
 savings nobody can take. The predicate, `discount_offers.invoice_awaits_payment`, is
@@ -404,7 +412,7 @@ every place a `Payment` reaches `completed` in `app/api/payments.py`:
   savings realized on a number in dispute. See
   [payments.md](payments.md) § Settlement-amount verification.
 
-Both call the shared `_capture_discount_offers` helper →
+Both call the shared `discount_opportunities.capture_discount_offers` helper →
 `discount_capture.capture_offer_for_settled_payment`. **A payment booked with a
 discount** (`Payment.discount_offer_id`, migration 0104 — § Paying the
 discounted amount below) captures exactly that offer, for exactly
@@ -476,7 +484,7 @@ never raises on an already-`captured` offer. `mark_captured`'s own status
 guard is a second backstop against a genuine race between two settlement
 paths. **Best-effort**: the whole capture attempt (including resolving the
 invoice on the webhook leg) runs inside a try/except in
-`_capture_discount_offers` — a failure here is logged (exception class only)
+`capture_discount_offers` — a failure here is logged (exception class only)
 and swallowed, never the reason a payment that DID settle fails to record
 that it settled, or the reason a webhook delivery 5xxs and gets needlessly
 retried.
@@ -645,7 +653,7 @@ discounts are still on the table:
 | `analytics.bucket_outflows` (`discount_eligible_amount`) | same rule — **this was the outlier** |
 
 The commitment rows the forecast consumes are bounded on their DUE date only
-(`api/analytics._commitment_rows`), so an in-horizon invoice on 2/10-net-60
+(`ap_commitments.commitment_rows`), so an in-horizon invoice on 2/10-net-60
 terms routinely arrives carrying a `discount_date` that passed weeks ago.
 Counting it made `/analytics/cashflow_forecast` report a saving nobody can
 still take — and the copilot narrates off that figure. `bucket_outflows` now

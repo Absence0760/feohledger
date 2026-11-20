@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Catalog, GuidedBuyingSuggestion } from '#lib/types/catalog.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { catalogTypeLabelKey, guidedBuyingReasonLabelKey } from '#lib/types/catalog.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -393,7 +394,8 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={catalogs.length === 0}
-		empty={loading ? m('common.loading') : m('catalogs.empty')}
+		{loading}
+		empty={m('catalogs.empty')}
 	>
 		{#snippet body()}
 			{#each catalogs as c (c.id)}
@@ -428,23 +430,15 @@
 
 	<!-- Inside the success branch: under LoadError the stale rows' counts
 	     ("Load more (100 of 240)") describe a list that is not on screen. -->
-	{#if hasMore}
-		<div class="load-more-row">
-			<button
-				class="btn-load-more"
-				onclick={() => load({ append: true })}
-				disabled={loadingMore}
-			>
-				{loadingMore
-					? m('common.loading')
-					: m('catalogs.loadMore', { shown: catalogs.length, total })}
-			</button>
-		</div>
-	{:else if total > 0}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('catalogs.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={catalogs.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		onloadmore={() => load({ append: true })}
+		moreKey="catalogs.loadMore"
+		allKey="catalogs.showingAll"
+	/>
 	{/if}
 </PageHeader>
 

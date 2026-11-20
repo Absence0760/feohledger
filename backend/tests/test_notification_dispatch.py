@@ -229,3 +229,49 @@ async def test_kill_switch_suppresses_all(realdb, monkeypatch):
         await s.commit()
 
     assert await _notifications_for(mk, uploader, EVENT_INVOICE_APPROVED) == []
+
+
+async def test_paid_notification_logs_a_failed_manager_lookup_by_class(monkeypatch, caplog):
+    """A failed AP-manager lookup still notifies the uploader, and is logged by
+    exception CLASS (never the message, which may carry an address) instead of
+    silently dropping the managers."""
+    from types import SimpleNamespace
+
+    import app.services.notification_dispatch as dispatch
+    import app.services.vendor_notifications as vendor_notifications
+    from app.services import workflow_engine
+
+    secret = "manager@example.test"
+    sent: dict = {}
+
+    async def _lookup_fails(_org_id, _role):
+        raise LookupError(secret)
+
+    async def _capture(_db, **kw):
+        sent.update(kw)
+
+    async def _no_vendor(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(dispatch, "resolve_role_user_ids", _lookup_fails)
+    monkeypatch.setattr(dispatch, "notify_event", _capture)
+    monkeypatch.setattr(vendor_notifications, "notify_vendor_of_invoice_event", _no_vendor)
+
+    uploader = uuid.uuid4()
+    invoice = SimpleNamespace(
+        id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        uploaded_by_id=uploader,
+        invoice_number="INV-1",
+        vendor_name="Acme",
+        amount=Decimal("10.00"),
+        currency="USD",
+    )
+    with caplog.at_level("WARNING", logger="app.services.workflow_engine"):
+        await workflow_engine._maybe_notify_transition(
+            None, invoice, InvoiceStatus.paid, actor_id=None, details=None
+        )
+    assert sent["recipient_user_ids"] == [uploader]
+    assert "LookupError" in caplog.text
+    assert secret not in caplog.text

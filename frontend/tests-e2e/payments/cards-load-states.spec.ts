@@ -89,7 +89,7 @@ test.describe('/payments Cards table load states', () => {
 
 		const empty = page.getByTestId('cards-table').getByTestId('table-empty');
 		await expect(empty).toBeVisible({ timeout: 10_000 });
-		await expect(empty).toHaveText('Loading cards…');
+		await expect(empty).toHaveText('Loading…');
 		await expect(empty).not.toContainText('No virtual cards issued yet.');
 
 		release();

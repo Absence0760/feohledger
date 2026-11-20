@@ -92,6 +92,18 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'poTotal': 'money',
     'currency': 'currency',
   },
+  'po_billed_beyond_total': {
+    'billedAmount': 'money',
+    'poNumber': 'text',
+    'poTotal': 'money',
+    'currency': 'currency',
+  },
+  'po_billed_beyond_receipt': {
+    'totalBilled': 'money',
+    'poNumber': 'text',
+    'receivedValue': 'money',
+    'currency': 'currency',
+  },
   'po_amount_variance_po_currency_unknown': {
     'variancePct': 'percent',
     'poNumber': 'text',
@@ -165,6 +177,15 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'contractNumber': 'text',
     'spendLimit': 'money',
     'currency': 'currency',
+  },
+  'contract_currency_mismatch': {
+    'invoiceCurrency': 'text',
+    'contractNumber': 'text',
+    'contractCurrency': 'text',
+  },
+  'contract_currency_mismatch_invoice_currency_unknown': {
+    'contractNumber': 'text',
+    'contractCurrency': 'text',
   },
   'contract_gl_not_allowed': {'glAccount': 'text', 'contractNumber': 'text'},
   'self_correction_total_reconciliation': {
@@ -550,6 +571,32 @@ String? _localizeWarningCode(
         invoiceAmount,
         poTotal,
       );
+    // Other invoices already bill {billedAmount} {currency} against PO {poNumber}, whose total is {poTotal} {currency} — this invoice takes it past that total
+    case 'po_billed_beyond_total':
+      final billedAmount = _money(p['billedAmount'], currency);
+      if (billedAmount == null) return null;
+      final poNumber = _text(p['poNumber'], currency);
+      if (poNumber == null) return null;
+      final poTotal = _money(p['poTotal'], currency);
+      if (poTotal == null) return null;
+      return l.invoiceWarningPoBilledBeyondTotal(
+        billedAmount,
+        poNumber,
+        poTotal,
+      );
+    // Invoices on PO {poNumber} bill {totalBilled} {currency}, this one included; goods worth {receivedValue} {currency} have been received
+    case 'po_billed_beyond_receipt':
+      final totalBilled = _money(p['totalBilled'], currency);
+      if (totalBilled == null) return null;
+      final poNumber = _text(p['poNumber'], currency);
+      if (poNumber == null) return null;
+      final receivedValue = _money(p['receivedValue'], currency);
+      if (receivedValue == null) return null;
+      return l.invoiceWarningPoBilledBeyondReceipt(
+        totalBilled,
+        poNumber,
+        receivedValue,
+      );
     // Amount variance {variancePct}% vs PO {poNumber}, which records no currency (invoice {invoiceAmount} {currency} vs PO {poTotal})
     case 'po_amount_variance_po_currency_unknown':
       final variancePct = _percent(p['variancePct'], currency);
@@ -762,6 +809,29 @@ String? _localizeWarningCode(
         cumulativeSpend,
         contractNumber,
         spendLimit,
+      );
+    // Invoice is in {invoiceCurrency} but contract {contractNumber} is in {contractCurrency} — its spend limit was not checked
+    case 'contract_currency_mismatch':
+      final invoiceCurrency = _text(p['invoiceCurrency'], currency);
+      if (invoiceCurrency == null) return null;
+      final contractNumber = _text(p['contractNumber'], currency);
+      if (contractNumber == null) return null;
+      final contractCurrency = _text(p['contractCurrency'], currency);
+      if (contractCurrency == null) return null;
+      return l.invoiceWarningContractCurrencyMismatch(
+        invoiceCurrency,
+        contractNumber,
+        contractCurrency,
+      );
+    // The invoice records no valid currency, so the spend limit in {contractCurrency} of contract {contractNumber} was not checked
+    case 'contract_currency_mismatch_invoice_currency_unknown':
+      final contractNumber = _text(p['contractNumber'], currency);
+      if (contractNumber == null) return null;
+      final contractCurrency = _text(p['contractCurrency'], currency);
+      if (contractCurrency == null) return null;
+      return l.invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+        contractNumber,
+        contractCurrency,
       );
     // GL account {glAccount} is outside contract {contractNumber} allowed accounts
     case 'contract_gl_not_allowed':

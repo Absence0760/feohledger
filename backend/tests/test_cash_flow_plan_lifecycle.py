@@ -1781,7 +1781,7 @@ async def test_a_plan_whose_only_payable_has_no_currency_stages_nothing(realdb):
     async with mk_a() as sa:
         ent = await _default_entity_id(sa, a.org_id)
         await _seed_invoice(
-            sa, a.org_id, ent, number="CUR-ONLY-BLANK", amount="7000.00", currency=""
+            sa, a.org_id, ent, number="CUR-ONLY-BLANK", amount="7000.00", currency=None
         )
         await sa.commit()
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Budget } from '#lib/types/budget.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import {
 		BUDGET_DIMENSIONS,
 		BUDGET_DIMENSION_LABEL_KEYS,
@@ -331,7 +332,8 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={visibleBudgets.length === 0}
-		empty={loading ? m('common.loading') : m('budgets.empty')}
+		{loading}
+		empty={m('budgets.empty')}
 	>
 		{#snippet body()}
 			{#each visibleBudgets as b (b.id)}
@@ -366,23 +368,16 @@
 	</DataTable>
 	{/if}
 
-	{#if hasMore && !errored}
-		<div class="load-more-row">
-			<button
-				class="btn-load-more"
-				onclick={() => load({ append: true })}
-				disabled={loadingMore}
-			>
-				{loadingMore
-					? m('common.loading')
-					: m('budgets.loadMore', { shown: budgets.length, total })}
-			</button>
-		</div>
-	{:else if total > 0 && !errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('budgets.showingAll', { total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={budgets.length}
+		{total}
+		{hasMore}
+		loading={loadingMore}
+		{errored}
+		onloadmore={() => load({ append: true })}
+		moreKey="budgets.loadMore"
+		allKey="budgets.showingAll"
+	/>
 </PageHeader>
 
 {#if showCreate}

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { focusTrap } from '#lib/actions/focusTrap.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
 	import { api } from '#lib/api.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
@@ -58,7 +58,10 @@
 	// rounding or locale can't land in one and not the others.
 	import { formatAmountWithoutCurrency } from '#lib/utils/discountRecommendation.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { errorMessage } from '#lib/utils/apiError.ts';
+	import { formatCount } from '#lib/utils/count.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	let {
 		runId,
@@ -79,16 +82,6 @@
 		 */
 		executionMode?: PaymentExecutionMode | null;
 	} = $props();
-
-	// Freeze background page scroll while the dialog is open (restored on close),
-	// so a wheel event over the backdrop can't bleed through to the list behind it.
-	$effect(() => {
-		const prev = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
-		return () => {
-			document.body.style.overflow = prev;
-		};
-	});
 
 	interface RunPayment {
 		id: string;
@@ -536,12 +529,6 @@
 		}
 	}
 
-	function handleBackdrop(e: MouseEvent) {
-		if (e.target === e.currentTarget) onclose();
-	}
-
-	// Esc + focus trap/restore are handled by the shared `focusTrap` action.
-
 	/** Render money under the currency the SERVER stated, honestly.
 	 *
 	 *  Every money cell in this dialog goes through it. The five call sites used
@@ -571,9 +558,9 @@
 		return currency ? formatMoney(amount, { currency }) : formatAmountWithoutCurrency(amount);
 	}
 
+	// The in-app locale, not a pinned 'en-US' (a German UI read US dates here).
 	function fmtDate(s: string | null): string {
-		if (!s) return '—';
-		return new Date(s).toLocaleString('en-US', {
+		return formatDate(s, '—', {
 			month: 'short',
 			day: 'numeric',
 			year: 'numeric',
@@ -610,658 +597,657 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions -->
-<div class="backdrop" onclick={handleBackdrop} role="presentation">
-	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-modal="true" aria-label={m('paymentRuns.runDetail.dialogLabel')} tabindex="-1">
-		<header>
-			<div class="title-block">
-				<h2>{m('paymentRuns.runDetail.title')}</h2>
-				<HelpTip term="payment-run" />
-				{#if run}
-					<span class="run-id">{run.id.slice(0, 8)}</span>
-					<!-- `status-badge` is the e2e hook (tests-e2e/payments read it by
-					     class and assert on textContent); the tone comes from the
-					     shared map, never from a rule on the variant. -->
-					<Badge tone={runStatusTone(run.status)} variant="status-badge {run.status}">{runLabel(run.status)}</Badge>
+<!-- The shell (backdrop, focus trap, Esc / backdrop-click close, page-scroll
+     lock) is the shared Modal; `.run-detail-dialog` only lays out the
+     header / scrolling body / footer column below. -->
+<Modal ariaLabel={m('paymentRuns.runDetail.dialogLabel')} width="lg" class="run-detail-dialog" {onclose}>
+	<header>
+		<div class="title-block">
+			<h2>{m('paymentRuns.runDetail.title')}</h2>
+			<HelpTip term="payment-run" />
+			{#if run}
+				<span class="run-id">{run.id.slice(0, 8)}</span>
+				<!-- `status-badge` is the e2e hook (tests-e2e/payments read it by
+				     class and assert on textContent); the tone comes from the
+				     shared map, never from a rule on the variant. -->
+				<Badge tone={runStatusTone(run.status)} variant="status-badge {run.status}">{runLabel(run.status)}</Badge>
+			{/if}
+		</div>
+		<!-- `.close-btn` is an e2e hook (tests-e2e/payments/), no CSS. -->
+		<button type="button" class="btn-icon close-btn" onclick={onclose} aria-label={m('paymentRuns.runDetail.close')}>&times;</button>
+	</header>
+
+	<div class="body">
+		{#if loading}
+			<LoadingState />
+		{:else if error}
+			<div class="error" role="alert">{error}</div>
+		{:else if run}
+			<dl class="meta">
+				<dt>{m('paymentRuns.runDetail.total')}</dt>
+				<dd class="total" data-testid="run-total">{fmt(run.total_amount, run.currency)}</dd>
+				{#if run.discount_total && isPositiveAmount(run.discount_total)}
+					<!-- Already deducted from the total above: what the accepted
+					     early-payment offers save, so the CFO signing the run sees why
+					     it is below the invoices it pays. -->
+					<dt>{m('paymentRuns.runDetail.discountTotal')}</dt>
+					<dd data-testid="run-discount-total">{fmt(run.discount_total, run.currency)}</dd>
 				{/if}
-			</div>
-			<button class="close-btn" onclick={onclose} aria-label={m('paymentRuns.runDetail.close')}>&times;</button>
-		</header>
+				<dt>{m('paymentRuns.runDetail.payments')}</dt>
+				<dd>{formatCount(run.payments.length)}</dd>
+				<dt>{m('paymentRuns.runDetail.created')}</dt>
+				<dd>{fmtDate(run.created_at)}</dd>
+				{#if run.executed_at}
+					<dt>{m('paymentRuns.runDetail.executed')}</dt>
+					<dd>{fmtDate(run.executed_at)}</dd>
+				{/if}
+			</dl>
 
-		<div class="body">
-			{#if loading}
-				<div class="loading">{m('common.loading')}</div>
-			{:else if error}
-				<div class="error" role="alert">{error}</div>
-			{:else if run}
-				<dl class="meta">
-					<dt>{m('paymentRuns.runDetail.total')}</dt>
-					<dd class="total" data-testid="run-total">{fmt(run.total_amount, run.currency)}</dd>
-					{#if run.discount_total && isPositiveAmount(run.discount_total)}
-						<!-- Already deducted from the total above: what the accepted
-						     early-payment offers save, so the CFO signing the run sees why
-						     it is below the invoices it pays. -->
-						<dt>{m('paymentRuns.runDetail.discountTotal')}</dt>
-						<dd data-testid="run-discount-total">{fmt(run.discount_total, run.currency)}</dd>
-					{/if}
-					<dt>{m('paymentRuns.runDetail.payments')}</dt>
-					<dd>{run.payments.length}</dd>
-					<dt>{m('paymentRuns.runDetail.created')}</dt>
-					<dd>{fmtDate(run.created_at)}</dd>
-					{#if run.executed_at}
-						<dt>{m('paymentRuns.runDetail.executed')}</dt>
-						<dd>{fmtDate(run.executed_at)}</dd>
-					{/if}
-				</dl>
-
-				<table>
-					<thead>
+			<table>
+				<thead>
+					<tr>
+						<th>{m('paymentRuns.runDetail.colInvoice')}</th>
+						<th>{m('paymentRuns.runDetail.colVendor')}</th>
+						<th class="right">{m('paymentRuns.runDetail.colAmount')}</th>
+						<th>{m('paymentRuns.runDetail.colMethod')} <HelpTip term="payment-rail" /></th>
+						<th>{m('paymentRuns.runDetail.colStatus')}</th>
+						<th>{m('paymentRuns.runDetail.colReference')}</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each run.payments as p (p.id)}
 						<tr>
-							<th>{m('paymentRuns.runDetail.colInvoice')}</th>
-							<th>{m('paymentRuns.runDetail.colVendor')}</th>
-							<th class="right">{m('paymentRuns.runDetail.colAmount')}</th>
-							<th>{m('paymentRuns.runDetail.colMethod')} <HelpTip term="payment-rail" /></th>
-							<th>{m('paymentRuns.runDetail.colStatus')}</th>
-							<th>{m('paymentRuns.runDetail.colReference')}</th>
+							<td class="mono">{p.invoice_number ?? '—'}</td>
+							<td>{p.vendor_name ?? '—'}</td>
+							<td class="right mono" data-testid="run-payment-amount">
+								{fmt(p.amount, p.currency)}
+								{#if p.discount_amount}
+									<div class="muted" data-testid="run-payment-discount">
+										{m('paymentRuns.runDetail.rowDiscount', { amount: fmt(p.discount_amount, p.currency) })}
+									</div>
+								{/if}
+							</td>
+							<td>
+								{methodLabel(p.method)}
+								{#if isExternalPayment(p)}
+									<div class="muted" data-testid="run-payment-external">
+										{m('payments.provider.external')}
+									</div>
+								{/if}
+							</td>
+							<!-- No `?? 'neutral'`: the map is total over `PaymentStatus`,
+							     and a value off the union lands on `Badge`'s own `tone`
+							     default — which IS neutral — rather than a fallback
+							     restating it. -->
+							<td>
+								<Badge tone={PAYMENT_STATUS_TONES[p.status as PaymentStatus]} variant={p.status}>{statusLabel(p.status)}</Badge>
+							</td>
+							<td class="mono muted">{p.reference ?? '—'}</td>
 						</tr>
-					</thead>
-					<tbody>
-						{#each run.payments as p (p.id)}
-							<tr>
-								<td class="mono">{p.invoice_number ?? '—'}</td>
-								<td>{p.vendor_name ?? '—'}</td>
-								<td class="right mono" data-testid="run-payment-amount">
-									{fmt(p.amount, p.currency)}
-									{#if p.discount_amount}
-										<div class="muted" data-testid="run-payment-discount">
-											{m('paymentRuns.runDetail.rowDiscount', { amount: fmt(p.discount_amount, p.currency) })}
-										</div>
-									{/if}
-								</td>
-								<td>
-									{methodLabel(p.method)}
-									{#if isExternalPayment(p)}
-										<div class="muted" data-testid="run-payment-external">
-											{m('payments.provider.external')}
-										</div>
-									{/if}
-								</td>
-								<!-- No `?? 'neutral'`: the map is total over `PaymentStatus`,
-								     and a value off the union lands on `Badge`'s own `tone`
-								     default — which IS neutral — rather than a fallback
-								     restating it. -->
-								<td>
-									<Badge tone={PAYMENT_STATUS_TONES[p.status as PaymentStatus]} variant={p.status}>{statusLabel(p.status)}</Badge>
-								</td>
-								<td class="mono muted">{p.reference ?? '—'}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
+					{/each}
+				</tbody>
+			</table>
 
-				{#if showBankFile}
-					<section class="outside-panel" aria-labelledby="run-nacha-heading" data-testid="run-nacha-panel">
-						<div class="panel-title-row">
-							<h3 id="run-nacha-heading">{m('paymentRuns.runDetail.nachaHeading')}</h3>
-							<HelpTip term="nacha-file" />
+			{#if showBankFile}
+				<section class="outside-panel" aria-labelledby="run-nacha-heading" data-testid="run-nacha-panel">
+					<div class="panel-title-row">
+						<h3 id="run-nacha-heading">{m('paymentRuns.runDetail.nachaHeading')}</h3>
+						<HelpTip term="nacha-file" />
+					</div>
+					<p class="panel-hint">{m('paymentRuns.runDetail.nachaHint')}</p>
+					{#if showDownload}
+						<p class="panel-hint">{m('paymentRuns.runDetail.nachaClaimNote')}</p>
+					{/if}
+					{#if showDownload || confirmRegenerate}
+						<div class="panel-fields">
+							<label>
+								<span>{m('paymentRuns.runDetail.nachaEffectiveDate')}</span>
+								<input
+									type="date"
+									bind:value={nachaEffectiveDate}
+									min={todayUtc}
+									required
+									aria-invalid={!nachaDateOk}
+									aria-describedby={nachaDateOk ? undefined : 'run-nacha-date-error'}
+									data-testid="nacha-effective-date"
+								/>
+							</label>
+							<label>
+								<span>{m('paymentRuns.runDetail.nachaSecCode')}</span>
+								<select bind:value={nachaSecCode} data-testid="nacha-sec-code">
+									{#each NACHA_SEC_CODES as code (code)}
+										<option value={code}>
+											{code === 'CCD'
+												? m('paymentRuns.runDetail.nachaSecCcd')
+												: m('paymentRuns.runDetail.nachaSecPpd')}
+										</option>
+									{/each}
+								</select>
+							</label>
 						</div>
-						<p class="panel-hint">{m('paymentRuns.runDetail.nachaHint')}</p>
-						{#if showDownload}
-							<p class="panel-hint">{m('paymentRuns.runDetail.nachaClaimNote')}</p>
-						{/if}
-						{#if showDownload || confirmRegenerate}
-							<div class="panel-fields">
-								<label>
-									<span>{m('paymentRuns.runDetail.nachaEffectiveDate')}</span>
-									<input
-										type="date"
-										bind:value={nachaEffectiveDate}
-										min={todayUtc}
-										required
-										aria-invalid={!nachaDateOk}
-										aria-describedby={nachaDateOk ? undefined : 'run-nacha-date-error'}
-										data-testid="nacha-effective-date"
-									/>
-								</label>
-								<label>
-									<span>{m('paymentRuns.runDetail.nachaSecCode')}</span>
-									<select bind:value={nachaSecCode} data-testid="nacha-sec-code">
-										{#each NACHA_SEC_CODES as code (code)}
-											<option value={code}>
-												{code === 'CCD'
-													? m('paymentRuns.runDetail.nachaSecCcd')
-													: m('paymentRuns.runDetail.nachaSecPpd')}
-											</option>
-										{/each}
-									</select>
-								</label>
-							</div>
-							{#if !nachaDateOk}
-								<p class="panel-hint warn" id="run-nacha-date-error">
-									{m('paymentRuns.runDetail.nachaNotBusinessDay')}
-								</p>
-							{/if}
-						{/if}
-						{#if confirmRegenerate}
-							<!-- Announced the moment Regenerate arms: the next click
-							     produces a SECOND file for money already on its way. -->
-							<p class="panel-error" role="alert" data-testid="nacha-regenerate-warning">
-								{m('paymentRuns.runDetail.nachaRegenerateWarning')}
+						{#if !nachaDateOk}
+							<p class="panel-hint warn" id="run-nacha-date-error">
+								{m('paymentRuns.runDetail.nachaNotBusinessDay')}
 							</p>
 						{/if}
-						{#if nachaError}
-							<p class="panel-error" role="alert" data-testid="nacha-error">{nachaError}</p>
-						{/if}
-						{#if showVerify && !verifyResult}
-							<p class="panel-hint">{m('paymentRuns.runDetail.nachaVerifyHint')}</p>
-						{/if}
-						{#if verifyError}
-							<p class="panel-error" role="alert" data-testid="nacha-verify-error">{verifyError}</p>
-						{/if}
-						{#if verifyResult}
-							<div data-testid="nacha-verify-result" data-result={verifyResult.result}>
-								{#if verifyResult.result === 'verified'}
-									<p class="panel-hint" role="status">
-										{verifyResult.erp_checked
-											? m('paymentRuns.runDetail.nachaVerifyOk')
-											: m('paymentRuns.runDetail.nachaVerifyNoErp')}
-									</p>
-								{/if}
-								{#if verifyResult.removed.length > 0}
-									<p class="panel-error" role="alert">
-										{m('paymentRuns.runDetail.nachaVerifySuperseded')}
-									</p>
-									<ul class="verify-list">
-										{#each verifyResult.removed as item (item.payment_id)}
-											<li class="mono">{item.invoice_number ?? item.invoice_id}</li>
-										{/each}
-									</ul>
-									<p class="panel-hint warn">
-										{verifyResult.remaining > 0
-											? m('paymentRuns.runDetail.nachaVerifyRegenerate')
-											: m('paymentRuns.runDetail.nachaVerifyCancelled')}
-									</p>
-								{/if}
-								{#if verifyResult.held.length > 0}
-									<p class="panel-hint warn" role="status">
-										{m('paymentRuns.runDetail.nachaVerifyHeld')}
-									</p>
-									<ul class="verify-list">
-										{#each verifyResult.held as item (item.payment_id)}
-											<li class="mono">{item.invoice_number ?? item.invoice_id}</li>
-										{/each}
-									</ul>
-								{/if}
-							</div>
-						{/if}
-						{#if rejectOpen}
-							<form class="reject-form" onsubmit={(e) => { e.preventDefault(); rejectExport(); }}>
-								<p class="panel-hint">{m('paymentRuns.runDetail.nachaRejectIntro')}</p>
-								<label>
-									<span>{m('paymentRuns.runDetail.nachaRejectReason')}</span>
-									<input
-										type="text"
-										bind:value={rejectReason}
-										maxlength="500"
-										required
-										data-testid="nacha-reject-reason"
-									/>
-								</label>
-								{#if rejectError}
-									<p class="panel-error" role="alert" data-testid="nacha-reject-error">{rejectError}</p>
-								{/if}
-								<div class="panel-actions">
-									<button type="button" class="btn-cancel" onclick={() => (rejectOpen = false)}>
-										{m('common.cancel')}
-									</button>
-									<button
-										type="submit"
-										class="btn-discard armed"
-										disabled={rejecting || !rejectReason.trim()}
-										data-testid="nacha-reject-confirm"
-									>
-										{rejecting
-											? m('paymentRuns.runDetail.nachaRejecting')
-											: m('paymentRuns.runDetail.nachaRejectConfirm')}
-									</button>
-								</div>
-							</form>
-						{:else}
+					{/if}
+					{#if confirmRegenerate}
+						<!-- Announced the moment Regenerate arms: the next click
+						     produces a SECOND file for money already on its way. -->
+						<p class="panel-error" role="alert" data-testid="nacha-regenerate-warning">
+							{m('paymentRuns.runDetail.nachaRegenerateWarning')}
+						</p>
+					{/if}
+					{#if nachaError}
+						<p class="panel-error" role="alert" data-testid="nacha-error">{nachaError}</p>
+					{/if}
+					{#if showVerify && !verifyResult}
+						<p class="panel-hint">{m('paymentRuns.runDetail.nachaVerifyHint')}</p>
+					{/if}
+					{#if verifyError}
+						<p class="panel-error" role="alert" data-testid="nacha-verify-error">{verifyError}</p>
+					{/if}
+					{#if verifyResult}
+						<div data-testid="nacha-verify-result" data-result={verifyResult.result}>
+							{#if verifyResult.result === 'verified'}
+								<p class="panel-hint" role="status">
+									{verifyResult.erp_checked
+										? m('paymentRuns.runDetail.nachaVerifyOk')
+										: m('paymentRuns.runDetail.nachaVerifyNoErp')}
+								</p>
+							{/if}
+							{#if verifyResult.removed.length > 0}
+								<p class="panel-error" role="alert">
+									{m('paymentRuns.runDetail.nachaVerifySuperseded')}
+								</p>
+								<ul class="verify-list">
+									{#each verifyResult.removed as item (item.payment_id)}
+										<li class="mono">{item.invoice_number ?? item.invoice_id}</li>
+									{/each}
+								</ul>
+								<p class="panel-hint warn">
+									{verifyResult.remaining > 0
+										? m('paymentRuns.runDetail.nachaVerifyRegenerate')
+										: m('paymentRuns.runDetail.nachaVerifyCancelled')}
+								</p>
+							{/if}
+							{#if verifyResult.held.length > 0}
+								<p class="panel-hint warn" role="status">
+									{m('paymentRuns.runDetail.nachaVerifyHeld')}
+								</p>
+								<ul class="verify-list">
+									{#each verifyResult.held as item (item.payment_id)}
+										<li class="mono">{item.invoice_number ?? item.invoice_id}</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					{/if}
+					{#if rejectOpen}
+						<form class="reject-form" onsubmit={(e) => { e.preventDefault(); rejectExport(); }}>
+							<p class="panel-hint">{m('paymentRuns.runDetail.nachaRejectIntro')}</p>
+							<label>
+								<span>{m('paymentRuns.runDetail.nachaRejectReason')}</span>
+								<input
+									type="text"
+									bind:value={rejectReason}
+									maxlength="500"
+									required
+									data-testid="nacha-reject-reason"
+								/>
+							</label>
+							{#if rejectError}
+								<p class="panel-error" role="alert" data-testid="nacha-reject-error">{rejectError}</p>
+							{/if}
 							<div class="panel-actions">
-								{#if showDownload}
+								<button type="button" class="btn-cancel" onclick={() => (rejectOpen = false)}>
+									{m('common.cancel')}
+								</button>
+								<!-- Outlined, not `.armed`: this submits a form the
+								     reader opened and filled in, not the second click
+								     of a two-click confirm. -->
+								<button
+									type="submit"
+									class="btn-danger"
+									disabled={rejecting || !rejectReason.trim()}
+									data-testid="nacha-reject-confirm"
+								>
+									{rejecting
+										? m('paymentRuns.runDetail.nachaRejecting')
+										: m('paymentRuns.runDetail.nachaRejectConfirm')}
+								</button>
+							</div>
+						</form>
+					{:else}
+						<div class="panel-actions">
+							{#if showDownload}
+								<button
+									type="button"
+									class="btn-secondary"
+									disabled={downloadingNacha ||
+										!isAllowed(run.actions?.nacha_export) ||
+										!nachaDateOk}
+									aria-describedby={run.actions?.nacha_export
+										? 'run-nacha-export-refusal'
+										: undefined}
+									onclick={() => downloadBankFile(false)}
+								>
+									{downloadingNacha
+										? m('paymentRuns.runDetail.nachaDownloading')
+										: m('paymentRuns.runDetail.nachaDownload')}
+								</button>
+							{/if}
+							{#if showVerify}
+								<button
+									type="button"
+									class="btn-secondary"
+									disabled={verifying || downloadingNacha || !isAllowed(run.actions?.nacha_verify)}
+									aria-describedby={run.actions?.nacha_verify
+										? 'run-nacha-verify-refusal'
+										: undefined}
+									data-testid="nacha-verify"
+									onclick={verifyBankFile}
+								>
+									{verifying
+										? m('paymentRuns.runDetail.nachaVerifying')
+										: m('paymentRuns.runDetail.nachaVerify')}
+								</button>
+							{/if}
+							{#if showReject}
+								<button
+									type="button"
+									class="btn-danger"
+									disabled={downloadingNacha || !isAllowed(run.actions?.nacha_void)}
+									aria-describedby={run.actions?.nacha_void
+										? 'run-nacha-void-refusal'
+										: undefined}
+									data-testid="nacha-reject"
+									onclick={openReject}
+								>
+									{m('paymentRuns.runDetail.nachaReject')}
+								</button>
+							{/if}
+							{#if showRegenerate}
+								{#if confirmRegenerate}
 									<button
 										type="button"
-										class="btn-secondary"
+										class="btn-danger"
+										class:armed={isAllowed(run.actions?.nacha_regenerate) && nachaDateOk}
 										disabled={downloadingNacha ||
-											!isAllowed(run.actions?.nacha_export) ||
+											!isAllowed(run.actions?.nacha_regenerate) ||
 											!nachaDateOk}
-										aria-describedby={run.actions?.nacha_export
-											? 'run-nacha-export-refusal'
-											: undefined}
-										onclick={() => downloadBankFile(false)}
+										onclick={() => downloadBankFile(true)}
 									>
 										{downloadingNacha
 											? m('paymentRuns.runDetail.nachaDownloading')
-											: m('paymentRuns.runDetail.nachaDownload')}
+											: m('paymentRuns.runDetail.nachaConfirmRegenerate')}
 									</button>
-								{/if}
-								{#if showVerify}
+								{:else}
 									<button
 										type="button"
 										class="btn-secondary"
-										disabled={verifying || downloadingNacha || !isAllowed(run.actions?.nacha_verify)}
-										aria-describedby={run.actions?.nacha_verify
-											? 'run-nacha-verify-refusal'
+										disabled={downloadingNacha || !isAllowed(run.actions?.nacha_regenerate)}
+										aria-describedby={run.actions?.nacha_regenerate
+											? 'run-nacha-regenerate-refusal'
 											: undefined}
-										data-testid="nacha-verify"
-										onclick={verifyBankFile}
+										onclick={() => {
+											recordOpen = false;
+											confirmRegenerate = true;
+										}}
 									>
-										{verifying
-											? m('paymentRuns.runDetail.nachaVerifying')
-											: m('paymentRuns.runDetail.nachaVerify')}
+										{m('paymentRuns.runDetail.nachaRegenerate')}
 									</button>
 								{/if}
-								{#if showReject}
-									<button
-										type="button"
-										class="btn-discard"
-										disabled={downloadingNacha || !isAllowed(run.actions?.nacha_void)}
-										aria-describedby={run.actions?.nacha_void
-											? 'run-nacha-void-refusal'
-											: undefined}
-										data-testid="nacha-reject"
-										onclick={openReject}
-									>
-										{m('paymentRuns.runDetail.nachaReject')}
-									</button>
-								{/if}
-								{#if showRegenerate}
-									{#if confirmRegenerate}
-										<button
-											type="button"
-											class="btn-discard armed"
-											disabled={downloadingNacha ||
-												!isAllowed(run.actions?.nacha_regenerate) ||
-												!nachaDateOk}
-											onclick={() => downloadBankFile(true)}
-										>
-											{downloadingNacha
-												? m('paymentRuns.runDetail.nachaDownloading')
-												: m('paymentRuns.runDetail.nachaConfirmRegenerate')}
-										</button>
-									{:else}
-										<button
-											type="button"
-											class="btn-secondary"
-											disabled={downloadingNacha || !isAllowed(run.actions?.nacha_regenerate)}
-											aria-describedby={run.actions?.nacha_regenerate
-												? 'run-nacha-regenerate-refusal'
-												: undefined}
-											onclick={() => {
-												recordOpen = false;
-												confirmRegenerate = true;
-											}}
-										>
-											{m('paymentRuns.runDetail.nachaRegenerate')}
-										</button>
-									{/if}
-								{/if}
-							</div>
-							<!-- Why a control above is disabled, in the server's words
-							     (localized from its code): a colleague must export it,
-							     the CFO has not signed, the bank file is not set up. -->
-							{#if showDownload && run.actions?.nacha_export}
-								<p
-									class="panel-hint warn"
-									id="run-nacha-export-refusal"
-									data-testid="run-nacha-export-refusal"
-								>
-									{refusalText(run.actions.nacha_export, m)}
-								</p>
 							{/if}
-							{#if showVerify && run.actions?.nacha_verify}
-								<p
-									class="panel-hint warn"
-									id="run-nacha-verify-refusal"
-									data-testid="run-nacha-verify-refusal"
-								>
-									{refusalText(run.actions.nacha_verify, m)}
-								</p>
-							{/if}
-							{#if showReject && run.actions?.nacha_void}
-								<p
-									class="panel-hint warn"
-									id="run-nacha-void-refusal"
-									data-testid="run-nacha-void-refusal"
-								>
-									{refusalText(run.actions.nacha_void, m)}
-								</p>
-							{/if}
-							{#if showRegenerate && run.actions?.nacha_regenerate}
-								<p
-									class="panel-hint warn"
-									id="run-nacha-regenerate-refusal"
-									data-testid="run-nacha-regenerate-refusal"
-								>
-									{refusalText(run.actions.nacha_regenerate, m)}
-								</p>
-							{/if}
-						{/if}
-					</section>
-				{/if}
-
-				{#if showRecord}
-					<section class="outside-panel" aria-labelledby="run-record-heading" data-testid="run-record-panel">
-						<div class="panel-title-row">
-							<h3 id="run-record-heading">{m('paymentRuns.runDetail.recordHeading')}</h3>
-							<HelpTip term="record-only" />
 						</div>
-						{#if recordOpen}
-							<p class="panel-hint">{m('paymentRuns.runDetail.recordIntro')}</p>
-							<form onsubmit={(e) => { e.preventDefault(); recordRunPaid(); }}>
-								<div class="panel-fields">
-									<label>
-										<span>{m('paymentRuns.runDetail.recordReference')}</span>
-										<input
-											type="text"
-											bind:value={recordReference}
-											maxlength="255"
-											required
-											aria-describedby="run-record-reference-hint"
-											data-testid="run-record-reference"
-										/>
-									</label>
-									<label>
-										<span>{m('paymentRuns.runDetail.recordPaidOn')}</span>
-										<input
-											type="date"
-											bind:value={recordPaidOn}
-											max={todayLocal}
-											required
-											data-testid="run-record-paid-on"
-										/>
-									</label>
-								</div>
-								<p class="panel-hint" id="run-record-reference-hint">
-									{m('paymentRuns.runDetail.recordReferenceHint')}
-								</p>
-								{#if recordError}
-									<p class="panel-error" role="alert" data-testid="run-record-error">{recordError}</p>
-								{/if}
-								<div class="panel-actions">
-									<button type="button" class="btn-cancel" onclick={() => (recordOpen = false)}>
-										{m('common.cancel')}
-									</button>
-									<button
-										type="submit"
-										class="btn-approve"
-										disabled={recordingRun ||
-											!isAllowed(run.actions?.record_outside) ||
-											!recordReference.trim() ||
-											!recordPaidOn ||
-											recordPaidOn > todayLocal}
-										data-testid="run-record-confirm"
-									>
-										{recordingRun
-											? m('paymentRuns.runDetail.recordSubmitting')
-											: m('paymentRuns.runDetail.recordSubmit', {
-													amount: fmt(run.total_amount, run.currency)
-												})}
-									</button>
-								</div>
-							</form>
-						{:else}
+						<!-- Why a control above is disabled, in the server's words
+						     (localized from its code): a colleague must export it,
+						     the CFO has not signed, the bank file is not set up. -->
+						{#if showDownload && run.actions?.nacha_export}
+							<p
+								class="panel-hint warn"
+								id="run-nacha-export-refusal"
+								data-testid="run-nacha-export-refusal"
+							>
+								{refusalText(run.actions.nacha_export, m)}
+							</p>
+						{/if}
+						{#if showVerify && run.actions?.nacha_verify}
+							<p
+								class="panel-hint warn"
+								id="run-nacha-verify-refusal"
+								data-testid="run-nacha-verify-refusal"
+							>
+								{refusalText(run.actions.nacha_verify, m)}
+							</p>
+						{/if}
+						{#if showReject && run.actions?.nacha_void}
+							<p
+								class="panel-hint warn"
+								id="run-nacha-void-refusal"
+								data-testid="run-nacha-void-refusal"
+							>
+								{refusalText(run.actions.nacha_void, m)}
+							</p>
+						{/if}
+						{#if showRegenerate && run.actions?.nacha_regenerate}
+							<p
+								class="panel-hint warn"
+								id="run-nacha-regenerate-refusal"
+								data-testid="run-nacha-regenerate-refusal"
+							>
+								{refusalText(run.actions.nacha_regenerate, m)}
+							</p>
+						{/if}
+					{/if}
+				</section>
+			{/if}
+
+			{#if showRecord}
+				<section class="outside-panel" aria-labelledby="run-record-heading" data-testid="run-record-panel">
+					<div class="panel-title-row">
+						<h3 id="run-record-heading">{m('paymentRuns.runDetail.recordHeading')}</h3>
+						<HelpTip term="record-only" />
+					</div>
+					{#if recordOpen}
+						<p class="panel-hint">{m('paymentRuns.runDetail.recordIntro')}</p>
+						<form onsubmit={(e) => { e.preventDefault(); recordRunPaid(); }}>
+							<div class="panel-fields">
+								<label>
+									<span>{m('paymentRuns.runDetail.recordReference')}</span>
+									<input
+										type="text"
+										bind:value={recordReference}
+										maxlength="255"
+										required
+										aria-describedby="run-record-reference-hint"
+										data-testid="run-record-reference"
+									/>
+								</label>
+								<label>
+									<span>{m('paymentRuns.runDetail.recordPaidOn')}</span>
+									<input
+										type="date"
+										bind:value={recordPaidOn}
+										max={todayLocal}
+										required
+										data-testid="run-record-paid-on"
+									/>
+								</label>
+							</div>
+							<p class="panel-hint" id="run-record-reference-hint">
+								{m('paymentRuns.runDetail.recordReferenceHint')}
+							</p>
+							{#if recordError}
+								<p class="panel-error" role="alert" data-testid="run-record-error">{recordError}</p>
+							{/if}
 							<div class="panel-actions">
-								<!-- Once the file is out, recording the run is THE next step,
-								     so it becomes the primary control. -->
+								<button type="button" class="btn-cancel" onclick={() => (recordOpen = false)}>
+									{m('common.cancel')}
+								</button>
 								<button
-									type="button"
-									class={fileOut ? 'btn-approve' : 'btn-secondary'}
-									disabled={executing ||
-										cancelling ||
-										downloadingNacha ||
-										rejecting ||
-										!isAllowed(run.actions?.record_outside)}
-									aria-describedby={run.actions?.record_outside
-										? 'run-record-refusal'
-										: undefined}
-									onclick={openRecord}
+									type="submit"
+									class="btn-primary"
+									disabled={recordingRun ||
+										!isAllowed(run.actions?.record_outside) ||
+										!recordReference.trim() ||
+										!recordPaidOn ||
+										recordPaidOn > todayLocal}
+									data-testid="run-record-confirm"
 								>
-									{m('paymentRuns.runDetail.recordOpen')}
+									{recordingRun
+										? m('paymentRuns.runDetail.recordSubmitting')
+										: m('paymentRuns.runDetail.recordSubmit', {
+												amount: fmt(run.total_amount, run.currency)
+											})}
 								</button>
 							</div>
-							{#if run.actions?.record_outside}
-								<p class="panel-hint warn" id="run-record-refusal" data-testid="run-record-refusal">
-									{refusalText(run.actions.record_outside, m)}
-								</p>
-							{/if}
+						</form>
+					{:else}
+						<div class="panel-actions">
+							<!-- Once the file is out, recording the run is THE next step,
+							     so it becomes the primary control. -->
+							<button
+								type="button"
+								class={fileOut ? 'btn-primary' : 'btn-secondary'}
+								disabled={executing ||
+									cancelling ||
+									downloadingNacha ||
+									rejecting ||
+									!isAllowed(run.actions?.record_outside)}
+								aria-describedby={run.actions?.record_outside
+									? 'run-record-refusal'
+									: undefined}
+								onclick={openRecord}
+							>
+								{m('paymentRuns.runDetail.recordOpen')}
+							</button>
+						</div>
+						{#if run.actions?.record_outside}
+							<p class="panel-hint warn" id="run-record-refusal" data-testid="run-record-refusal">
+								{refusalText(run.actions.record_outside, m)}
+							</p>
 						{/if}
-					</section>
-				{/if}
+					{/if}
+				</section>
 			{/if}
-		</div>
+		{/if}
+	</div>
 
-		<footer>
-			{#if run?.status === 'draft'}
-				{@const pendingCfo = run.requires_cfo_approval && !run.cfo_approved_at}
-				{@const cfoApproved = run.requires_cfo_approval && !!run.cfo_approved_at}
+	<footer>
+		{#if run?.status === 'draft'}
+			{@const pendingCfo = run.requires_cfo_approval && !run.cfo_approved_at}
+			{@const cfoApproved = run.requires_cfo_approval && !!run.cfo_approved_at}
 
-				{#if pendingCfo}
-					<p class="footer-note pending">
-						<strong>{m('paymentRuns.runDetail.pendingCfoStrong')}</strong> {m('paymentRuns.runDetail.pendingCfoBody')}
-						<HelpTip term="cfo-gate" />
-					</p>
-				{:else if cfoApproved}
-					<p class="footer-note approved">
-						{m('paymentRuns.runDetail.cfoApprovedNote', { date: fmtDate(run.cfo_approved_at) })}
-					</p>
-				{:else if executionMode === 'record_only'}
-					<p class="footer-note" data-testid="run-record-only-note">
-						{m('paymentRuns.runDetail.recordOnlyNote')}
-					</p>
-				{:else}
-					<p class="footer-note">
-						{m('paymentRuns.runDetail.draftNotePre')}<strong>{m('paymentRuns.runDetail.draftWord')}</strong>{m('paymentRuns.runDetail.draftNotePost')}
-					</p>
+			{#if pendingCfo}
+				<p class="footer-note pending">
+					<strong>{m('paymentRuns.runDetail.pendingCfoStrong')}</strong> {m('paymentRuns.runDetail.pendingCfoBody')}
+					<HelpTip term="cfo-gate" />
+				</p>
+			{:else if cfoApproved}
+				<p class="footer-note approved">
+					{m('paymentRuns.runDetail.cfoApprovedNote', { date: fmtDate(run.cfo_approved_at) })}
+				</p>
+			{:else if executionMode === 'record_only'}
+				<p class="footer-note" data-testid="run-record-only-note">
+					{m('paymentRuns.runDetail.recordOnlyNote')}
+				</p>
+			{:else}
+				<p class="footer-note">
+					{m('paymentRuns.runDetail.draftNotePre')}<strong>{m('paymentRuns.runDetail.draftWord')}</strong>{m('paymentRuns.runDetail.draftNotePost')}
+				</p>
+			{/if}
+
+			{#if confirmExecute}
+				<!-- Announced (role="alert") the moment Execute arms, so a
+				     screen-reader user learns the next click moves money
+				     without having to re-read the button. -->
+				<p class="footer-note armed-note" role="alert" data-testid="execute-armed-note">
+					{m('paymentRuns.runDetail.executeArmedNote', {
+						amount: fmt(run.total_amount, run.currency)
+					})}
+				</p>
+			{/if}
+
+			<div class="actions">
+				<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
+				{#if confirmCancel}
+					<button
+						class="btn-danger armed"
+						disabled={cancelling}
+						onclick={cancelDraft}
+					>
+						{cancelling ? m('paymentRuns.runDetail.cancelling') : m('paymentRuns.runDetail.confirmCancel')}
+					</button>
+				{:else if isOffered(run.actions?.cancel)}
+					<button
+						class="btn-danger"
+						disabled={cancelling || executing || approving || !isAllowed(run.actions?.cancel)}
+						onclick={() => arm('cancel')}
+					>
+						{m('paymentRuns.runDetail.cancelRun')}
+					</button>
 				{/if}
-
-				{#if confirmExecute}
-					<!-- Announced (role="alert") the moment Execute arms, so a
-					     screen-reader user learns the next click moves money
-					     without having to re-read the button. -->
-					<p class="footer-note armed-note" role="alert" data-testid="execute-armed-note">
-						{m('paymentRuns.runDetail.executeArmedNote', {
-							amount: fmt(run.total_amount, run.currency)
+				<!-- The server's verdict (`actions.approve`), never a role check
+				     here: the sign-off is `require_roles(ROLE_CFO)` (an admin is
+				     not a CFO — a sign-off one can grant themselves is not a
+				     sign-off), and maker-checker refuses the CFO who CREATED the
+				     run. That CFO used to see an enabled "Approve as CFO" that
+				     could only 403; they now see it disabled, with the reason.
+				     `pendingCfo` decides only whether the run HAS a CFO step to
+				     render a control for — a run that needs no sign-off shows no
+				     disabled "Approve as CFO"; whether it may be pressed is the
+				     verdict alone. -->
+				{#if pendingCfo && isOffered(run.actions?.approve)}
+					<button
+						class="btn-primary"
+						disabled={approving || !isAllowed(run.actions?.approve)}
+						aria-describedby={run.actions?.approve ? 'run-approve-refusal' : undefined}
+						onclick={approveCfo}
+					>
+						{approving ? m('paymentRuns.runDetail.approving') : m('paymentRuns.runDetail.approveAsCfo')}
+					</button>
+				{/if}
+				<!-- Execute only where FeohLedger actually sends payments. On a
+				     record-only tenant (or before the mode is known — fail
+				     closed) it is not rendered at all: the server would refuse it
+				     with `payments_record_only`, and the record path above is the
+				     way to `paid`. -->
+				{#if showExecute}
+					{#if confirmExecute}
+						<!-- Armed. The label is deliberately DISTINCT from the
+						     unarmed one ("Confirm execute · …" vs "Execute · …")
+						     so the change is announced to a screen reader, and so
+						     a test can wait on the armed control by name instead
+						     of on a timer. -->
+						<button
+							class="btn-primary"
+							class:armed={isAllowed(run.actions?.execute)}
+							disabled={executing || cancelling || !isAllowed(run.actions?.execute)}
+							aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
+							onclick={execute}
+						>
+							{executing
+								? m('paymentRuns.runDetail.executing')
+								: m('paymentRuns.runDetail.confirmExecuteAmount', {
+										amount: fmt(run.total_amount, run.currency)
+									})}
+						</button>
+					{:else}
+						<!-- Secondary while the CFO sign-off is pending: that
+						     sign-off is then the footer's one lead action, and
+						     Execute cannot run before it anyway. -->
+						<button
+							class={pendingCfo ? 'btn-secondary' : 'btn-primary'}
+							disabled={executing || cancelling || !isAllowed(run.actions?.execute) || recordingRun}
+							aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
+							title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}
+							onclick={() => {
+								recordOpen = false;
+								arm('execute');
+							}}
+						>
+							{m('paymentRuns.runDetail.executeAmount', {
+								amount: fmt(run.total_amount, run.currency)
+							})}
+						</button>
+					{/if}
+				{/if}
+			</div>
+			<!-- Why a control above is disabled, in the server's own words
+			     (localized from its code) — e.g. a colleague must sign off or
+			     execute a run this reader created. -->
+			{#if pendingCfo && isOffered(run.actions?.approve) && run.actions?.approve}
+				<p class="footer-note" id="run-approve-refusal" data-testid="run-approve-refusal">
+					{refusalText(run.actions.approve, m)}
+				</p>
+			{/if}
+			{#if showExecute && executeRefusal}
+				<p class="footer-note" id="run-execute-refusal" data-testid="run-execute-refusal">
+					{refusalText(executeRefusal, m)}
+				</p>
+			{/if}
+		{:else if run?.status === 'exported'}
+			<!-- Claimed by its bank file: no Execute, no Cancel run. The two
+			     exits — record as paid, or the bank rejected the file — are
+			     in the panels above. -->
+			<p class="footer-note" data-testid="run-exported-note">
+				{m('paymentRuns.runDetail.exportedNote')}
+			</p>
+			<div class="actions">
+				<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
+			</div>
+		{:else}
+			{#if retryResult}
+				<div class="footer-note" role="status" data-testid="run-retry-result">
+					<p>
+						{m('paymentRuns.runDetail.retryResult', {
+							retried: retryResult.payments_retried,
+							skipped: retryResult.payments_skipped
 						})}
 					</p>
-				{/if}
-
-				<div class="actions">
-					<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
-					{#if confirmCancel}
-						<button
-							class="btn-discard armed"
-							disabled={cancelling}
-							onclick={cancelDraft}
-						>
-							{cancelling ? m('paymentRuns.runDetail.cancelling') : m('paymentRuns.runDetail.confirmCancel')}
-						</button>
-					{:else if isOffered(run.actions?.cancel)}
-						<button
-							class="btn-discard"
-							disabled={cancelling || executing || approving || !isAllowed(run.actions?.cancel)}
-							onclick={() => arm('cancel')}
-						>
-							{m('paymentRuns.runDetail.cancelRun')}
-						</button>
-					{/if}
-					<!-- The server's verdict (`actions.approve`), never a role check
-					     here: the sign-off is `require_roles(ROLE_CFO)` (an admin is
-					     not a CFO — a sign-off one can grant themselves is not a
-					     sign-off), and maker-checker refuses the CFO who CREATED the
-					     run. That CFO used to see an enabled "Approve as CFO" that
-					     could only 403; they now see it disabled, with the reason.
-					     `pendingCfo` decides only whether the run HAS a CFO step to
-					     render a control for — a run that needs no sign-off shows no
-					     disabled "Approve as CFO"; whether it may be pressed is the
-					     verdict alone. -->
-					{#if pendingCfo && isOffered(run.actions?.approve)}
-						<button
-							class="btn-approve"
-							disabled={approving || !isAllowed(run.actions?.approve)}
-							aria-describedby={run.actions?.approve ? 'run-approve-refusal' : undefined}
-							onclick={approveCfo}
-						>
-							{approving ? m('paymentRuns.runDetail.approving') : m('paymentRuns.runDetail.approveAsCfo')}
-						</button>
-					{/if}
-					<!-- Execute only where FeohLedger actually sends payments. On a
-					     record-only tenant (or before the mode is known — fail
-					     closed) it is not rendered at all: the server would refuse it
-					     with `payments_record_only`, and the record path above is the
-					     way to `paid`. -->
-					{#if showExecute}
-						{#if confirmExecute}
-							<!-- Armed. The label is deliberately DISTINCT from the
-							     unarmed one ("Confirm execute · …" vs "Execute · …")
-							     so the change is announced to a screen reader, and so
-							     a test can wait on the armed control by name instead
-							     of on a timer. -->
-							<button
-								class="btn-execute armed"
-								disabled={executing || cancelling || !isAllowed(run.actions?.execute)}
-								aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
-								onclick={execute}
-							>
-								{executing
-									? m('paymentRuns.runDetail.executing')
-									: m('paymentRuns.runDetail.confirmExecuteAmount', {
-											amount: fmt(run.total_amount, run.currency)
-										})}
-							</button>
-						{:else}
-							<button
-								class="btn-execute"
-								disabled={executing || cancelling || !isAllowed(run.actions?.execute) || recordingRun}
-								aria-describedby={executeRefusal ? 'run-execute-refusal' : undefined}
-								title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}
-								onclick={() => {
-									recordOpen = false;
-									arm('execute');
-								}}
-							>
-								{m('paymentRuns.runDetail.executeAmount', {
-									amount: fmt(run.total_amount, run.currency)
-								})}
-							</button>
-						{/if}
+					{#if retryResult.skip_reasons.length > 0}
+						<p>{m('paymentRuns.runDetail.retrySkippedHeading')}</p>
+						<ul class="retry-skips">
+							{#each retryResult.skip_reasons as reason (reason)}
+								<li>{skipLabel(reason)}</li>
+							{/each}
+						</ul>
 					{/if}
 				</div>
-				<!-- Why a control above is disabled, in the server's own words
-				     (localized from its code) — e.g. a colleague must sign off or
-				     execute a run this reader created. -->
-				{#if pendingCfo && isOffered(run.actions?.approve) && run.actions?.approve}
-					<p class="footer-note" id="run-approve-refusal" data-testid="run-approve-refusal">
-						{refusalText(run.actions.approve, m)}
-					</p>
-				{/if}
-				{#if showExecute && executeRefusal}
-					<p class="footer-note" id="run-execute-refusal" data-testid="run-execute-refusal">
-						{refusalText(executeRefusal, m)}
-					</p>
-				{/if}
-			{:else if run?.status === 'exported'}
-				<!-- Claimed by its bank file: no Execute, no Cancel run. The two
-				     exits — record as paid, or the bank rejected the file — are
-				     in the panels above. -->
-				<p class="footer-note" data-testid="run-exported-note">
-					{m('paymentRuns.runDetail.exportedNote')}
-				</p>
-				<div class="actions">
-					<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
-				</div>
-			{:else}
-				{#if retryResult}
-					<div class="footer-note" role="status" data-testid="run-retry-result">
-						<p>
-							{m('paymentRuns.runDetail.retryResult', {
-								retried: retryResult.payments_retried,
-								skipped: retryResult.payments_skipped
-							})}
-						</p>
-						{#if retryResult.skip_reasons.length > 0}
-							<p>{m('paymentRuns.runDetail.retrySkippedHeading')}</p>
-							<ul class="retry-skips">
-								{#each retryResult.skip_reasons as reason (reason)}
-									<li>{skipLabel(reason)}</li>
-								{/each}
-							</ul>
-						{/if}
-					</div>
-				{/if}
-				{#if showRetry && confirmRetry}
-					<!-- Announced the moment Retry arms: the next click sends money. -->
-					<p class="footer-note armed-note" role="alert" data-testid="retry-armed-note">
-						{m('paymentRuns.runDetail.retryArmedNote', { count: run?.retryable_failures ?? 0 })}
-					</p>
-				{/if}
-				<div class="actions">
-					<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
-					<!-- The server's verdict (`actions.retry_failed`), never a status
-					     or role check here. Disabled with the reason when the reader
-					     can act on it (a colleague must retry a run this reader
-					     created; CFO sign-off is pending; every failure must be
-					     reconciled first); hidden for a role refusal or a run that did
-					     not finish with failures. -->
-					{#if showRetry}
-						{#if confirmRetry}
-							<button
-								class="btn-execute armed"
-								disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
-								onclick={retryFailed}
-							>
-								{retrying
-									? m('paymentRuns.runDetail.retrying')
-									: m('paymentRuns.runDetail.confirmRetryFailed')}
-							</button>
-						{:else}
-							<button
-								class="btn-execute"
-								disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
-								aria-describedby={run?.actions?.retry_failed ? 'run-retry-refusal' : undefined}
-								onclick={() => (confirmRetry = true)}
-							>
-								{m('paymentRuns.runDetail.retryFailed')}
-							</button>
-						{/if}
-					{/if}
-				</div>
-				{#if showRetry && run?.actions?.retry_failed}
-					<p class="footer-note" id="run-retry-refusal" data-testid="run-retry-refusal">
-						{refusalText(run.actions.retry_failed, m)}
-					</p>
-				{/if}
 			{/if}
-		</footer>
-	</div>
-</div>
+			{#if showRetry && confirmRetry}
+				<!-- Announced the moment Retry arms: the next click sends money. -->
+				<p class="footer-note armed-note" role="alert" data-testid="retry-armed-note">
+					{m('paymentRuns.runDetail.retryArmedNote', { count: run?.retryable_failures ?? 0 })}
+				</p>
+			{/if}
+			<div class="actions">
+				<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
+				<!-- The server's verdict (`actions.retry_failed`), never a status
+				     or role check here. Disabled with the reason when the reader
+				     can act on it (a colleague must retry a run this reader
+				     created; CFO sign-off is pending; every failure must be
+				     reconciled first); hidden for a role refusal or a run that did
+				     not finish with failures. -->
+				{#if showRetry}
+					{#if confirmRetry}
+						<button
+							class="btn-primary"
+							class:armed={isAllowed(run?.actions?.retry_failed)}
+							disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
+							onclick={retryFailed}
+						>
+							{retrying
+								? m('paymentRuns.runDetail.retrying')
+								: m('paymentRuns.runDetail.confirmRetryFailed')}
+						</button>
+					{:else}
+						<button
+							class="btn-primary"
+							disabled={retrying || !isAllowed(run?.actions?.retry_failed)}
+							aria-describedby={run?.actions?.retry_failed ? 'run-retry-refusal' : undefined}
+							onclick={() => (confirmRetry = true)}
+						>
+							{m('paymentRuns.runDetail.retryFailed')}
+						</button>
+					{/if}
+				{/if}
+			</div>
+			{#if showRetry && run?.actions?.retry_failed}
+				<p class="footer-note" id="run-retry-refusal" data-testid="run-retry-refusal">
+					{refusalText(run.actions.retry_failed, m)}
+				</p>
+			{/if}
+		{/if}
+	</footer>
+</Modal>
 
 <style>
-	.backdrop {
-		position: fixed;
-		inset: 0;
-		background: var(--overlay);
-		display: grid;
-		place-items: center;
-		z-index: 100;
-		backdrop-filter: blur(2px);
-	}
-
-	.modal {
+	:global(.modal.run-detail-dialog) {
 		background: var(--surface);
 		border: 1px solid var(--border);
 		border-radius: 8px;
-		width: min(820px, 95vw);
 		max-height: 90vh;
 		display: flex;
 		flex-direction: column;
@@ -1294,27 +1280,12 @@
 		color: var(--text-muted);
 	}
 
-	.close-btn {
-		background: none;
-		border: none;
-		font-size: 1.5rem;
-		cursor: pointer;
-		color: var(--text-muted);
-		line-height: 1;
-		padding: 0 4px;
-	}
-
-	.close-btn:hover {
-		color: var(--text);
-	}
-
 	.body {
 		padding: 20px;
 		overflow-y: auto;
 		flex: 1;
 	}
 
-	.loading,
 	.error {
 		padding: 40px;
 		text-align: center;
@@ -1434,82 +1405,9 @@
 		gap: 8px;
 	}
 
-	.btn-cancel {
-		padding: 8px 16px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-cancel:hover {
-		background: var(--bg);
-	}
-
-	.btn-execute {
-		padding: 8px 20px;
-		border-radius: 4px;
-		border: none;
-		background: var(--success-strong);
-		color: #fff;
-		font-size: 0.88rem;
-		font-weight: 600;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-execute:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	.btn-execute:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	/* Armed: the next click moves money. Reads as a warning, not as the
-	   calm green "ready" state, and mirrors how `.btn-discard.armed`
-	   changes appearance one step before it commits. */
-	.btn-execute.armed {
-		/* --danger-strong, not --danger: this is a fill carrying white text
-		   (5.37:1), the same call `app.css` records for every red fill. */
-		background: var(--danger-strong);
-		box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 30%, transparent);
-	}
-
 	.footer-note.armed-note {
 		color: var(--danger);
 		font-weight: 600;
-	}
-
-	.btn-discard {
-		padding: 8px 16px;
-		border-radius: 4px;
-		border: 1px solid var(--border);
-		background: var(--surface);
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-discard:hover:not(:disabled):not(.armed) {
-		border-color: var(--danger);
-		color: var(--danger);
-	}
-
-	.btn-discard.armed {
-		border-color: var(--danger);
-		background: color-mix(in srgb, var(--danger) 10%, transparent);
-		color: var(--danger);
-	}
-
-	.btn-discard:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	/* --- Paying the run outside FeohLedger --- */
@@ -1586,29 +1484,6 @@
 		margin-top: 10px;
 	}
 
-	.btn-secondary {
-		padding: 8px 16px;
-		border-radius: 4px;
-		/* --accent for text on the surface (--accent-strong is a FILL token only,
-		   and fails 4.5:1 as text on --surface — app.css). */
-		border: 1px solid var(--accent);
-		background: var(--surface);
-		color: var(--accent);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-secondary:hover:not(:disabled) {
-		background: var(--bg);
-	}
-
-	.btn-secondary:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
 	.footer-note.pending {
 		color: var(--warning);
 	}
@@ -1617,24 +1492,4 @@
 		color: var(--success);
 	}
 
-	.btn-approve {
-		padding: 8px 16px;
-		border-radius: 4px;
-		border: 1px solid var(--accent-strong);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	.btn-approve:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-
-	.btn-approve:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
 </style>

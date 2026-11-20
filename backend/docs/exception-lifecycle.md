@@ -8,7 +8,7 @@ both humans and agents run on.
 ## Why an exception is a control, not a note
 
 Six exception types block a payment run outright —
-`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`:
+`services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`:
 
 | Type | Raised by |
 |---|---|
@@ -24,7 +24,7 @@ human sign-off that lets the money move — the last control between a flagged
 payable and a funded payment run.
 
 Two of them, `duplicate` and `fraud_flag`
-(`api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`), also refuse the **ERP
+(`services/payment_gates.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`), also refuse the **ERP
 push** while open or escalated: a bill in the ERP can be paid from inside the
 ERP, where the payment-run gate never sees it. Clearing one is then also what
 lets the invoice post ([erp-integration.md](erp-integration.md) § An open
@@ -138,7 +138,7 @@ groups that exception's raise / assign / resolve rows together.
 ```
 
 - **`payment_blocking`** is derived from
-  `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES` at write time
+  `services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES` at write time
   (`exception_lifecycle.is_payment_blocking`), never a second hardcoded list —
   add a type to the gate and the trail follows. It is what tells an auditor
   this decision unblocked money.
@@ -278,7 +278,7 @@ their own queue.
 beside the rest of an exception's behaviour (payment-blocking, actionable,
 auditable). Two things key off it:
 
-- `api/exceptions.EXCEPTION_TYPE_LABELS` must cover it **exactly**. A missing
+- `services/exception_lifecycle.EXCEPTION_TYPE_LABELS` must cover it **exactly**. A missing
   entry isn't a crash — the lookup falls back to the raw key — so the queue just
   renders `line_total_mismatch` at an AP manager instead of "Line Total
   Mismatch". That matters most for exactly the types it kept happening to:

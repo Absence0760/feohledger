@@ -15,14 +15,6 @@ enum ContractStatus {
     );
   }
 
-  String get label => switch (this) {
-    ContractStatus.draft => 'Draft',
-    ContractStatus.active => 'Active',
-    ContractStatus.expired => 'Expired',
-    ContractStatus.terminated => 'Terminated',
-    ContractStatus.cancelled => 'Cancelled',
-  };
-
   // Each lifecycle action is offered only from a state the backend accepts it
   // in — `_LIFECYCLE_TRANSITIONS` in backend/app/api/contracts.py — gated the
   // same way as the web ContractModal. The backend also admits activate /
@@ -66,16 +58,6 @@ enum ContractType {
     );
   }
 
-  String get label => switch (this) {
-    ContractType.purchase => 'Purchase',
-    ContractType.service => 'Service',
-    ContractType.subscription => 'Subscription',
-    ContractType.lease => 'Lease',
-    ContractType.sla => 'SLA',
-    ContractType.msa => 'MSA',
-    ContractType.sow => 'SOW',
-    ContractType.other => 'Other',
-  };
 }
 
 class ContractLineItem {

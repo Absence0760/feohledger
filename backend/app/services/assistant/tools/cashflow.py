@@ -4,7 +4,7 @@ what-if, and the Phase 2 proposed-plan action.
 Finance-leader-only reads (``ToolSpec.allowed_roles`` — enforced by the
 orchestrator's ``run_tool``). Every figure comes from the pure functions in
 ``services.analytics`` over the same commitment rows the CFO dashboard uses
-(``app/api/analytics.py::_commitment_rows``); money stays ``Decimal`` end to
+(``services/ap_commitments.commitment_rows``); money stays ``Decimal`` end to
 end and serializes as an exact JSON string — these tools deliberately do NOT
 inherit the analytics HTTP endpoints' ``float()`` chart coercion. The LLM
 never computes a number. See ``docs/cash-flow-copilot.md``.
@@ -17,8 +17,6 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import _commitment_rows
-from app.api.discounts import _name_maps
 from app.config import settings
 from app.models.organization import Organization
 from app.services.analytics import (
@@ -26,6 +24,7 @@ from app.services.analytics import (
     bucket_outflows,
     compute_cash_position,
 )
+from app.services.ap_commitments import commitment_rows
 from app.services.assistant.tools._currency import resolve_org_currency
 from app.services.assistant.tools.optimizer import (
     build_discount_recommendations,
@@ -51,6 +50,7 @@ from app.services.cashflow import (
     resolve_cash_thresholds,
     resolve_opening_balance,
 )
+from app.services.discount_opportunities import name_maps
 from app.utils.dates import utc_today
 
 _ZERO = Decimal("0")
@@ -105,7 +105,7 @@ async def get_cashflow_forecast(
 ) -> CashflowForecastResult:
     today = utc_today()
     horizon_days = _horizon(params.horizon_days)
-    rows = await _commitment_rows(
+    rows = await commitment_rows(
         db,
         today=today,
         horizon_days=horizon_days,
@@ -170,7 +170,7 @@ async def get_cash_position(
 ) -> CashPositionResult:
     today = utc_today()
     horizon_days = _horizon(params.horizon_days)
-    rows = await _commitment_rows(
+    rows = await commitment_rows(
         db,
         today=today,
         horizon_days=horizon_days,
@@ -244,7 +244,7 @@ async def run_payment_whatif(
 ) -> PaymentWhatifResult:
     today = utc_today()
     horizon_days = _horizon(params.horizon_days)
-    rows = await _commitment_rows(
+    rows = await commitment_rows(
         db,
         today=today,
         horizon_days=horizon_days,
@@ -309,7 +309,7 @@ async def propose_payment_plan(
     dashboard would for equivalent inputs."""
     today = utc_today()
     horizon_days = _horizon(params.horizon_days)
-    rows = await _commitment_rows(
+    rows = await commitment_rows(
         db,
         today=today,
         horizon_days=horizon_days,
@@ -336,7 +336,7 @@ async def propose_payment_plan(
         cost_of_capital_pct=params.cost_of_capital_pct,
         today=today,
     )
-    vmap, imap = await _name_maps(db, offers)
+    vmap, imap = await name_maps(db, offers)
     recommendations = build_discount_recommendations(optimizer_result, offers, vmap, imap)
 
     plan = assemble_plan(

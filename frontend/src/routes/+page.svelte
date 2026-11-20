@@ -34,8 +34,10 @@
 	} from '#lib/utils/dashboardPartials.ts';
 	import type { DashboardData } from '#lib/types/analytics.ts';
 	import { currentLocale, m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { firstName, greetingKey, localDateKey } from '#lib/utils/greeting.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 
 	// The response shape lives in `#lib/types/analytics.ts` (`DashboardData`,
 	// `ReportingAgingBuckets`, `AgingBuckets`) rather than here. Declared
@@ -275,7 +277,7 @@
 			<div class="setup-head">
 				<h2 id="dashboard-setup-heading">{m('dashboard.setup.heading')}</h2>
 				<p class="setup-progress" data-testid="dashboard-setup-progress">
-					{m('dashboard.setup.progress', { done: setupCount.done, total: setupCount.total })}
+					{m('dashboard.setup.progress', { done: formatCount(setupCount.done), total: formatCount(setupCount.total) })}
 				</p>
 			</div>
 			<p class="setup-intro">{m('dashboard.setup.intro')}</p>
@@ -412,7 +414,7 @@
 		     names it, and a stand-in ("this entity") that is then swapped for
 		     the real name is a flash, not a state (#635). The KPI row above is
 		     unaffected — it hands off on `data` alone (decisions §125/§154). -->
-		<p class="loading">{m('common.loading')}</p>
+		<LoadingState testId="dashboard-loading" />
 	{:else if isEmptyEntity}
 		<!-- An established workspace, a subsidiary with nothing in it yet. -->
 		<EmptyState
@@ -468,7 +470,7 @@
 							<div class="pipeline-bar-bg">
 								<div class="pipeline-bar" data-status={status} style="width:{pct}%"></div>
 							</div>
-							<span class="pipeline-count">{count}</span>
+							<span class="pipeline-count">{formatCount(count)}</span>
 						</div>
 					{/each}
 				</div>
@@ -730,10 +732,6 @@
 	}
 	.title-row h2 {
 		margin: 0;
-	}
-
-	.loading {
-		color: var(--text-muted);
 	}
 
 	.empty {

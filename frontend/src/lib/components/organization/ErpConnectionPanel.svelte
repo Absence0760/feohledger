@@ -57,6 +57,7 @@
 	import SecretField from '#lib/components/ui/SecretField.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { FEATURE_ERP_INTEGRATIONS, FEATURE_ERP_MERGE } from '#lib/types/planFeatures.ts';
 	import {
 		BYO_APP_FIELDS,
@@ -94,8 +95,8 @@
 		type OAuthReturn,
 		type StoredErpConfig
 	} from '#lib/types/erpConnection.ts';
-	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { formatList } from '#lib/utils/list.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 
 	let {
@@ -218,7 +219,7 @@
 	const callUsageText = $derived(
 		provider
 			? callUsageLines(callUsage, providerLabel(provider), m, {
-					count: (n) => new Intl.NumberFormat(getActiveFormatLocale()).format(n),
+					count: (n) => formatCount(n),
 					time: (iso) =>
 						formatDate(iso, '—', {
 							month: 'short',
@@ -767,7 +768,7 @@
 			oncancel={cancelPick}
 		/>
 	{:else if pendingLoading}
-		<p class="card-hint" aria-busy="true">{m('org.erp.oauth.pick.loading', { erp: m('org.erp.oauth.yourErp') })}</p>
+		<LoadingState label={m('org.erp.oauth.pick.loading', { erp: m('org.erp.oauth.yourErp') })} />
 	{:else if userLoaded && !entitled}
 		<!-- Every catalogue entry is a live ERP; the local-first `mock` ERP
 		     needs no configuration. -->
@@ -778,7 +779,7 @@
 			<button type="button" class="btn-test" onclick={loadCatalog}>{m('common.tryAgain')}</button>
 		</div>
 	{:else if !catalog}
-		<p class="card-hint" aria-busy="true">{m('org.erp.loading')}</p>
+		<LoadingState label={m('org.erp.loading')} />
 	{:else}
 		<div class="form-grid">
 			<label class="full-width">

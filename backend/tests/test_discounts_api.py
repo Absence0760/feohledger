@@ -12,6 +12,7 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 
 from app.models.discount import (
@@ -184,6 +185,49 @@ async def test_create_invoice_offer_defaults_base_amount_and_audits(realdb):
             )
         ).scalar_one()
         assert audit.entity_type == "discount_offer"
+
+
+# Malformed values fit `invoices.currency` (varchar(3)): "US$" is the shape a
+# legacy row or an ERP stamp actually leaves; "EURO" cannot be stored at all.
+@pytest.mark.parametrize("unknown", [None, "", "   ", "US$"])
+@pytest.mark.parametrize("named", [None, "EUR"])
+async def test_an_invoice_offer_on_an_unknown_currency_invoice_is_refused(realdb, unknown, named):
+    """An invoice that records no usable currency (NULL, blank or malformed,
+    decisions §473) takes no invoice-scoped offer, even one whose caller names
+    a currency: a 409, the same rule as a credit memo, and no offer row
+    written. Naming EUR used to be accepted, pricing a balance in no stated
+    currency and all but deciding the invoice's code for it."""
+    from sqlalchemy import update
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    invoice_id = await _add_invoice(mk, org_id, amount="1000.00")
+    async with mk() as s:
+        await s.execute(
+            update(Invoice).where(Invoice.id == uuid.UUID(invoice_id)).values(currency=unknown)
+        )
+        await s.commit()
+
+    body = {"scope": "invoice", "invoice_id": invoice_id, "tiers": _tiers()}
+    if named is not None:
+        body["currency"] = named
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post("/api/discounts/offers", json=body)
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "discount_offer_invoice_currency_unknown"
+    assert detail["params"] == {}
+    async with mk() as s:
+        offers = (
+            (
+                await s.execute(
+                    select(DiscountOffer).where(DiscountOffer.invoice_id == uuid.UUID(invoice_id))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert offers == []
 
 
 async def test_create_offer_422s_a_malformed_id(realdb):

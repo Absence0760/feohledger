@@ -246,7 +246,12 @@ test.describe('RBAC at the API layer', () => {
 			const headers = { Authorization: `Bearer ${token}`, 'X-Tenant-Slug': currentTenantSlug() };
 			const created = await request.post(`${API_BASE}/api/invoices`, {
 				headers,
-				data: { vendor: 'E2E Clerk Entry Vendor', invoice_number: marker, amount: '42.00' }
+				data: {
+					vendor: 'E2E Clerk Entry Vendor',
+					invoice_number: marker,
+					amount: '42.00',
+					currency: 'USD'
+				}
 			});
 			expect(created.status(), 'clerk POST /invoices').toBe(201);
 			const { id } = (await created.json()) as { id: string };

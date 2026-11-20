@@ -45,14 +45,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.analytics import _commitment_rows
 from app.api.deps import (
     ROLE_ADMIN,
     ROLE_AP_MANAGER,
     ROLE_CFO,
     require_roles,
 )
-from app.api.payments import PAYABLE_INVOICE_STATUSES
 from app.api.refusals import coded_refusal
 from app.config import settings
 from app.database import get_control_db
@@ -88,6 +86,7 @@ from app.schemas.cash_flow import (
 )
 from app.services import discount_offers as offers_svc
 from app.services.analytics import bucket_outflows
+from app.services.ap_commitments import commitment_rows
 from app.services.assistant import usage as usage_service
 from app.services.assistant.orchestrator import run_turn, run_turn_streaming
 from app.services.assistant.tools.cashflow import _horizon, propose_payment_plan
@@ -107,6 +106,7 @@ from app.services.currency_conversion import (
     resolve_reporting_currency,
 )
 from app.services.discount_auto_trigger import settled_invoice_status
+from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 from app.services.payment_runs import PaymentRunItemInput, create_payment_run_for_invoices
 from app.tenant import (
     apply_entity_scope,
@@ -381,7 +381,7 @@ async def draft_run_from_plan(
     currently-payable invoice the plan's horizon says is due.
 
     Re-derives the SAME commitment rows ``propose_payment_plan`` used
-    (``_commitment_rows`` — same params), narrows them to invoices that are
+    (``ap_commitments.commitment_rows`` — same params), narrows them to invoices that are
     ACTUALLY payable right now (``PAYABLE_INVOICE_STATUSES`` — a plan's
     horizon includes pre-approval pipeline invoices too, which can't be
     staged), and hands that set to the exact same
@@ -414,7 +414,7 @@ async def draft_run_from_plan(
     )
     scope_entity_id = resolved.scope_entity_id
 
-    rows = await _commitment_rows(
+    rows = await commitment_rows(
         tenant_db,
         today=today,
         horizon_days=resolved.horizon_days,
@@ -529,7 +529,7 @@ async def draft_run_from_plan(
         org=org,
         org_id=org.id,
         entity_id=run_entity_id,
-        # The scope the PLAN was built under, the same one `_commitment_rows`
+        # The scope the PLAN was built under, the same one `commitment_rows`
         # above used — so the run can only ever stage invoices the plan itself
         # included. `None` (consolidated) leaves the lookup unrestricted, which
         # is what every other consolidated read does.

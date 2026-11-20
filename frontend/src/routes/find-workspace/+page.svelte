@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { goto } from '$app/navigation';
 	import AuthShell from '#lib/components/auth/AuthShell.svelte';
 	import AuthBrandMark from '#lib/components/auth/AuthBrandMark.svelte';
 	import LinkedMessage from '#lib/components/ui/LinkedMessage.svelte';
@@ -16,7 +15,6 @@
 		type WorkspaceAddressProblem
 	} from '#lib/utils/workspaceAddress.ts';
 	import { DEFAULT_PRODUCT_NAME } from '#lib/stores/brandTheme.ts';
-	import { hasTenantContext } from '#lib/tenant.ts';
 	import type { PublicConfig } from '#lib/types/publicConfig.ts';
 
 	/**
@@ -72,13 +70,10 @@
 		}
 	}
 
+	// Apex only. On a workspace host the root layout never mounts this page
+	// and sends the visitor to `/login` or `/` itself — the one navigation, so
+	// nothing here races it (`#lib/utils/tenantHostRoute.ts`).
 	onMount(() => {
-		// A workspace host already IS a workspace: its own sign-in is `/login`,
-		// and `/` takes a signed-out visitor there.
-		if (hasTenantContext()) {
-			goto('/', { replace: true });
-			return;
-		}
 		void loadConfig();
 	});
 

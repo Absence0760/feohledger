@@ -60,3 +60,60 @@ describe('SupplierChatThread error state', () => {
 		expect(out).toContain('data-testid="chat-input"');
 	});
 });
+
+describe('SupplierChatThread copy comes from the catalogue', () => {
+	const now = new Date().toISOString();
+	const msg = (created_at: string) => ({
+		id: 'm1',
+		author_role: 'supplier',
+		author_name: null,
+		body: 'Hello',
+		created_at,
+		attachments: []
+	});
+
+	it('labels the status pill and keeps the wire value on data-status', () => {
+		const out = html({ thread: { id: 't', status: 'resolved', messages: [] }, surface: 'ap' });
+		// The wire value rides the wrapper; the label is the Badge inside it.
+		expect(out).toMatch(/data-status="resolved"[^>]*><span class="badge success[^"]*"[^>]*>(?:<!---->)?Resolved</);
+		expect(out).toContain('aria-label="Supplier chat"');
+		expect(out).toContain('This thread is resolved.');
+	});
+
+	it('shows an unknown status as-is rather than dropping it', () => {
+		const out = html({ thread: { id: 't', status: 'archived', messages: [] } });
+		expect(out).toMatch(/data-status="archived"[^>]*><span class="badge neutral[^"]*"[^>]*>(?:<!---->)?archived</);
+	});
+
+	it('renders the composer labels and the unknown-author fallback', () => {
+		const out = html({ thread: { id: 't', status: 'open', messages: [msg(now)] } });
+		expect(out).toContain('placeholder="Write a message…"');
+		expect(out).toContain('aria-label="Write a message"');
+		expect(out).toContain('>Unknown<');
+		expect(out).toMatch(/>\s*Attach\s*</);
+	});
+
+	it('puts message times in a <time> with the exact instant, through Intl', () => {
+		const out = html({ thread: { id: 't', status: 'open', messages: [msg(now)] } });
+		expect(out).toContain(`datetime="${now}"`);
+		// Under a minute: `Intl.RelativeTimeFormat`'s "now", not a hand-built
+		// English "just now".
+		expect(out).not.toContain('just now');
+		const rel = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'short' }).format(
+			0,
+			'second'
+		);
+		expect(out).toContain(`>${rel}</time>`);
+	});
+
+	it('shows an older message as a localized date', () => {
+		const old = '2020-01-15T12:00:00Z';
+		const out = html({ thread: { id: 't', status: 'open', messages: [msg(old)] } });
+		const expected = new Date(old).toLocaleDateString(undefined, {
+			month: 'short',
+			day: 'numeric',
+			year: 'numeric'
+		});
+		expect(out).toContain(`>${expected}</time>`);
+	});
+});

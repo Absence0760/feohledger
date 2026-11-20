@@ -778,10 +778,24 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 }
 
 /* --- Primary / cancel buttons --- */
+/* .btn-primary and .btn-cancel take the exact box .btn-secondary /
+   .btn-danger do (inline-flex, a 1px border, the line-height a <button>
+   computes), so a footer mixing all four is one height and an icon + label
+   inside any of them sits on one centred line. The primary's border is
+   transparent: same box, no outline. */
+.btn-primary,
+.btn-cancel {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	line-height: normal;
+	text-decoration: none;
+}
 .btn-primary {
 	padding: 9px 18px;
 	border-radius: var(--radius-sm);
-	border: none;
+	border: 1px solid transparent;
 	background: var(--accent-strong);
 	color: #fff;
 	font-size: 0.85rem;
@@ -831,8 +845,8 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
    destructive trigger (erase, disable); the filled, armed confirmation stays
    with <RowAction armed> / <BulkDeleteButton>.
 
-   Same box as .btn-primary / .btn-cancel so a toolbar mixing them is one
-   height. inline-flex so an <a> (a navigating "button") or a hidden <span>
+   Same box as .btn-primary / .btn-cancel (declared on both above) so a
+   toolbar mixing them is one height. inline-flex so an <a> (a navigating "button") or a hidden <span>
    slot reserve takes the exact box a <button> does.
 
    Measured, dark / light, worst of --bg and --surface:
@@ -845,9 +859,9 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
    group opacity takes --text-muted to 2.33:1 (a11y/opacityAudit.test.ts).
 
    Every rule here is one class of specificity (states inside :where()), so
-   a route still carrying its own scoped copy (/payments' filled
-   .btn-danger, /tax's armed one) keeps winning on every property it sets
-   until it migrates, instead of picking up a tint on hover. */
+   a component still carrying its own scoped copy keeps winning on every
+   property it sets until it migrates, instead of picking up a tint on hover.
+   Which files must carry none is pinned by sharedButtonClasses.test.ts. */
 .btn-secondary,
 .btn-danger {
 	display: inline-flex;
@@ -884,6 +898,140 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 .btn-danger:where(:disabled) {
 	border-color: var(--border);
 	background: var(--surface);
+	color: var(--text-muted);
+	cursor: not-allowed;
+}
+/* Armed: the second, committing click of a two-click confirm (execute a
+   run, file 1099s, cancel a run). The next click moves money or cannot be
+   undone, so the button turns into a red fill one step before it commits,
+   whatever it looked like unarmed. --danger-strong, not --danger: it is a
+   fill under white text (5.37:1 dark, 7.89:1 light), the call every red fill in
+   this file makes. Two classes, so it outranks .btn-primary's own :hover
+   (whose lift shadow would otherwise drop the red ring) and its :disabled.
+   Pair the class with a distinct armed LABEL: the colour alone tells a
+   screen reader nothing.
+
+   Busy (disabled while the request is in flight): still red, never
+   `opacity` — .btn-primary:disabled's 0.5 took white on --danger-strong
+   to a wash. It turns to the danger tint with --danger-on-tint text and
+   keeps the --danger-strong border, so "armed, and working" reads as one
+   state. Measured, dark / light, worst of --bg and --surface:
+     --danger-on-tint over --danger-tint   5.36 / 5.77 */
+.btn-primary.armed,
+.btn-danger.armed,
+.btn-primary.armed:hover:not(:disabled) {
+	border-color: var(--danger-strong);
+	background: var(--danger-strong);
+	color: #fff;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 30%, transparent);
+}
+.btn-primary.armed:disabled,
+.btn-danger.armed:disabled {
+	border: 1px solid var(--danger-strong);
+	background: var(--danger-tint);
+	color: var(--danger-on-tint);
+	box-shadow: none;
+	opacity: 1;
+	cursor: not-allowed;
+}
+
+/* While a <BulkBar> shows, the page reserves the fixed bar's measured
+   height below its content (BulkBar sets both), so the last rows and the
+   pagination scroll clear of the bar instead of sitting under it. */
+html.has-bulk-bar body {
+	padding-bottom: var(--bulk-bar-reserve, 0px);
+}
+
+/* --- Ghost button ---
+   An action that reads as a link: Back out of a detail view, Download beside
+   the sentence that explains it. No box, so it sits inline in running text
+   without changing the line's height. Underlined as well as coloured, so it
+   is not told apart from the text around it by colour alone (WCAG 1.4.1).
+   --accent on --surface 5.55 / 6.95 (dark / light; on --bg 6.04 / 6.37);
+   disabled swaps to --text-muted (5.38 / 5.75), never `opacity`.
+
+   Target size (WCAG 2.5.8): standing alone (Back out of a detail view) it
+   is a control of its own and gets a 24px-tall box. Inside a sentence,
+   inline-flex with no padding keeps it on the text baseline (its baseline
+   is its text's), at the cost of a few pixels on a line set tighter than
+   24px and of not wrapping mid-label; 2.5.8's inline exception would cover
+   it there, but one rule for both uses beats a modifier nobody remembers. */
+.btn-ghost {
+	display: inline-flex;
+	align-items: center;
+	min-height: 24px;
+	padding: 0;
+	border: none;
+	background: none;
+	color: var(--accent);
+	font: inherit;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+.btn-ghost:where(:hover:not(:disabled)) {
+	text-decoration-thickness: 2px;
+}
+.btn-ghost:where(:disabled) {
+	color: var(--text-muted);
+	cursor: not-allowed;
+}
+
+/* --- Icon button ---
+   A control whose whole label is a glyph: a header ✕, a fullscreen toggle,
+   the /invoices filter toggle. It carries its name in aria-label, never in
+   the glyph. No box at rest, so a header row of them reads as quiet chrome;
+   the box arrives on hover. A text glyph (✕) renders at 1.25rem; an <svg>
+   child keeps its own width / height.
+
+   Target size (WCAG 2.5.8): 24px minimum both ways, whatever the glyph.
+   Focus: the global :focus-visible ring (2px --accent, offset 2px; --accent
+   on --surface 5.55 / 6.95, well past 1.4.11's 3:1).
+
+   Measured, dark / light:
+     rest      --text-muted on --surface 5.38 / 6.27, on --bg 5.86 / 5.75
+     hover     --text on --surface-2                11.01 / 14.68
+     pressed   (:active) as hover, --accent border  (non-text; 4.48 / 5.87
+               against --surface-2)
+     on        [aria-pressed='true'] --accent-on-tint over --accent-tint
+                                                     5.33 / 5.93
+     disabled  --text-muted, as at rest, never `opacity`
+   States sit inside :where(), one class of specificity like the boxed
+   variants. Scoped CSS may size or place it (a 34px toggle, a badge dot
+   on a child), never paint it: sharedButtonClasses.test.ts. */
+.btn-icon {
+	position: relative;
+	display: inline-grid;
+	place-items: center;
+	min-width: 24px;
+	min-height: 24px;
+	padding: 4px;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: none;
+	color: var(--text-muted);
+	font-family: inherit;
+	font-size: 1.25rem;
+	line-height: 1;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+.btn-icon:where(:hover:not(:disabled)) {
+	background: var(--surface-2);
+	border-color: var(--border-strong);
+	color: var(--text);
+}
+.btn-icon:where(:active:not(:disabled)) {
+	background: var(--surface-2);
+	border-color: var(--accent);
+	color: var(--text);
+}
+.btn-icon:where([aria-pressed='true']) {
+	background: var(--accent-tint);
+	border-color: var(--accent);
+	color: var(--accent-on-tint);
+}
+.btn-icon:where(:disabled) {
 	color: var(--text-muted);
 	cursor: not-allowed;
 }
@@ -1156,6 +1304,35 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 }
 .modal.modal-lg {
 	width: min(820px, 95vw);
+}
+/* `<Modal fullscreen>`: no gutter, the whole viewport, square corners. The
+   selector outranks a caller's own `.modal.<class>` sizing, so the toggle
+   wins without each caller restating it.
+
+   The size is the DYNAMIC viewport (`dvh` / `dvw`), with the `vh` / `vw`
+   line before it as the fallback for an engine without them. On a phone
+   `100vh` is the LARGE viewport — the height with the browser toolbar
+   retracted — so while the toolbar shows, the bottom of a 100vh dialog sits
+   under it, and a dialog that pins its actions to its foot (InvoiceModal's
+   `.form-actions`) loses them there.
+
+   `max-height` is the same box rather than `none`: a dialog that animates
+   its height into this state (InvoiceModal) is then capped by the same value
+   on both sides of the toggle, so the cap does not drop away in one frame
+   and make the dialog jump before the transition starts. */
+.backdrop.backdrop-flush {
+	--backdrop-pad: 0px;
+}
+.backdrop.backdrop-flush > .modal.modal-fullscreen {
+	width: 100vw;
+	width: 100dvw;
+	height: 100vh;
+	height: 100dvh;
+	max-width: none;
+	max-height: 100vh;
+	max-height: 100dvh;
+	border-radius: 0;
+	border: none;
 }
 .modal h2 {
 	margin: 0 0 4px;

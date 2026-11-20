@@ -36,6 +36,7 @@ fields. Money (``amount``) is ``Decimal`` — never float.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
@@ -57,6 +58,7 @@ from app.services.e_invoice import (
 from app.services.peppol_adapters import UnknownPeppolProviderError, get_peppol_adapter
 from app.services.webhook_security import verify_hmac_sha256
 from app.services.workflow_engine import create_workflow_instance
+from app.utils.currency_code import iso_currency_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -180,9 +182,17 @@ async def receive_peppol_message(
             # 2. Validate the payload structurally. A non-structured or malformed
             #    document is soft-rejected (no invoice). EInvoiceValidationError's
             #    str() is already PII-free; ValueError gets a fixed code.
+            #    Off the loop: the XML mime is only a hint, and `detect_format`
+            #    trusts the bytes — a payload starting `%PDF` (a hybrid Factur-X
+            #    a sender wraps in the envelope) is opened with PyMuPDF to probe
+            #    for its embedded CII, which is synchronous C work on a PUBLIC
+            #    webhook path (`tests/test_pdf_render_offloaded.py`).
             try:
-                doc = parse_e_invoice(
-                    message.payload, mime_type="application/xml", filename="inbound.xml"
+                doc = await asyncio.to_thread(
+                    parse_e_invoice,
+                    message.payload,
+                    mime_type="application/xml",
+                    filename="inbound.xml",
                 )
             except EInvoiceValidationError as exc:
                 # field/code pairs only — no PII, no document values.
@@ -208,7 +218,10 @@ async def receive_peppol_message(
                 vendor_name=(doc.seller.name or ""),
                 description=f"Received via PEPPOL from {message.sender_scheme}",
                 amount=amount,
-                currency=doc.currency or "USD",
+                # UBL requires DocumentCurrencyCode, so a missing or malformed
+                # one is a malformed document: recorded as unknown (NULL), never
+                # a guessed USD (decisions §473).
+                currency=iso_currency_or_none(doc.currency),
                 status=InvoiceStatus.new,
                 organization_id=org.id,
                 entity_id=entity_id,
@@ -255,7 +268,7 @@ async def receive_peppol_message(
                 status="delivered",  # inbound is already delivered to us (C4)
                 provider=adapter.provider_name,
                 amount=amount,
-                currency=doc.currency or "USD",
+                currency=iso_currency_or_none(doc.currency),
                 raw_response={
                     "direction": _DIRECTION_INBOUND,
                     "doc_type": message.doc_type_id,

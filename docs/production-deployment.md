@@ -326,7 +326,7 @@ least-privilege policy lands with the workload stack it has to name — tracked 
 | `PUBLIC_API_URL` | variable | **repository** | API base URL — the backend job's deploy URL. Also baked into the SPA build in `vm-deploy.yml`'s ungated `build-frontend` job, which is why it is repository-scoped. The `smoke` job checks its `/api/health` and `/api/public-config`; it strips only an `https://` prefix, so set an https origin with no path (`https://api.feohledger.com`). |
 | `APP_URL` | variable | **repository** | The public site origin (`https://feohledger.com`); shared with `vm-deploy.yml`. The `smoke` job checks its apex; an https origin with no path or trailing slash. |
 | `SMOKE_TENANT_HOST` | variable | **repository** | A tenant host the `smoke` job fetches to prove tenant TLS (e.g. `sandbox.feohledger.com`). |
-| `SIGNUP_ENABLED` | variable | **repository** | `true` / `false` — what `FEOH_SIGNUP_ENABLED` is in the deployed env, which `public-config` must report. Repository-scoped because the `smoke` job has no environment. |
+| `SIGNUP_ENABLED` | variable | **repository** | `true` / `false` — what `FEOH_SIGNUP_ENABLED` is in the deployed env, which `public-config` must report. Repository-scoped because the `smoke` job has no environment. **Shared with `vm-deploy.yml`**, whose `smoke` job runs the same check after every VM release (with `APP_URL`, `PUBLIC_API_URL` and the synthetic tenant host `smoke-check.<apex>`); unset, that job fails the release. |
 
 The SPA publish's own settings (`APP_URL`, `FRONTEND_PUBLISH_ENABLED`,
 `FRONTEND_BUCKET`, `CLOUDFRONT_DISTRIBUTION_ID`) belong to `vm-deploy.yml` and

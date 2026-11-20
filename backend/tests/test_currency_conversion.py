@@ -7,7 +7,7 @@ payment-level FX (international_payments). Pins:
     - explicit settings.reporting_currency wins
     - falls back to payments.home_currency, then invoice_defaults.currency,
       then the platform default
-    - always uppercased; empty/garbage degrades to default
+    - always uppercased; empty degrades to the next rung, a set malformed rung answers "" (§473)
 
   convert_amount
     - same currency → rate 1, no adapter call, exact
@@ -836,3 +836,112 @@ async def test_legacy_row_without_the_column_falls_back_to_the_shape_heuristic()
     changed = await materialize_reporting_amount(inv, reporting_currency="USD", fx_adapter=fx)
     assert changed is True
     assert inv.reporting_source_currency == "USD"  # and the column is now filled
+
+
+# ---------------------------------------------------------------------------
+# An invoice with no known currency (decisions §473): never the reporting
+# currency, never locked, always counted as unconverted.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("currency", [None, "", "   ", "US"])
+async def test_materialize_never_locks_an_unknown_currency(currency):
+    fx = MockFXAdapter({})
+    inv = _invoice_row(currency=currency)
+    changed = await materialize_reporting_amount(inv, reporting_currency="USD", fx_adapter=fx)
+    assert changed is False
+    assert inv.reporting_amount is None
+    assert inv.reporting_currency is None
+    assert inv.reporting_fx_rate is None
+
+
+@pytest.mark.asyncio
+async def test_materialize_clears_a_made_up_lock_on_an_unknown_currency():
+    """A row locked 1:1 before §473 (the blank read as the reporting currency)
+    loses that lock, so no rollup trusts it."""
+    fx = MockFXAdapter({})
+    inv = _invoice_row(currency=None)
+    inv.reporting_currency = "USD"
+    inv.reporting_amount = Decimal("1000.00")
+    inv.reporting_fx_rate = Decimal("1")
+    inv.reporting_source_currency = "USD"
+    inv.reporting_fx_locked_at = datetime.now(UTC)
+    changed = await materialize_reporting_amount(inv, reporting_currency="USD", fx_adapter=fx)
+    assert changed is True
+    assert (
+        inv.reporting_currency,
+        inv.reporting_amount,
+        inv.reporting_fx_rate,
+        inv.reporting_source_currency,
+        inv.reporting_fx_locked_at,
+    ) == (None, None, None, None, None)
+
+
+def test_row_with_unknown_currency_is_unconverted_even_with_a_lock():
+    amt, unconverted = reporting_amount_for_row(
+        amount=Decimal("100.00"),
+        currency=None,
+        reporting_currency="USD",
+        persisted_reporting_currency="USD",
+        persisted_reporting_amount=Decimal("100.00"),
+    )
+    assert (amt, unconverted) == (Decimal("100.00"), True)
+
+
+def test_rollup_puts_an_unknown_currency_row_in_its_own_unconverted_group():
+    rollup = rollup_to_reporting_currency(
+        [
+            {"amount": Decimal("100.00"), "currency": "USD"},
+            {
+                "amount": Decimal("40.00"),
+                "currency": None,
+                "reporting_amount": Decimal("40.00"),
+                "reporting_currency": "USD",
+            },
+        ],
+        reporting_currency="USD",
+    )
+    assert rollup.unconverted_count == 1
+    groups = {e.currency: e for e in rollup.by_currency}
+    assert set(groups) == {"USD", None}
+    assert groups["USD"].unconverted_count == 0
+    assert groups[None].unconverted_count == 1
+    assert groups[None].count == 1
+
+
+def test_rollup_from_grouped_rows_keeps_the_unknown_group_unlabelled():
+    rollup = rollup_from_grouped_rows(
+        [
+            {
+                "currency": "USD",
+                "original_amount": Decimal("100"),
+                "reporting_amount": Decimal("100"),
+                "count": 1,
+                "unconverted_count": 0,
+            },
+            {
+                "currency": None,
+                "original_amount": Decimal("40"),
+                "reporting_amount": Decimal("40"),
+                "count": 1,
+                "unconverted_count": 1,
+            },
+        ],
+        reporting_currency="USD",
+    )
+    assert rollup.unconverted_count == 1
+    assert {e.currency for e in rollup.by_currency} == {"USD", None}
+
+
+@pytest.mark.asyncio
+async def test_unrealized_counts_an_unknown_currency_row_without_valuing_it():
+    fx = MockFXAdapter({"mock_rates": {"EUR": "0.92"}})
+    result = await compute_unrealized_fx_gain_loss(
+        [{"amount": Decimal("500.00"), "currency": None}],
+        reporting_currency="USD",
+        fx_adapter=fx,
+    )
+    assert result.unconverted_count == 1
+    assert result.by_currency == []
+    assert result.total_unrealized_gain_loss == Decimal("0.00")

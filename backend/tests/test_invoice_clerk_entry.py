@@ -30,7 +30,12 @@ PDF = ("invoice.pdf", b"%PDF-1.4 clerk entry", "application/pdf")
 async def _clerk_create(c, number: str, amount: str = "500.00") -> str:
     resp = await c.post(
         "/api/invoices",
-        json={"vendor": "Clerk Entry Vendor", "invoice_number": number, "amount": amount},
+        json={
+            "currency": "USD",
+            "vendor": "Clerk Entry Vendor",
+            "invoice_number": number,
+            "amount": amount,
+        },
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["id"]
@@ -882,7 +887,12 @@ async def test_a_custom_role_alone_cannot_enter_invoices(realdb):
     async with c:
         resp = await c.post(
             "/api/invoices",
-            json={"vendor": "V", "invoice_number": "CUSTOM-NOPE-001", "amount": "1.00"},
+            json={
+                "currency": "USD",
+                "vendor": "V",
+                "invoice_number": "CUSTOM-NOPE-001",
+                "amount": "1.00",
+            },
         )
         assert resp.status_code == 403
         assert (await c.post("/api/invoices/upload", files={"file": PDF})).status_code == 403

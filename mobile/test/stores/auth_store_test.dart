@@ -84,13 +84,19 @@ void main() {
 
     test('a transport failure surfaces a connection error', () async {
       ApiClient().debugConfigure(
-        client: MockClient((req) async => throw Exception('network down')),
+        client: MockClient(
+          (req) async => throw http.ClientException('network down'),
+        ),
       );
 
       final result = await store.login('demo@acme.com', 'demo', 'acme');
 
       expect(result.isSuccess, isFalse);
-      expect(store.error, startsWith('Connection failed'));
+      // A localized sentence, never the exception's own text.
+      expect(
+        store.error,
+        "Couldn't reach the server. Check your connection and try again.",
+      );
     });
 
     test('notifies listeners on the loading->done transition', () async {

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Contract, ContractStatus, ContractType } from '#lib/types/contract.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
 		CONTRACT_STATUSES,
@@ -34,6 +35,7 @@
 	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { type MatchingIdsResponse } from '#lib/utils/pagination.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatCount } from '#lib/utils/count.ts';
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
@@ -62,7 +64,6 @@
 	// Three states, not two: a failed load must not read as "nothing matched".
 	// The failed state renders `ui/LoadError` (with a Retry) in the table's
 	// place, so the empty line only has loading vs. empty to say.
-	let emptyMessage = $derived(contractStore.loading ? m('common.loading') : m('contracts.empty'));
 
 	let showCreate = $state(false);
 	let editing = $state<Contract | null>(null);
@@ -195,7 +196,7 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					m('contracts.toast.selectedTruncated', { shown: res.ids.length, total: res.total }),
+					m('contracts.toast.selectedTruncated', { shown: formatCount(res.ids.length), total: formatCount(res.total) }),
 					'error'
 				);
 			} else {
@@ -350,7 +351,8 @@
 	{:else}
 	<DataTable
 		isEmpty={contractStore.all.length === 0}
-		empty={emptyMessage}
+		loading={contractStore.loading}
+		empty={m('contracts.empty')}
 		colspan={8}
 	>
 		{#snippet header()}
@@ -424,25 +426,22 @@
 	</DataTable>
 	{/if}
 
-	{#if contractStore.hasMore && !contractStore.errored}
-		<div class="load-more-row">
-			<button class="btn-load-more" onclick={() => contractStore.loadMore()} disabled={contractStore.loading}>
-				{contractStore.loading
-					? m('common.loading')
-					: m('contracts.loadMore', { shown: contractStore.all.length, total: contractStore.total })}
-			</button>
-		</div>
-	{:else if contractStore.total > 0 && !contractStore.errored}
-		<div class="load-more-row">
-			<span class="load-more-end">{m('contracts.showingAll', { total: contractStore.total })}</span>
-		</div>
-	{/if}
+	<LoadMoreFooter
+		shown={contractStore.all.length}
+		total={contractStore.total}
+		hasMore={contractStore.hasMore}
+		loading={contractStore.loading}
+		errored={contractStore.errored}
+		onloadmore={() => contractStore.loadMore()}
+		moreKey="contracts.loadMore"
+		allKey="contracts.showingAll"
+	/>
 
 	{#if canManage}
 		<BulkBar count={selected.size} onclear={clearSelection}>
 			{#snippet actions()}
 				{#if allSelected && !selectedAllMatching && contractStore.total > contractStore.all.length}
-					<button class="bulk-action-btn secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
+					<button class="btn-secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
 						{selectingAllMatching
 							? m('common.loading')
 							: m('common.selectAllMatching', { total: contractStore.total })}
@@ -455,9 +454,9 @@
 					<option value="terminate">{m('contracts.modal.lifecycle.terminate')}</option>
 					<option value="cancel">{m('contracts.modal.lifecycle.cancel')}</option>
 				</select>
-				<button class="bulk-action-btn" disabled={bulkBusy} onclick={bulkStatusChange}>{m('contracts.bulk.changeStatus')}</button>
+				<button class="btn-primary" disabled={bulkBusy} onclick={bulkStatusChange}>{m('contracts.bulk.changeStatus')}</button>
 				<div class="bulk-divider"></div>
-				<button class="bulk-action-btn" disabled={bulkBusy} onclick={bulkExport}>{m('contracts.bulk.exportCsv')}</button>
+				<button class="btn-secondary" disabled={bulkBusy} onclick={bulkExport}>{m('contracts.bulk.exportCsv')}</button>
 			{/snippet}
 		</BulkBar>
 	{/if}
@@ -509,29 +508,6 @@
 		border-radius: 6px;
 		background-color: var(--surface);
 		font-size: 0.82rem;
-	}
-	.bulk-action-btn {
-		padding: 6px 14px;
-		border-radius: 6px;
-		border: 1px solid var(--accent-strong);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.82rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		white-space: nowrap;
-	}
-	.bulk-action-btn:hover:not(:disabled) {
-		filter: brightness(1.1);
-	}
-	.bulk-action-btn:disabled {
-		opacity: 0.6;
-		cursor: default;
-	}
-	.bulk-action-btn.secondary {
-		background: transparent;
-		color: var(--accent-strong);
 	}
 	.bulk-all-matching-note {
 		font-size: 0.82rem;

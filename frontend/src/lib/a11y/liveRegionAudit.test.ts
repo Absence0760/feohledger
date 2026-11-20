@@ -210,3 +210,109 @@ describe('inline feedback is announced (WCAG 4.1.3)', () => {
 		).toEqual([]);
 	});
 });
+
+/**
+ * The same SC, for the other thing that appears while the reader waits: the
+ * standalone loading block. It used to be written 67 ways (`<p
+ * class="loading">`, `<p class="state">`, `.muted`, `.hint` …) and only three
+ * were announced, so a screen-reader user opening a page heard nothing until
+ * the content landed — or nothing at all when it never did. The one shape now
+ * is `ui/LoadingState.svelte`: a polite `role="status"` region with the busy
+ * ring, `common.loading` by default.
+ *
+ * This flags the bare idiom: a `<p>` or `<div>` whose whole content is one
+ * `{m('….loading')}` call. Inline text inside other content (a table cell's
+ * "Checking…", a `KpiCard`'s screen-reader placeholder) is not a block and is
+ * not matched.
+ *
+ * {@link LOADING_ALLOWLIST} holds sites not yet converted, keyed like
+ * {@link ALLOWLIST}. It only shrinks: a stale entry fails below.
+ */
+const LOADING_ALLOWLIST: Record<string, string> = {};
+
+const LOADING_STATE = 'lib/components/ui/LoadingState.svelte';
+
+interface LooseNode {
+	type?: string;
+	data?: string;
+	expression?: {
+		type?: string;
+		callee?: { type?: string; name?: string };
+		arguments?: { type?: string; value?: unknown }[];
+	};
+}
+
+/** True when the node is `{m('<key ending in .loading>')}`. */
+function isLoadingMessage(node: LooseNode): boolean {
+	const expr = node.expression;
+	if (node.type !== 'ExpressionTag' || expr?.type !== 'CallExpression') return false;
+	if (expr.callee?.type !== 'Identifier' || expr.callee.name !== 'm') return false;
+	const key = expr.arguments?.[0];
+	return key?.type === 'Literal' && typeof key.value === 'string' && key.value.endsWith('.loading');
+}
+
+function isBareLoadingBlock(el: Element): boolean {
+	if (el.name !== 'p' && el.name !== 'div') return false;
+	const content = (el.fragment.nodes as LooseNode[]).filter(
+		(n) => !(n.type === 'Text' && (n.data ?? '').trim() === '')
+	);
+	return content.length === 1 && isLoadingMessage(content[0]);
+}
+
+function scanLoading(path: string, source: string): SilentFeedback[] {
+	if (path === LOADING_STATE || !/\.loading'\)\}/.test(source)) return [];
+	const ast = parse(source, { modern: true });
+	const found: SilentFeedback[] = [];
+	const visit = (node: unknown): void => {
+		if (node === null || typeof node !== 'object') return;
+		if (Array.isArray(node)) {
+			node.forEach(visit);
+			return;
+		}
+		const record = node as Record<string, unknown>;
+		if (record.type === 'RegularElement' && isBareLoadingBlock(record as unknown as Element)) {
+			const el = record as unknown as Element;
+			const line = source.slice(0, el.start).split('\n').length;
+			const snippet = source.split('\n')[line - 1].trim();
+			if (!(`${path}:${snippet}` in LOADING_ALLOWLIST)) found.push({ path, line, snippet });
+		}
+		for (const [key, value] of Object.entries(record)) if (key !== 'parent') visit(value);
+	};
+	visit(ast.fragment);
+	return found;
+}
+
+describe('a standalone loading block is a LoadingState (WCAG 4.1.3)', () => {
+	it('the scanner flags the bare idiom and nothing else', () => {
+		expect(scanLoading('t.svelte', `{#if busy}<p class="loading">{m('common.loading')}</p>{/if}`)).toHaveLength(1);
+		expect(scanLoading('t.svelte', `{#if busy}<div class="state">\n\t{m('billing.loading')}\n</div>{/if}`)).toHaveLength(1);
+		expect(scanLoading('t.svelte', `{#if busy}<LoadingState label={m('billing.loading')} />{/if}`)).toEqual([]);
+		// Inline text in other content is not a block.
+		expect(scanLoading('t.svelte', `<td>{m('x.state.loading')} <b>!</b></td>`)).toEqual([]);
+		expect(scanLoading('t.svelte', `<span class="visually-hidden">{m('common.loading')}</span>`)).toEqual([]);
+		expect(scanLoading('t.svelte', `<p>{m('common.loaded')}</p>`)).toEqual([]);
+	});
+
+	it('every loading allowlist entry still matches a real element', () => {
+		const lines = new Set<string>();
+		for (const { path, source } of files) {
+			for (const line of source.split('\n')) lines.add(`${path}:${line.trim()}`);
+		}
+		expect(Object.keys(LOADING_ALLOWLIST).filter((k) => !lines.has(k))).toEqual([]);
+	});
+
+	it('no page renders a bare loading paragraph', () => {
+		const bare = files.flatMap(({ path, source }) => scanLoading(path, source));
+		expect(
+			bare.map((s) => `${s.path}:${s.line}  ${s.snippet}`),
+			'render <LoadingState label={m(…)} /> (ui/LoadingState.svelte) instead'
+		).toEqual([]);
+	});
+
+	it('LoadingState itself is a polite status region', () => {
+		const source = files.find((f) => f.path === LOADING_STATE)?.source ?? '';
+		expect(source).toMatch(/role="status"/);
+		expect(source).toMatch(/aria-live="polite"/);
+		expect(source).toMatch(/m\('common\.loading'\)/);
+	});
+});

@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
+import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/contract.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
@@ -17,15 +19,17 @@ class ContractListTile extends StatelessWidget {
 
   // A single, sensible screen-reader announcement for the whole row instead of
   // walking each disjoint Text span (WCAG 1.3.1 / 4.1.2).
-  String get _semanticLabel {
+  String _semanticLabel(AppLocalizations l) {
     final parts = <String>[
-      contract.title ?? contract.vendorName ?? 'Untitled Contract',
+      contract.title ?? contract.vendorName ?? l.contractDetailUntitled,
       if (contract.totalValue != null) _totalValue,
-      if (contract.contractNumber != null) 'contract ${contract.contractNumber}'
-      else if (contract.vendorName != null) contract.vendorName!,
-      contract.status.label,
+      if (contract.contractNumber != null)
+        l.listRowContractNumber(contract.contractNumber!)
+      else if (contract.vendorName != null)
+        contract.vendorName!,
+      contractStatusLabel(l, contract.status),
       if (contract.endDate != null)
-        'ends ${formatLongDate(contract.endDate!)}',
+        l.listRowEnds(formatLongDate(contract.endDate!)),
     ];
     return parts.join(', ');
   }
@@ -37,15 +41,16 @@ class ContractListTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
     return Semantics(
-      label: _semanticLabel,
+      label: _semanticLabel(l),
       button: onTap != null,
       excludeSemantics: true,
-      child: _buildTile(),
+      child: _buildTile(l),
     );
   }
 
-  Widget _buildTile() {
+  Widget _buildTile(AppLocalizations l) {
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       onTap: onTap,
@@ -53,7 +58,7 @@ class ContractListTile extends StatelessWidget {
         children: [
           Expanded(
             child: Text(
-              contract.title ?? contract.vendorName ?? 'Untitled Contract',
+              contract.title ?? contract.vendorName ?? l.contractDetailUntitled,
               style: const TextStyle(fontWeight: FontWeight.w600),
               overflow: TextOverflow.ellipsis,
             ),

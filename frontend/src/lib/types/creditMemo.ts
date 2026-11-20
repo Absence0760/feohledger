@@ -18,7 +18,8 @@ export interface EligibleInvoice {
 	status: string;
 	due_date: string | null;
 	amount: MoneyAmount;
-	currency: string;
+	/** `null` = the invoice records no currency (offered to a memo of any). */
+	currency: string | null;
 	/** `amount` minus every credit already applied — what the over-application
 	 *  guard on both application paths compares against. */
 	creditable_balance: MoneyAmount;

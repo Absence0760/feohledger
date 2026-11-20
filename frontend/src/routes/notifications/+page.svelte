@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { notificationStore } from '#lib/stores/notifications.svelte.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
@@ -13,6 +14,7 @@
 	import { afterNavigate, goto, replaceState } from '$app/navigation';
 	import { formatDate, timeAgo } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { EVENT_LABEL_KEYS } from '#lib/types/notification.ts';
 	import { notificationHref } from '#lib/utils/notificationHref.ts';
 	import type { Notification } from '#lib/types/notification.ts';
@@ -175,7 +177,7 @@
 		<!-- A failed load is not an empty inbox: say so in place, with a way back. -->
 		<LoadError message={m('notifications.empty.errored')} onretry={reload} testId="notifications-error" />
 	{:else if !initialLoaded && loading}
-		<p class="state-msg">{m('common.loading')}</p>
+		<LoadingState />
 	{:else}
 		<DataTable columns={COLUMNS} isEmpty={items.length === 0} empty={emptyMessage} colspan={2}>
 			{#snippet body()}
@@ -223,19 +225,15 @@
 			{/snippet}
 		</DataTable>
 
-		{#if hasMore}
-			<div class="load-more-row">
-				<button class="btn-load-more" onclick={loadMore} disabled={loading}>
-					{loading
-						? m('common.loading')
-						: m('notifications.loadMore', { shown: items.length, total: filteredTotal })}
-				</button>
-			</div>
-		{:else if filteredTotal > 0}
-			<div class="load-more-row">
-				<span class="load-more-end">{m('notifications.showingAll', { total: filteredTotal })}</span>
-			</div>
-		{/if}
+		<LoadMoreFooter
+			shown={items.length}
+			total={filteredTotal}
+			{hasMore}
+			{loading}
+			onloadmore={loadMore}
+			moreKey="notifications.loadMore"
+			allKey="notifications.showingAll"
+		/>
 	{/if}
 </PageHeader>
 
@@ -259,11 +257,6 @@
 	.btn-mark-all:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
-	}
-
-	.state-msg {
-		color: var(--text-muted);
-		padding: 12px 4px;
 	}
 
 	tbody tr.unread-row td {

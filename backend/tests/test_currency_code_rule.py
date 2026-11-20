@@ -9,6 +9,8 @@ applies it, so a caller that drifts back to its own check fails here.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Annotated
 
 import pytest
@@ -129,7 +131,6 @@ def test_currency_code_or_unset_reads_blank_as_none():
 #: `max_length=3` (which admits "ÄÖÜ" and "US") fails here without building
 #: the whole request body.
 REQUEST_CURRENCY_FIELDS: list[tuple[type[BaseModel], str]] = [
-    (InvoiceCreate, "currency"),
     (CreditMemoCreate, "currency"),
     (CreditMemoUpdate, "currency"),
     (ContractCreate, "currency"),
@@ -194,6 +195,24 @@ def test_invoice_update_currency_reaches_the_handler_raw():
     assert InvoiceUpdate(currency="EURO").currency == "EURO"
 
 
+def test_invoice_create_currency_reaches_the_handler_raw_with_no_default():
+    """The create's `currency` is checked by `invoice_currency(..., creating=True)`
+    in the handler, the same coded 422s as the PATCH, and an omitted one is
+    `None` for the handler to refuse, never a USD default (decisions §473)."""
+    base = {"vendor": "Acme", "invoice_number": "INV-1", "amount": "1.00"}
+    assert InvoiceCreate(**base).currency is None
+    assert InvoiceCreate(**base, currency="EURO").currency == "EURO"
+
+
+@pytest.mark.parametrize("raw", [None, "", "   "])
+def test_invoice_currency_refuses_a_missing_code_on_create(raw):
+    with pytest.raises(HTTPException) as exc:
+        invoice_currency(raw, creating=True)
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == INVOICE_CURRENCY_REQUIRED
+    assert "cleared" not in exc.value.detail["message"]
+
+
 @pytest.mark.parametrize("raw", [None, "", "   "])
 def test_invoice_currency_refuses_a_blank(raw):
     with pytest.raises(HTTPException) as exc:
@@ -253,3 +272,166 @@ def test_extraction_drops_a_non_code(raw):
 
 def test_extraction_keeps_a_code_with_a_trailing_dot():
     assert _clean_currency_code("pln.") == "PLN"
+
+
+# ---------------------------------------------------------------------------
+# The two service normalisers delegate to the rule
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("raw", [*MALFORMED, "US DOLLARS", None, 840])
+def test_payment_normalizer_reads_a_non_code_as_unknown(raw):
+    from app.services.international_payments import normalize_currency_code
+
+    assert normalize_currency_code(raw) is None
+
+
+@pytest.mark.parametrize(("raw", "expected"), WELL_FORMED)
+def test_payment_normalizer_uppercases(raw, expected):
+    from app.services.international_payments import normalize_currency_code
+
+    assert normalize_currency_code(raw) == expected
+
+
+def test_a_malformed_home_currency_setting_reads_as_unset():
+    from app.services.international_payments import configured_home_currency
+
+    assert configured_home_currency({"payments": {"home_currency": "US DOLLARS"}}) is None
+    assert configured_home_currency({"payments": {"home_currency": " gbp "}}) == "GBP"
+
+
+@pytest.mark.parametrize("raw", [*MALFORMED, None])
+def test_expense_normalizer_no_longer_defaults_a_non_code(raw):
+    """It used to return ``"USD"`` (or the caller's target) for a blank code,
+    which made an unrecorded currency compare equal to the target."""
+    from app.services.expense_currency import normalize_currency
+
+    assert normalize_currency(raw) is None
+
+
+@pytest.mark.parametrize(("raw", "expected"), WELL_FORMED)
+def test_expense_normalizer_uppercases(raw, expected):
+    from app.services.expense_currency import normalize_currency
+
+    assert normalize_currency(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["", None, "ÄÖÜ"])
+def test_expense_line_with_no_usable_code_is_unconverted_not_face_value(raw):
+    from decimal import Decimal
+
+    from app.services.expense_currency import (
+        line_amount_in_report_currency,
+        rollup_report_lines,
+    )
+
+    assert (
+        line_amount_in_report_currency(
+            amount=Decimal("10"),
+            currency=raw,
+            converted_amount=None,
+            converted_currency=None,
+            report_currency="USD",
+        )
+        is None
+    )
+    rollup = rollup_report_lines(
+        [{"id": "a", "amount": Decimal("10"), "currency": raw}], report_currency="USD"
+    )
+    assert rollup.total == Decimal("0.00")
+    assert rollup.unconverted_count == 1
+
+
+@pytest.mark.parametrize("raw", ["", None, "ÄÖÜ"])
+def test_expense_report_gate_figure_is_unknown_without_a_usable_code(raw):
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from app.services.expense_currency import report_amount_for_gate
+
+    report = SimpleNamespace(
+        currency=raw, total_amount=Decimal("10"), reporting_amount=None, reporting_currency=None
+    )
+    # None is the fail-closed signal: the caller requires CFO sign-off.
+    assert report_amount_for_gate(report, reporting_currency="USD") is None
+    assert report_amount_for_gate(
+        SimpleNamespace(currency="USD", total_amount=Decimal("10"), reporting_amount=None),
+        reporting_currency="usd",
+    ) == Decimal("10.00")
+
+
+async def test_expense_lock_refuses_without_a_usable_code():
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from app.services.expense_currency import ExpenseConversionError, lock_expense_conversion
+
+    for src, tgt in (("", "USD"), ("ÄÖÜ", "USD"), ("USD", "")):
+        expense = SimpleNamespace(amount=Decimal("10"), currency=src)
+        with pytest.raises(ExpenseConversionError):
+            await lock_expense_conversion(expense, target_currency=tgt, fx_adapter=None)
+
+
+def test_policy_threshold_currency_only_falls_back_when_unset():
+    from types import SimpleNamespace
+
+    from app.services.expense_policy import threshold_currency_for
+
+    assert threshold_currency_for(SimpleNamespace(threshold_currency=None), "gbp") == "GBP"
+    assert threshold_currency_for(SimpleNamespace(threshold_currency=" "), "GBP") == "GBP"
+    assert threshold_currency_for(SimpleNamespace(threshold_currency="eur"), "GBP") == "EUR"
+    # Set but not a code: never silently re-denominated in the default.
+    assert threshold_currency_for(SimpleNamespace(threshold_currency="ÄÖÜ"), "GBP") == ""
+
+
+def test_reconciliation_currency_keeps_a_malformed_code_distinct_from_unknown():
+    from app.services.bank_reconciliation import reconciliation_currency
+
+    assert reconciliation_currency(None) == ""
+    assert reconciliation_currency("  ") == ""
+    assert reconciliation_currency(" usd ") == "USD"
+    # Stated but malformed: equals no real code, so it reads as a mismatch.
+    assert reconciliation_currency("ÄÖÜ") not in ("", "USD")
+
+
+# ---------------------------------------------------------------------------
+# Source scan: no inline `.strip().upper()` on a currency value under app/
+# ---------------------------------------------------------------------------
+
+_INLINE_NORMALISE = re.compile(r"\.strip\(\)\s*\.upper\(\)|\.upper\(\)\s*\.strip\(\)")
+_CURRENCY_NAME = re.compile(r"currency|ccy", re.IGNORECASE)
+
+#: Files still carrying inline normalisations, with how many. It only shrinks:
+#: a file over its count fails, and a file that is clean fails until its entry
+#: is removed. Each is another lane's file (decisions §381 is the owner rule).
+_INLINE_ALLOWLIST = {
+    "app/api/credit_memos.py": 3,
+    "app/services/currency_conversion.py": 5,
+}
+
+
+def _inline_currency_normalisations() -> dict[str, int]:
+    app_dir = Path(__file__).resolve().parent.parent / "app"
+    found: dict[str, int] = {}
+    for path in sorted(app_dir.rglob("*.py")):
+        rel = path.relative_to(app_dir.parent).as_posix()
+        for line in path.read_text(encoding="utf-8").splitlines():
+            code = line.split("#", 1)[0]
+            if _INLINE_NORMALISE.search(code) and _CURRENCY_NAME.search(code):
+                found[rel] = found.get(rel, 0) + 1
+    return found
+
+
+def test_currency_values_normalise_through_the_owner():
+    found = _inline_currency_normalisations()
+    over = {f: n for f, n in found.items() if n > _INLINE_ALLOWLIST.get(f, 0)}
+    assert not over, (
+        "Normalise a currency through app/utils/currency_code.iso_currency_or_none "
+        f"(or normalize_iso_currency), not inline .strip().upper(): {over}"
+    )
+
+
+def test_inline_currency_allowlist_only_shrinks():
+    found = _inline_currency_normalisations()
+    clean = sorted(f for f in _INLINE_ALLOWLIST if f not in found)
+    assert not clean, f"Remove these now-clean files from _INLINE_ALLOWLIST: {clean}"

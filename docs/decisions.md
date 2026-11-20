@@ -23493,3 +23493,523 @@ Tests: `backend/tests/test_portal_self_service.py` (live statuses refused with
 the coded detail and verdict, a split leg, a rejected or foreign-vendor invoice
 not blocking, the flipped PO's verdict and its replay);
 `frontend/src/lib/types/purchaseOrder.test.ts`.
+
+## 469. A PO billed past its total across invoices is a review warning, and a rejected flip still counts as invoiced (round 25, 2026-11-19)
+
+**Problem.** §468 refused a flip of a PO the vendor had already invoiced, and
+left the reverse order open: after a flip, a portal submit, an emailed invoice
+or AP keying for the same order passed every check. The flipped invoice has no
+number for duplicate detection to match, and PO matching compares one invoice
+with the PO, not with what other invoices already bill against it. Separately,
+§468 counted a rejected invoice as not billing, which is right for the
+supplier's ordinary invoice but not for the PO's own flip. The flip's
+`po-flip:<po_id>` marker is unique in every status (migration 0024), so after a
+rejection the row offered "Create invoice" while the endpoint could only replay
+the rejected invoice.
+
+**Decision 1: an over-billing warning, not a hold.**
+`invoice_warnings._refresh_po_overbilling`, run inside the PO match, sums the
+other invoices billing the matched PO and adds `po_billed_beyond_total`
+(type `po_overbilled`, severity `warning`) when they and this invoice exceed
+the PO total by more than the match rule's tolerance. Its `currency` param is
+the normalised ISO code, not the invoice's raw field. A sibling is any other
+invoice in every status but `rejected`, in the PO's currency, that:
+
+- last matched this PO (`po_match->>'po_id'` is its id);
+- or was linked to it by a multi-PO split (`split_po_ids` holds its id). The
+  split counts at its whole amount, because its amount cannot be attributed to
+  one leg and overcounting is the safe direction;
+- or is not matched to any PO yet (a `new` invoice, or one reopened to `new`)
+  and cites the PO's number within the PO's entity, naming the PO's vendor or
+  no vendor.
+
+So another vendor's invoice citing the same number does not count: it bills
+that vendor's order. The flip refusal (`api/portal._pos_already_invoiced`) is
+vendor-scoped and reads the number and the split legs only; this rule is wider
+because AP reads it and any bill matched to the order counts. The sum is exact
+`Decimal`. It runs only on a single-PO match whose total is trustworthy and in
+the invoice's own currency. A cancelled, unissued, unvouched or other-currency
+PO already raises its own finding.
+
+Why not a payment-blocking `po_mismatch`: the sum crosses invoices, and their
+changes (a credit memo, a corrective re-bill, a sibling rejected or reopened
+after this refresh) do not re-run this invoice's warnings. A hold would go
+stale both ways: it would hold a legitimate bill after its sibling was rejected,
+or miss a sibling reopened later. A hold would also need a re-match of every
+sibling on each status change, which no transition does today. Why its own
+type: the invoice modal shows `po_mismatch` warnings only through the PO-match
+panel's `issues`, and this finding is not one of them. `refresh_po_match_only`
+rebuilds the new type together with the match, so a PO-only refresh neither
+duplicates it nor keeps a stale copy.
+
+**It departs from §249, and closes the gap that leaves.** §249's principle is
+that a finding which means the invoice could over-pay is a hold, not a note.
+This one means exactly that, and is still a warning, for the staleness reason
+above: a hold that cannot be kept true would refuse legitimate bills and give
+false comfort on the rest. A warning alone, though, would let an invoice be
+approved and paid with no person reading it. So the warning stops every
+unattended approval instead: `invoice_warnings.po_match_hold_refusal` answers
+`po_overbilled` (`UNATTENDED_APPROVAL_PO_OVERBILLED`) when the freshly
+refreshed invoice carries it, which sends extraction's auto-approve and
+`/complete`'s `auto_approve_below` floor to `ready_for_review` with
+`auto_approve_suppressed: "po_overbilled"` on the audit row, as §425 does for
+a hold. An exception agent's approval is no person reading it either: the
+coordinator unwinds an apply that approved an invoice carrying the warning and
+escalates. A person approving is the review §468 called for, at the moment the
+figure is current.
+
+**Decision 2: a rejected flip still counts as "already invoiced".**
+`_pos_already_invoiced` counts a rejected invoice when its `reference_number`
+is that PO's own flip marker, and counts it for that PO only, so a flip
+edited to cite another PO cannot mark that one invoiced. A rejected flip is
+reopened, not replaced: the
+supplier's `/resubmit`, or AP moving it `rejected → new`. A second flip beside
+it is impossible (the unique marker) and would also be wrong: reopening the
+first would double-bill the order. So `flip_verdict` and the endpoint now
+agree. The verdict refuses with `po_already_invoiced`, and a retry still
+replays the rejected invoice with its status, as §468's replay order requires.
+Reopening changes nothing for the flip gate: the invoice is live again and
+still counts. A supplier's ORDINARY rejected invoice keeps §468's rule. It
+does not block a flip, and if that invoice is reopened after a flip, the
+over-billing warning from Decision 1 surfaces the second bill.
+
+**Left alone.** Credit memos are not netted off the billed sum. The warning
+names the figure and the reviewer judges it, which is a further reason it is
+not a hold.
+
+Tests: `backend/tests/test_po_matching_critical_path.py` (flip then a second
+bill warns with exact params; rejecting the flip clears it, reopening brings
+it back; two halves and an other-currency invoice do not warn; the tolerance
+boundary to the cent; one warning after two PO-only refreshes; a split leg
+counts; another vendor's same-numbered PO does not);
+`backend/tests/test_invoice_complete_auto_approve.py` and
+`backend/tests/test_extraction_reextract_options.py` (both unattended doors
+land at review with `po_overbilled`); `backend/tests/test_exception_agents.py`
+(the agent unwind);
+`backend/tests/test_portal_self_service.py` (a rejected flip's verdict, its
+replay, and the reopened flip's verdict, with one invoice throughout).
+
+## 470. Invoices billing past what was received of a PO is the same review warning (round 26, 2026-11-19)
+
+**Problem.** §469 made the amount leg cumulative and left the receipt leg
+per-invoice. The matcher measures ONE invoice against the received slice of
+the PO (`received_value`, `po_total × received / ordered`, §249), so with
+400.00 of a 1000.00 PO received, two invoices of 400.00 each fit it: neither
+raised the `billed_beyond_receipt` hold, and together they asked for twice
+what had arrived.
+
+**Decision: the same warning, not a hold.**
+`invoice_warnings._refresh_po_overbilling` measures the same siblings §469
+defined (matched PO id, split legs at their whole amount, an unmatched
+invoice by number within the PO's entity and vendor; every status but
+`rejected`; the PO's currency) against `received_value` at the match rule's
+tolerance, and adds `po_billed_beyond_receipt` (type `po_overbilled`,
+severity `warning`; params `billedAmount`, `poNumber`, `receivedValue`,
+`currency`). The comparison is exact `Decimal`; only the displayed
+`receivedValue` is rounded to the cent, since one unit of three received is
+a non-terminating share. It runs only:
+
+- on a SHORT receipt, the one case where the matcher sets `received_value`.
+  A full receipt's slice is the whole PO, which the total check measures.
+- when this invoice alone fits what arrived. If it does not, the matcher's
+  `billed_beyond_receipt` has already raised the payment-blocking
+  `po_mismatch` (§249), and a second sentence would add nothing.
+- when the total check did not fire. Past the whole PO, no receipt can cure
+  the bill, so only `po_billed_beyond_total` is written.
+
+Sharing the type gives it §469's consequences with no new wiring:
+`po_match_hold_refusal` answers `po_overbilled`, so extraction's
+auto-approve and `/complete`'s floor send the invoice to review; the
+exception-agent coordinator unwinds an approval that leaves it standing; and
+`refresh_po_match_only` rebuilds it rather than appending.
+
+**Why not a hold, against §249.** §249 holds a finding that means the
+invoice could over-pay, and this one does. It is still a warning for §469's
+reason, plus one that is sharper here. §469's reason: the sum crosses
+invoices, and a sibling rejected, reopened or credited does not re-run this
+invoice's warnings, so a hold would go stale both ways. The receipt side is
+better served than the amount side, because recording or cancelling a goods
+receipt re-matches every invoice citing the PO in the same transaction
+(`refresh_invoices_citing_pos`), so the delivery that covers the bills drops
+the finding at once. The sibling side is not. The sharper reason: the
+finding cannot say which bill is the excess one. Each invoice sees the
+others, so every bill on the PO carries it. A payment-blocking hold would
+stop the legitimate first bill along with the second, and clearing a
+`po_mismatch` is an SoD-gated sign-off (§169–§170) that the first bill's
+approver would then need for an invoice that was never wrong. A warning that
+stops every unattended approval puts a person in front of the figure on
+every bill, which is the review the finding asks for.
+
+**Left alone.** Receipts are still valued pro rata across the PO's lines, so
+receiving the cheap lines of a mixed order overstates the received value for
+both the per-invoice hold and this warning. That is the narrowed
+`docs/followups.md` entry: value receipts per line in the matcher's
+`received_value`, which both read. Credit memos are not netted, as in §469.
+
+**Amended (round 26 gate): a hold past approval, and the implicated
+receipt.** A money-path review found the warning-only rule open after
+approval. Two receipts of 4 units (800.00 of a 1000.00 PO) and two bills of
+400.00, both approved with no finding; the second receipt is cancelled
+(§262 allows it). The re-match finds each bill alone within 400.00, so no
+per-invoice hold, only this warning, which no reviewer will read again and
+nothing on the payment path reads. A run would pay 800.00 for 400.00
+received. So:
+
+- **Past approval, a new or worse finding is a hold.** On an invoice outside
+  `PRE_APPROVAL_STATUSES`, `_refresh_po_match` raises the payment-blocking
+  `po_mismatch` with the warning's own sentence, through the same
+  `_ensure_exception` the per-invoice receipt leg uses. The run builder and
+  every dispatch refuse it, and clearing it is the SoD-gated sign-off
+  (§169–§170, §420). §249's principle wins here because the staleness reason
+  is weakest: the event that raises it (a receipt cancelled) re-matches every
+  bill on the PO in the same transaction, and the hold, once raised, closes
+  on the refresh that no longer finds it.
+- **Only when new or worse since the last refresh**
+  (`_beyond_receipt_worsened`): no such finding before, less received, more
+  billed, another PO or currency, or an unreadable old figure (fail closed).
+  An approver who signed off with the unchanged warning in front of them was
+  the review the warning asked for; holding that bill would make their
+  approval need a second sign-off for nothing new. The cost: a figure that
+  worsens and recovers to its old value between two refreshes is not
+  re-held. Once raised, any open `po_mismatch` is kept found while the
+  finding stands (`_open_po_mismatch_hold`; any row, because
+  `_ensure_exception` folds a finding into the row already open), so repeated
+  refreshes keep one row.
+- **Clearing follows the existing rule.** The refresh that no longer finds it
+  closes it through `_close_cleared_po_exceptions`, which keeps it while a
+  live manual receipt on the PO was typed in by someone implicated in the
+  invoice, by nobody known, or by an approver (`receipts_clear_hold`, §262,
+  §389).
+- **An implicated receipt stops unattended approval.** Before approval no row
+  exists for that rule to hold, so a receipt typed in by the uploader could
+  make the warning (or the per-invoice hold) vanish before anyone read it.
+  `po_match_hold_refusal` now answers `po_receipt_implicated`
+  (`UNATTENDED_APPROVAL_PO_RECEIPT_IMPLICATED`) while
+  `receipts_clear_hold` is False for the matched PO ids, lifted by
+  `settings.exceptions.require_segregation: false` as the auto-close's
+  rule is. A NULL recorder on a manual receipt counts as unknown, as it
+  already did there; a receipt with no `source` (an ERP or pre-entry row) is
+  trusted.
+- **Runs.** A new run refuses the invoice (`run_refusal_reasons`). A draft
+  run's payment is refused before money moves, at rail dispatch, NACHA export
+  and the paid-elsewhere close-out (`payment_runs.dispatch_preflight`,
+  `invoice_blocked:po_mismatch`, retry-safe). A NACHA file already exported
+  has gone with the customer's upload; the hold cannot recall it and only
+  puts the invoice in the exception queue.
+- **The total leg gets no post-approval hold.** A PO total rarely moves after
+  approval, and §469's warning already covers that leg.
+- **Wording.** The sentence now states every live bill on the PO, this one
+  included (`totalBilled`), against the value received; it used to read as
+  if the received value were part of what the others billed.
+
+Tests: `backend/tests/test_po_matching_critical_path.py` (two 400.00
+invoices against 400.00 received both warn with exact params and neither is
+held alone; the 5 % boundary to the cent; 3 of 7 units with two 225.00 bills
+does not warn; past the total only the total finding; one of three units
+received named as 333.33; two PO-only refreshes keep one finding, unattended
+approval answers `po_overbilled`, and a receipt for the rest of the delivery
+clears both on the next refresh; through `create_goods_receipt` /
+`cancel_goods_receipt`, a receipt cancelled after approval holds both bills,
+a run refuses them, a refresh keeps one row and a new receipt lifts it; an
+implicated recorder's receipt does not; `po_receipt_implicated` and its
+opt-out; an approval over the unchanged warning raises no hold; the
+new-or-worse comparison).
+
+Tests: `backend/tests/test_po_matching_critical_path.py` (two 400.00 invoices
+against 400.00 received both warn with exact params and neither is held
+alone; the 5 % boundary to the cent; past the total only the total finding;
+one of three units received named as 333.33; two PO-only refreshes keep one
+finding, unattended approval answers `po_overbilled`, and a receipt for the
+rest of the delivery clears both on the next refresh).
+
+## 471. The dashboard counts overdue and due-soon AP over the whole book, by the /cfo card's predicate (round 27, 2026-11-19)
+
+The mobile dashboard had no overdue figure, and its "Upcoming" card read
+`upcoming_payments`, which the server caps at ten rows ordered by due date.
+Overdue rows sort first, so a count read off that list stops at ten, and a
+due-soon count read off it can be zero in a week when invoices fall due.
+`GET /api/dashboard` now serves `overdue_count` / `overdue_total` and
+`due_soon_count` / `due_soon_total`, counted in SQL over the whole book and
+scoped to the selected entity.
+
+**One predicate, the /cfo card's.** `services/open_ap_due.py` holds the
+population, the effective due date (the latest payment schedule's, else the
+invoice's own) and "overdue" (strictly before today). The cash-flow forecast
+(`api/analytics._commitment_rows`, and with it the /cfo "Overdue (owed now)"
+card, §449) and the dashboard both read it. So `overdue_count` equals the
+forecast's `totals.overdue_count`, and a test pins that equality.
+
+**In-review invoices count as overdue.** The population is open AP plus the
+in-review pipeline (`new`, `pending`, `ready_for_review`), which is what the
+/cfo card counts with the forecast's default `include_pending=true`. An
+invoice still in review past its due date is still late. Leaving it out
+would make the two surfaces disagree, and it would hide the invoices most
+likely to need chasing.
+
+**Totals are face value, per currency.** Each `*_total` is a list of
+`{currency, amount, count}`, grouped on the invoice's own code and never
+converted. A count of invoices owed now should not depend on whether each
+one has a rate lock, and a converted total that is partly face value needs
+its own disclosure (§35). A row with no code groups under `null`, and a
+client renders it without a symbol rather than a guessed one (§160). The
+mobile card shows one compact figure per currency (`€1K · $2.1K`).
+
+**`due_soon_*` lets "Upcoming" mean due soon.** The brief asked only for the
+overdue pair, but the capped list also counted overdue rows as "Upcoming",
+and it could not answer "due this week" either. `due_soon_*` is the same
+population, due today through seven days out. Mobile's Upcoming card reads
+it. A payload or cache without the fields shows the legacy figure and no
+Overdue card, never a `0` that nobody reported.
+
+**Left alone.** The web dashboard still renders its own upcoming list; it
+could read these fields and was not changed in this round. The mobile
+Overdue card does not tap through, because `GET /api/payments/queue` has no
+overdue filter and lists approved invoices only. That is tracked in
+`docs/followups.md`.
+
+Tests: `backend/tests/test_dashboard_aggregates.py` § 5 (fifteen overdue
+against the ten-row list, equality with the forecast, schedule dates winning
+both ways, in-review in, rejected, paid and undated out, per-currency
+totals, entity scope); `mobile/test/screens/dashboard_screen_test.dart`
+(overdue and due-soon cards, zero, absent fields, offline cache,
+currency-less group).
+
+## 472. A contract limit the invoice's currency cannot measure is a finding, and a not-to-exceed one stops unattended approval (round 28, 2026-11-19)
+
+**Problem.** `contract_compliance.evaluate_contract_compliance` measures
+cumulative spend against `spend_limit` only when the invoice's currency
+(`payment_runs.payable_currency_code`) is the contract's. An invoice in
+another currency, or in none (§466), skipped the check and raised nothing, so
+a not-to-exceed contract said nothing about it. A code-less invoice cannot be
+approved or paid (§466), but a foreign-currency one could be, unattended, with
+nobody told that the cap was never checked.
+
+**Decision 1: a finding, never a conversion.** When the contract has a
+`spend_limit` and a valid currency, an invoice in another currency gets
+`contract_currency_mismatch` (params `invoiceCurrency`, `contractNumber`,
+`contractCurrency`, all `text`), and one with no valid currency gets
+`contract_currency_mismatch_invoice_currency_unknown`. Both are type
+`contract_noncompliant`, built through `invoice_warning_catalog.warning`, with
+severity `error` when `not_to_exceed` and `warning` otherwise, as the
+spend-limit codes' severity follows it. Nothing is converted. A rate fetched
+or guessed here would decide whether a contractual cap is passed, which is
+§196's substitution in another place. The figure stays out of the sum, as
+before. Two codes, not a param, because a missing currency is a different
+sentence (the `po_currency_mismatch` pattern). A contract with no limit raises
+neither: there is nothing unmeasured.
+
+**Decision 2: a not-to-exceed `error` stops every unattended approval, and
+the measured breach does too.** §469 stopped the unattended doors for
+`po_overbilled` because a finding that means the invoice could over-pay must
+have a person read it before approval, even when it cannot be a hold. A
+not-to-exceed contract is the customer's statement that spend past the cap
+needs a decision. An amount the cap cannot measure is exactly that case: it may
+be within the cap or past it, and nobody can say which without a rate we
+refuse to guess. So `invoice_warnings.has_contract_cap_warning` (an `error`
+`contract_noncompliant` finding, which only a not-to-exceed contract's
+spend-limit codes carry) makes `po_match_hold_refusal` answer `contract_cap`
+(`UNATTENDED_APPROVAL_CONTRACT_CAP`). Extraction's auto-approve and
+`/complete`'s floor then land at `ready_for_review` with
+`auto_approve_suppressed: "contract_cap"`, and the exception-agent coordinator
+unwinds an apply that approved such an invoice and escalates
+(`_ContractCap`), as it does for `po_overbilled`.
+
+This also covers `contract_spend_limit_exceeded_not_to_exceed`. It was an
+`error` with no consequence on any unattended door. Wiring only the currency
+finding would have stopped an unmeasurable invoice while still auto-approving
+one that measurably breached the cap, which is backwards. The function is
+named for the PO match, but both doors and the floor already ask it, so the
+contract answer lives there rather than as a second question at each door.
+
+**Why not a hold.** §469's reasons hold here too. The spend sum crosses
+invoices, and a sibling rejected or relinked does not re-run this invoice's
+warnings, so a payment-blocking hold would go stale both ways.
+`contract_noncompliant` is not in `PAYMENT_BLOCKING_EXCEPTION_TYPES` and stays
+out. A non-not-to-exceed contract keeps its advisory meaning: the finding is a
+`warning` and stops nothing.
+
+**Left alone.** A contract whose own stored currency is invalid (the API
+validates it, so only an old or hand-edited row) raises no currency finding.
+The prior-spend query still compares the raw `contract.currency`.
+
+Tests: `backend/tests/test_contracts.py` (other currency and no currency, each
+with `not_to_exceed` on and off, with exact params and no spend query; the
+same currency unchanged, over and under the limit; no limit, no finding;
+`has_contract_cap_warning` reads only an `error`; through the real link route,
+`po_match_hold_refusal` answers `contract_cap` for a not-to-exceed contract and
+nothing otherwise); `backend/tests/test_exception_agents.py` (the agent
+unwind).
+
+## 473. An invoice records "currency unknown" as NULL, and the upload creates it that way (closes two followups; extends §453, §457, §460; round 28, 2026-11-19)
+
+`invoices.currency` was NOT NULL with a column default of `"USD"`. `POST
+/api/invoices/upload` and the supplier-portal submit created the row as USD
+before anything had read the document, and an extraction that found no code
+(§308 fills it from a printed code when there is one) left it there: the
+default §160/§196/§200 forbid. Rows blanked by the invoice PATCH before §460
+held `""` instead, a sentinel every money path had to know.
+
+Migration 0136 (tenant) drops NOT NULL and turns every value that is blank
+after trimming whitespace into NULL, so NULL is the one spelling of unknown.
+The upload and the portal submit pass `currency=None`. No code is backfilled
+or removed: a row the old upload stamped USD cannot be told apart from a real
+USD invoice, and guessing either way manufactures a refusal or a currency
+nobody recorded (§141).
+
+The column default is gone, because a SQLAlchemy column `default` also
+replaces an explicit `None` at INSERT, which turned the upload's NULL back into
+USD (the migration test caught it). `Invoice.__init__` keeps `"USD"` only for
+a construction that does not mention `currency` at all, which about a hundred
+test fixtures rely on. `tests/test_invoice_currency_explicit.py` pins that
+every `Invoice(...)` under `app/` names its currency, so that fallback never
+labels a real document.
+
+Readers. Every money-path refusal already went through
+`payment_runs.payable_currency_code`, which answers `None` for NULL, blank and
+malformed alike, and `api/payments._queue_currency_unknown` coalesces NULL, so
+`currency_unknown` fires unchanged on the run builder, the payment queue,
+`POST /api/payments`, dispatch, `/draft-run` and the card mint, and the
+approval gates read the amount as inexpressible (§466). The tests now drive
+those refusals with NULL as well as the legacy blanks. Five readers stamped
+USD on an unknown currency and now do not: the statistical-anomaly history
+(an unknown-currency invoice has no comparable history, so it is not scored),
+the `invoice.*` and `exception.raised` webhook payloads (`currency: null`), the
+invoice-register CSV (a blank cell) and the assistant's invoice and
+pending-approval rows. The response schemas that carry an invoice's currency
+(`InvoiceResponse`, the credit-memo picker's eligible invoice, the supplier
+portal's invoice list, the public `V1Invoice`) are `str | None`, so a NULL row
+reads back as `null` rather than a 500, and the published v1 OpenAPI says so.
+The invoice PATCH is unchanged (§460): leaving `currency` out edits an unknown
+row, and an explicit `null` or blank is still the coded 422.
+
+Rejected: keeping `""` as the sentinel and only fixing the upload, which keeps
+two spellings of unknown; and backfilling a code from the org's home or
+reporting currency, which is the substitution with a different default.
+
+Amended in the round 28 gate review. **Rollups.** An unknown currency (NULL,
+blank or malformed, judged by `payment_runs.payable_currency_code`, and in SQL
+by `currency_conversion.invoice_currency_key_sql` with the same trim set and
+pattern) is never the reporting currency. Every invoice rollup groups such
+rows under a `None` key and counts each in `unconverted_count`, whatever lock
+it carries; `materialize_reporting_amount` never locks one and clears a 1:1
+lock written before this decision; the payment-amount resolver behind the
+1099, risk and cash-flow totals reads it as not expressible; and the
+unrealized-FX report counts it without valuing it. **More doors closed.** Email
+intake creates its invoice with `currency=None`; inbound PEPPOL never guesses
+one (UBL requires `DocumentCurrencyCode`: a missing or short code fails the
+structural validator and books no invoice, and a code that passes it but is
+not an ISO shape, such as `ÉUR`, is recorded as NULL — corrected in the round
+29 gate review, which found the first half was a rejection, not a NULL); a PO flip on a PO with no currency
+books NULL; an invoice warning carries an unknown currency as `""`, which both
+clients render as bare digits; the supplier portal's payment list, the
+email-approval page, the virtual-card email and the workflow builder's context
+omit the code instead of saying USD; and an invoice-scoped discount offer on
+such an invoice is refused (`discount_offer_currency_required`, superseded in
+round 31 below) unless the caller names a currency.
+`tests/test_invoice_currency_explicit.py` also refuses a literal or
+`or`-defaulted currency, `Invoice(**kwargs)` and `module.Invoice(...)` at an
+application construction site. `InvoiceCreate` still defaulted `currency` to
+USD for an API caller that omitted it; closed in round 31 below.
+
+Amended in the round 29 gate review. **A credit takes no unknown-currency
+invoice.** A linked credit-memo create and `POST /credit-memos/{id}/apply` on
+an invoice whose currency is unknown (NULL, blank or malformed, by
+`payable_currency_code`) are refused with 409
+`credit_memo_invoice_currency_unknown`, whether or not the caller names a
+currency, until the invoice's own currency is set; both eligible-invoice
+pickers leave such an invoice out (`invoice_currency_key_sql` is not NULL).
+The round 28 form admitted the create once the caller named a currency
+(`credit_memo_currency_required` otherwise, now gone): that compared a EUR
+memo with a balance in no stated currency, and since the run builder refuses
+the invoice as `currency_unknown` until someone sets a code, the applied EUR
+credit then all but decided which code that would be. This supersedes the
+"blank invoice currency admitted" clause of the currency leg in §202 for
+create, apply and both pickers. §214's edit guard keeps its legacy-blank
+admission, which now only ever covers a credit applied before this amendment.
+
+Amended in round 31. **A create states its currency.** `POST /api/invoices`
+no longer defaults an omitted `currency` to USD: an omitted, null or blank code
+is the coded 422 `invoice_currency_required`, a malformed one
+`invoice_currency_invalid`, through the PATCH's own
+`refusals.invoice_currency(..., creating=True)` (§460). The field is raw on the
+schema so the refusal is coded rather than Pydantic's list; every pytest and
+Playwright caller that leaned on the default now names USD, and the web form
+already refused a blank field. **A discount offer takes no unknown-currency
+invoice either.** An invoice-scoped offer on an invoice whose currency is
+unknown (by `payable_currency_code`) is the 409
+`discount_offer_invoice_currency_unknown` whether or not the caller names a
+currency, for the reason the credit memo is (round 29 above): a EUR offer on a
+balance in no stated currency cannot be proved to price it, and once accepted
+it would all but decide the invoice's code. `discount_offer_currency_required`
+is gone. **An offer's own unknown code is unconvertible.** `build_opportunity`
+read `offer.currency or "USD"`; it now carries `iso_currency_or_none`, and the
+optimizer treats `None` as unconvertible whatever the reporting currency (even
+for a caller that passes none), so the offer keeps its currency-free ROI but
+joins no total and never spends a cash budget. Persisted offers are NOT NULL,
+so this only reaches a legacy malformed row.
+
+**Settings: only UNSET falls back.** `settings.payments.home_currency` that is
+set but not a code used to read as USD on the payment path: `"EURO"` paid a
+USD→EUR leg at a real FX lock, and a GBP org that typed `"GBR"` paid a USD
+invoice as domestic and skipped the international KYC.
+`international_payments.resolve_home_currency` now falls back to
+`DEFAULT_HOME_CURRENCY` only for an unset value (absent, null, blank) and
+raises `HomeCurrencyInvalidError` (`home_currency_invalid`) for a malformed
+one, the rule `expense_policy.threshold_currency_for` already applies.
+`_execute_single_payment` resolves it once, before the card and processor
+legs, and fails the payment `international_payment_error:
+home_currency_invalid` (retry-safe: no order exists yet);
+`prepare_international_payment` refuses it; the card mint skips the invoice as
+`card_skip_home_currency_invalid`. `PATCH /api/organization` validates the
+field on write (422 `organization_home_currency_invalid`; blank stores null),
+so only a row written before that check, or by hand, reaches the refusal.
+`currency_conversion.resolve_reporting_currency` applies the same rule to each
+rung: unset falls through, set returns its code, set-but-malformed answers
+`""`, a currency nothing is denominated in, so every amount reads as
+unconverted — never a garbled code passed on (rungs 1 and 3 did) and never a
+fall-through to a currency the org did not choose (rung 2 did).
+`payment_controls.cfo_approval_decision` carries such a reporting currency as
+`None`, not a `USD` label, and requires sign-off (`amount_not_expressible`).
+Rejected: raising from `resolve_reporting_currency`, which has 56 callers and
+backs every dashboard; `""` fails closed without a 500.
+
+**Three more readers.** SYSPRO's `po_is_foreign` compares a header with the
+local currency under SYSPRO's own code rule first (`$` is valid there and not
+ISO), so `$` against `$` is local; only a label matching neither rule is
+unknown. Bank reconciliation's settlement pair, and its SQL mirror, read a
+whitespace-only `source_currency` as no FX stamp (`reconciliation_currency`),
+so the currency check is not skipped on it. An expense pre-approval with no
+currency is unknown rather than USD and covers nothing.
+
+## 474. An employee access token with no `org` claim is refused, not trusted to a later lookup (round 30, 2026-11-19)
+
+`tenant.get_tenant` cross-checks the JWT's `org` claim against the tenant the
+`X-Tenant-Slug` header resolves. It used to let an employee token *without* an
+`org` claim through, on the reasoning that the user lookup afterwards would
+fail closed. It does not: `get_current_user` finds the account by `sub` alone
+and never compares its organisation with the resolved tenant. A signed token
+with no `org` would therefore open whichever tenant the header named.
+
+Not exploitable today: every access token we mint carries `org`, and the only
+same-key tokens without it (the MFA challenge tokens) are refused by
+`get_current_user`. Forging a claim-less token needs the signing key. But the
+skip turned the tenant chokepoint into a check that depends on how tokens
+happen to be minted elsewhere, and `organization_close.py` had already grown
+its own compensating check because of it.
+
+**Decision:** `get_tenant` refuses an employee token with no `org` claim (absent, or present but empty) with
+the same 403 `token_tenant_mismatch` as a mismatched one. The MFA challenge
+token types stay exempt, because they are scoped to the challenge flow, never
+to tenant data. The chokepoint now stands on its own.
+
+Rejected: comparing the user's organisation inside `get_current_user` instead.
+That moves the tenant rule out of the one place the invariant names
+(root CLAUDE.md, Project invariants), and every other dependency that reads
+the tenant would still trust the header.
+
+Tests: `tests/test_tenant_auth_sweep.py` sweeps every tenant-resolving
+employee route with a cross-tenant token and with a claim-less one, through the
+production dependency chain. `tests/test_portal_cross_vendor.py` covers every
+by-id portal route, so one supplier gets the same 404 for another's id as for
+an unknown one. `tests/test_tenant_isolation.py` pins the refusal and the MFA
+exemption.

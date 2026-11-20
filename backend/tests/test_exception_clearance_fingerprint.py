@@ -68,7 +68,7 @@ _NOT_RAISED_BY_REFRESH = {
 
 
 def test_every_payment_blocking_type_is_covered():
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     assert set(PAYMENT_BLOCKING_EXCEPTION_TYPES) == set(_COVERED_BY) | _NOT_RAISED_BY_REFRESH
     assert not set(_COVERED_BY) & _NOT_RAISED_BY_REFRESH

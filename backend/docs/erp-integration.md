@@ -1396,7 +1396,7 @@ or a locale that leaves a placeholder unfilled.
 
 A bill in the ERP can be paid there (QuickBooks "Mark as paid", Bill Pay), past
 our payment-run gate. So the push refuses while the invoice has an open or
-escalated exception of a type in `api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`:
+escalated exception of a type in `services/payment_gates.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`:
 `duplicate` and `fraud_flag`, the two payment-blocking types that say the
 liability itself is wrong. The other four payment-blocking types are holds on
 *paying* a real liability and do not refuse it (decisions §286 has the per-type

@@ -198,6 +198,12 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get commonRetry;
 
+  /// No description provided for @commonLoadErrorConnection.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t reach FeohLedger. Check your connection and tap Retry.'**
+  String get commonLoadErrorConnection;
+
   /// No description provided for @commonAll.
   ///
   /// In en, this message translates to:
@@ -312,6 +318,12 @@ abstract class AppLocalizations {
   /// **'For Review'**
   String get dashboardForReview;
 
+  /// Dashboard KPI title: open invoices past their due date, counted over the whole book.
+  ///
+  /// In en, this message translates to:
+  /// **'Overdue'**
+  String get dashboardOverdue;
+
   /// No description provided for @dashboardApproved.
   ///
   /// In en, this message translates to:
@@ -369,7 +381,7 @@ abstract class AppLocalizations {
   /// No description provided for @dashboardRefreshFailed.
   ///
   /// In en, this message translates to:
-  /// **'Couldn\'t refresh — these are the last figures loaded. Pull down to try again.'**
+  /// **'Couldn\'t refresh — these are the last figures loaded. Tap Retry to try again.'**
   String get dashboardRefreshFailed;
 
   /// No description provided for @dashboardNeedsAttention.
@@ -600,23 +612,17 @@ abstract class AppLocalizations {
   /// **'No notifications'**
   String get notificationsEmpty;
 
-  /// No description provided for @notificationsCaughtUp.
-  ///
-  /// In en, this message translates to:
-  /// **'You\'re all caught up'**
-  String get notificationsCaughtUp;
-
   /// No description provided for @notificationsNothingYet.
   ///
   /// In en, this message translates to:
   /// **'Nothing here yet'**
   String get notificationsNothingYet;
 
-  /// No description provided for @notificationsLoadError.
+  /// Notifications list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Couldn\'t load notifications'**
-  String get notificationsLoadError;
+  /// **'Couldn\'t load notifications: {error}'**
+  String notificationsLoadErrorPrefix(String error);
 
   /// No description provided for @vendorsTitle.
   ///
@@ -672,11 +678,11 @@ abstract class AppLocalizations {
   /// **'No vendors found'**
   String get vendorsEmpty;
 
-  /// No description provided for @vendorsLoadError.
+  /// Vendors list first-load failure carrying the server's own reason (a 403 / 500 detail). A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Could not load vendors'**
-  String get vendorsLoadError;
+  /// **'Couldn\'t load vendors: {error}'**
+  String vendorsLoadErrorPrefix(String error);
 
   /// No description provided for @vendorActionVerify.
   ///
@@ -840,11 +846,11 @@ abstract class AppLocalizations {
   /// **'No payments'**
   String get paymentsEmpty;
 
-  /// No description provided for @paymentsErrorPrefix.
+  /// Payments history first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Error: {error}'**
-  String paymentsErrorPrefix(String error);
+  /// **'Couldn\'t load payments: {error}'**
+  String paymentsLoadErrorPrefix(String error);
 
   /// No description provided for @paymentStatusPending.
   ///
@@ -893,12 +899,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No invoices waiting for approval'**
   String get approvalsNoneWaiting;
-
-  /// No description provided for @approvalsLoadError.
-  ///
-  /// In en, this message translates to:
-  /// **'Could not load pending approvals'**
-  String get approvalsLoadError;
 
   /// No description provided for @approvalsPendingCount.
   ///
@@ -1980,17 +1980,17 @@ abstract class AppLocalizations {
   /// **'No invoices awaiting payment'**
   String get payQueueEmpty;
 
-  /// No description provided for @payQueueError.
+  /// Pay screen, Queue tab: first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Could not load the payment queue'**
-  String get payQueueError;
+  /// **'Couldn\'t load the payment queue: {error}'**
+  String payQueueLoadErrorPrefix(String error);
 
-  /// No description provided for @payQueueRetry.
+  /// Pay screen, Runs tab: first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Retry'**
-  String get payQueueRetry;
+  /// **'Couldn\'t load payment runs: {error}'**
+  String payRunsLoadErrorPrefix(String error);
 
   /// No description provided for @payQueueDue.
   ///
@@ -2850,11 +2850,11 @@ abstract class AppLocalizations {
   /// **'Workflow'**
   String get workflowDetailFallbackTitle;
 
-  /// No description provided for @workflowDetailLoadError.
+  /// No description provided for @workflowDetailErrorPrefix.
   ///
   /// In en, this message translates to:
-  /// **'Could not load workflow'**
-  String get workflowDetailLoadError;
+  /// **'Could not load the workflow: {error}'**
+  String workflowDetailErrorPrefix(String error);
 
   /// No description provided for @workflowDetailNoSteps.
   ///
@@ -3465,11 +3465,11 @@ abstract class AppLocalizations {
   /// **'Exception'**
   String get exceptionDetailTitle;
 
-  /// No description provided for @exceptionDetailNotFound.
+  /// No description provided for @exceptionDetailErrorPrefix.
   ///
   /// In en, this message translates to:
-  /// **'Exception not found'**
-  String get exceptionDetailNotFound;
+  /// **'Could not load the exception: {error}'**
+  String exceptionDetailErrorPrefix(String error);
 
   /// No description provided for @exceptionDetailOverdue.
   ///
@@ -4299,11 +4299,11 @@ abstract class AppLocalizations {
   /// **'No inspections with this outcome.'**
   String get inspectionsEmptyFiltered;
 
-  /// No description provided for @inspectionsLoadError.
+  /// Inspections list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
   ///
   /// In en, this message translates to:
-  /// **'Could not load inspections'**
-  String get inspectionsLoadError;
+  /// **'Couldn\'t load inspections: {error}'**
+  String inspectionsLoadErrorPrefix(String error);
 
   /// No description provided for @inspectionsResultPass.
   ///
@@ -5015,6 +5015,26 @@ abstract class AppLocalizations {
     String poTotal,
   );
 
+  /// No description provided for @invoiceWarningPoBilledBeyondTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'Other invoices already bill {billedAmount} against PO {poNumber}, whose total is {poTotal} — this invoice takes it past that total'**
+  String invoiceWarningPoBilledBeyondTotal(
+    String billedAmount,
+    String poNumber,
+    String poTotal,
+  );
+
+  /// No description provided for @invoiceWarningPoBilledBeyondReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoices on PO {poNumber} bill {totalBilled}, this one included; goods worth {receivedValue} have been received'**
+  String invoiceWarningPoBilledBeyondReceipt(
+    String totalBilled,
+    String poNumber,
+    String receivedValue,
+  );
+
   /// No description provided for @invoiceWarningPoAmountVariancePoCurrencyUnknown.
   ///
   /// In en, this message translates to:
@@ -5200,6 +5220,25 @@ abstract class AppLocalizations {
     String cumulativeSpend,
     String contractNumber,
     String spendLimit,
+  );
+
+  /// No description provided for @invoiceWarningContractCurrencyMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice is in {invoiceCurrency} but contract {contractNumber} is in {contractCurrency} — its spend limit was not checked'**
+  String invoiceWarningContractCurrencyMismatch(
+    String invoiceCurrency,
+    String contractNumber,
+    String contractCurrency,
+  );
+
+  /// No description provided for @invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'The invoice records no valid currency, so the spend limit in {contractCurrency} of contract {contractNumber} was not checked'**
+  String invoiceWarningContractCurrencyMismatchInvoiceCurrencyUnknown(
+    String contractNumber,
+    String contractCurrency,
   );
 
   /// No description provided for @invoiceWarningContractGlNotAllowed.
@@ -6599,6 +6638,557 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Enter a quantity on at least one line'**
   String get grRecordReceiveLines;
+
+  /// No description provided for @listShowingSavedCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing a saved copy — couldn\'t reach the server. Tap Retry to try again.'**
+  String get listShowingSavedCopy;
+
+  /// No description provided for @listRefreshFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t refresh — showing the last list loaded. Tap Retry to try again.'**
+  String get listRefreshFailed;
+
+  /// Exceptions list first-load failure carrying the server's own reason (a 403 / 500 detail). A connection failure uses commonLoadErrorConnection instead.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load exceptions: {error}'**
+  String exceptionsLoadErrorPrefix(String error);
+
+  /// Contracts list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load contracts: {error}'**
+  String contractsLoadErrorPrefix(String error);
+
+  /// A store's error text when the request never reached the server (offline, DNS, timeout, TLS).
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t reach the server. Check your connection and try again.'**
+  String get errorNetworkUnreachable;
+
+  /// A store's error text when the server refused without a sentence of its own.
+  ///
+  /// In en, this message translates to:
+  /// **'The server couldn\'t complete the request (HTTP {status}).'**
+  String errorRequestFailed(int status);
+
+  /// A store's error text for a failure that is neither a server refusal nor a network fault (an unreadable reply).
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong. Please try again.'**
+  String get errorUnexpected;
+
+  /// Run-created toast. `cfo` is `required` when the run trips the CFO approval threshold, else `none`.
+  ///
+  /// In en, this message translates to:
+  /// **'{cfo, select, required{{count, plural, one{Payment run created with {count} payment totalling {amount}. CFO approval is required before it can be executed.} other{Payment run created with {count} payments totalling {amount}. CFO approval is required before it can be executed.}}} other{{count, plural, one{Payment run created with {count} payment totalling {amount}.} other{Payment run created with {count} payments totalling {amount}.}}}}'**
+  String payRunCreated(int count, String amount, String cfo);
+
+  /// Run-created toast when the reply carries no count or total. `cfo` as in payRunCreated.
+  ///
+  /// In en, this message translates to:
+  /// **'{cfo, select, required{Payment run created. CFO approval is required before it can be executed.} other{Payment run created.}}'**
+  String payRunCreatedPlain(String cfo);
+
+  /// No description provided for @payRunApproved.
+  ///
+  /// In en, this message translates to:
+  /// **'Run approved by CFO'**
+  String get payRunApproved;
+
+  /// Run-executed toast. `provider` is the payment adapter's name, as the server reports it.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment run executed via {provider}: {completed, plural, one{{completed} completed} other{{completed} completed}}, {inFlight, plural, one{{inFlight} in flight} other{{inFlight} in flight}}, {failed, plural, one{{failed} failed} other{{failed} failed}}.'**
+  String payRunExecuted(
+    String provider,
+    int completed,
+    int inFlight,
+    int failed,
+  );
+
+  /// No description provided for @payRunExecutedPlain.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment run executed.'**
+  String get payRunExecutedPlain;
+
+  /// No description provided for @payRunExecutedCards.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} virtual card issued.} other {{count} virtual cards issued.}}'**
+  String payRunExecutedCards(int count);
+
+  /// No description provided for @payRunCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Draft run cancelled; {count} invoice returned to the queue.} other {Draft run cancelled; {count} invoices returned to the queue.}}'**
+  String payRunCancelled(int count);
+
+  /// No description provided for @payRunCancelledPlain.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment run cancelled.'**
+  String get payRunCancelledPlain;
+
+  /// No description provided for @vendorSyncSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Synced {created, plural, one{{created} new} other{{created} new}}, {updated, plural, one{{updated} updated} other{{updated} updated}}, {unchanged, plural, one{{unchanged} unchanged} other{{unchanged} unchanged}}.'**
+  String vendorSyncSummary(int created, int updated, int unchanged);
+
+  /// No description provided for @vendorSyncComplete.
+  ///
+  /// In en, this message translates to:
+  /// **'ERP sync complete.'**
+  String get vendorSyncComplete;
+
+  /// No description provided for @vendorSyncNotLinked.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} not linked (the name matches more than one vendor).} other{{count} not linked (the name matches more than one vendor).}}'**
+  String vendorSyncNotLinked(int count);
+
+  /// No description provided for @vendorSyncUnlinked.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} unlinked (linked under another ERP company).} other{{count} unlinked (linked under another ERP company).}}'**
+  String vendorSyncUnlinked(int count);
+
+  /// No description provided for @vendorSyncRelinked.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} relinked (linked when this ERP company was connected before).} other{{count} relinked (linked when this ERP company was connected before).}}'**
+  String vendorSyncRelinked(int count);
+
+  /// No description provided for @authInvalidCredentials.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid credentials'**
+  String get authInvalidCredentials;
+
+  /// No description provided for @authInvalidCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid or expired code. Please try again.'**
+  String get authInvalidCode;
+
+  /// No description provided for @authVerifyCodeFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not verify the code. Please try again.'**
+  String get authVerifyCodeFailed;
+
+  /// No description provided for @authEmailCodeFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not send the email code. Please try again.'**
+  String get authEmailCodeFailed;
+
+  /// Exceptions list: the status chip filters every row out. `status` is the chip's API value.
+  ///
+  /// In en, this message translates to:
+  /// **'{status, select, open{No open exceptions} escalated{No escalated exceptions} resolved{No resolved exceptions} dismissed{No dismissed exceptions} other{No matching exceptions}}'**
+  String exceptionsFilteredEmpty(String status);
+
+  /// Contracts list: the search query or status chip filters every row out.
+  ///
+  /// In en, this message translates to:
+  /// **'No contracts match your search or filter.'**
+  String get contractsFilteredEmpty;
+
+  /// Vendors list: the search query or status chip filters every row out.
+  ///
+  /// In en, this message translates to:
+  /// **'No vendors match your search or filter.'**
+  String get vendorsFilteredEmpty;
+
+  /// Action on a filtered-to-zero list that clears the filter / search.
+  ///
+  /// In en, this message translates to:
+  /// **'Show all'**
+  String get commonShowAll;
+
+  /// Button under a paged list that reads its next page.
+  ///
+  /// In en, this message translates to:
+  /// **'Load more'**
+  String get listLoadMore;
+
+  /// Footer of a paged list while more rows exist on the server: rows shown of the server's total. Announced as a live region.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing {shown} of {total}'**
+  String listShowingCount(int shown, int total);
+
+  /// Footer of a paged list once every row is loaded; count is the server's total.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Showing the only item} other {Showing all {count}}}'**
+  String listShowingAll(int count);
+
+  /// Footer of a paged list when reading the next page failed; the rows shown are still live and Load more retries.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load more.'**
+  String get listLoadMoreFailed;
+
+  /// Invoices list first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t load invoices: {error}'**
+  String invoicesLoadErrorPrefix(String error);
+
+  /// Approvals queue first-load failure carrying the server's own reason. A connection failure uses commonLoadErrorConnection instead.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load pending approvals: {error}'**
+  String approvalsLoadErrorPrefix(String error);
+
+  /// Invoices list: a status chip, search or advanced filter leaves no rows.
+  ///
+  /// In en, this message translates to:
+  /// **'No invoices match these filters'**
+  String get invoicesFilteredEmpty;
+
+  /// Screen-reader announcement for a status pill, e.g. 'Status: Approved'.
+  ///
+  /// In en, this message translates to:
+  /// **'Status: {label}'**
+  String statusPillAnnounce(String label);
+
+  /// Vendor lifecycle status.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get vendorStatusActive;
+
+  /// No description provided for @vendorStatusUnverified.
+  ///
+  /// In en, this message translates to:
+  /// **'Unverified'**
+  String get vendorStatusUnverified;
+
+  /// No description provided for @vendorStatusInactive.
+  ///
+  /// In en, this message translates to:
+  /// **'Inactive'**
+  String get vendorStatusInactive;
+
+  /// No description provided for @vendorStatusRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Rejected'**
+  String get vendorStatusRejected;
+
+  /// Contract lifecycle status.
+  ///
+  /// In en, this message translates to:
+  /// **'Draft'**
+  String get contractStatusDraft;
+
+  /// No description provided for @contractStatusActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get contractStatusActive;
+
+  /// No description provided for @contractStatusExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get contractStatusExpired;
+
+  /// No description provided for @contractStatusTerminated.
+  ///
+  /// In en, this message translates to:
+  /// **'Terminated'**
+  String get contractStatusTerminated;
+
+  /// No description provided for @contractStatusCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get contractStatusCancelled;
+
+  /// Contract type.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase'**
+  String get contractTypePurchase;
+
+  /// No description provided for @contractTypeService.
+  ///
+  /// In en, this message translates to:
+  /// **'Service'**
+  String get contractTypeService;
+
+  /// No description provided for @contractTypeSubscription.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription'**
+  String get contractTypeSubscription;
+
+  /// No description provided for @contractTypeLease.
+  ///
+  /// In en, this message translates to:
+  /// **'Lease'**
+  String get contractTypeLease;
+
+  /// Service-level agreement; keep the acronym where the market uses it.
+  ///
+  /// In en, this message translates to:
+  /// **'SLA'**
+  String get contractTypeSla;
+
+  /// Master services agreement.
+  ///
+  /// In en, this message translates to:
+  /// **'MSA'**
+  String get contractTypeMsa;
+
+  /// Statement of work.
+  ///
+  /// In en, this message translates to:
+  /// **'SOW'**
+  String get contractTypeSow;
+
+  /// No description provided for @contractTypeOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get contractTypeOther;
+
+  /// Exception-queue status.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get exceptionStatusOpen;
+
+  /// No description provided for @exceptionStatusEscalated.
+  ///
+  /// In en, this message translates to:
+  /// **'Escalated'**
+  String get exceptionStatusEscalated;
+
+  /// No description provided for @exceptionStatusResolved.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolved'**
+  String get exceptionStatusResolved;
+
+  /// No description provided for @exceptionStatusDismissed.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismissed'**
+  String get exceptionStatusDismissed;
+
+  /// Exception severity.
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get exceptionSeverityError;
+
+  /// No description provided for @exceptionSeverityWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Warning'**
+  String get exceptionSeverityWarning;
+
+  /// No description provided for @exceptionSeverityInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'Info'**
+  String get exceptionSeverityInfo;
+
+  /// Where a vendor record came from: synced from the ERP.
+  ///
+  /// In en, this message translates to:
+  /// **'ERP'**
+  String get vendorSourceErp;
+
+  /// Vendor record created by AI extraction.
+  ///
+  /// In en, this message translates to:
+  /// **'AI'**
+  String get vendorSourceAi;
+
+  /// Vendor record entered by hand.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual'**
+  String get vendorSourceManual;
+
+  /// Vendor source the app does not recognise.
+  ///
+  /// In en, this message translates to:
+  /// **'Other source'**
+  String get vendorSourceOther;
+
+  /// Notification event type.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice assigned'**
+  String get notificationEventInvoiceAssigned;
+
+  /// No description provided for @notificationEventInvoiceApproved.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice approved'**
+  String get notificationEventInvoiceApproved;
+
+  /// No description provided for @notificationEventInvoiceRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice rejected'**
+  String get notificationEventInvoiceRejected;
+
+  /// No description provided for @notificationEventInvoicePaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice paid'**
+  String get notificationEventInvoicePaid;
+
+  /// No description provided for @notificationEventContractRenewalDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Contract renewal due'**
+  String get notificationEventContractRenewalDue;
+
+  /// No description provided for @notificationEventChatMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'New message'**
+  String get notificationEventChatMessage;
+
+  /// An event type this app version does not know.
+  ///
+  /// In en, this message translates to:
+  /// **'Notification'**
+  String get notificationEventOther;
+
+  /// Announced first on an unread notification row.
+  ///
+  /// In en, this message translates to:
+  /// **'Unread'**
+  String get notificationUnread;
+
+  /// Notification age under a minute.
+  ///
+  /// In en, this message translates to:
+  /// **'just now'**
+  String get relativeTimeJustNow;
+
+  /// Notification age in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} minute ago} other {{count} minutes ago}}'**
+  String relativeTimeMinutesAgo(int count);
+
+  /// Notification age in hours.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} hour ago} other {{count} hours ago}}'**
+  String relativeTimeHoursAgo(int count);
+
+  /// Notification age in days (under a week).
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} day ago} other {{count} days ago}}'**
+  String relativeTimeDaysAgo(int count);
+
+  /// Bell button announcement carrying the live unread count.
+  ///
+  /// In en, this message translates to:
+  /// **'Notifications, {count} unread'**
+  String notificationBellUnread(int count);
+
+  /// App-bar action that opens the cash-flow forecast.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash flow forecast'**
+  String get cashFlowButtonLabel;
+
+  /// Row announcement prefix in multi-select mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected'**
+  String get listRowSelected;
+
+  /// No description provided for @listRowNotSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Not selected'**
+  String get listRowNotSelected;
+
+  /// Row announcement fragment naming an invoice number.
+  ///
+  /// In en, this message translates to:
+  /// **'invoice {number}'**
+  String listRowInvoiceNumber(String number);
+
+  /// Row announcement fragment: due date not yet passed.
+  ///
+  /// In en, this message translates to:
+  /// **'due {date}'**
+  String listRowDue(String date);
+
+  /// Row announcement fragment: due date already passed.
+  ///
+  /// In en, this message translates to:
+  /// **'past due {date}'**
+  String listRowPastDue(String date);
+
+  /// Exception row announcement fragment, e.g. 'Error severity'.
+  ///
+  /// In en, this message translates to:
+  /// **'{severity} severity'**
+  String listRowSeverity(String severity);
+
+  /// Exception row flag: past its SLA.
+  ///
+  /// In en, this message translates to:
+  /// **'Overdue'**
+  String get listRowOverdue;
+
+  /// Contract row announcement fragment.
+  ///
+  /// In en, this message translates to:
+  /// **'contract {number}'**
+  String listRowContractNumber(String number);
+
+  /// Contract row announcement fragment: end date.
+  ///
+  /// In en, this message translates to:
+  /// **'ends {date}'**
+  String listRowEnds(String date);
+
+  /// Vendor row announcement fragment.
+  ///
+  /// In en, this message translates to:
+  /// **'code {code}'**
+  String listRowVendorCode(String code);
+
+  /// Vendor row announcement fragment: where the record came from.
+  ///
+  /// In en, this message translates to:
+  /// **'source {source}'**
+  String listRowVendorSource(String source);
+
+  /// Vendor row announcement: how many invoices it has.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} invoice} other {{count} invoices}}'**
+  String listRowInvoiceCount(int count);
+
+  /// Compact invoice count shown on a vendor row.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} inv} other {{count} inv}}'**
+  String listRowInvoiceCountShort(int count);
 }
 
 class _AppLocalizationsDelegate

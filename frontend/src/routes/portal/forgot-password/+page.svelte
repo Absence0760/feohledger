@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { apiErrorMessage } from '#lib/utils/apiError.ts';
 	import { tick } from 'svelte';
 	import PortalAuthCard from '#lib/components/portal/PortalAuthCard.svelte';
 	import { portalApi } from '#lib/portalApi.ts';
@@ -31,7 +32,7 @@
 		} catch (err) {
 			// Never "address not found" — a non-2xx is a rate limit or a
 			// malformed request.
-			error = err instanceof Error ? err.message : m('portal.login.failed');
+			error = apiErrorMessage(err, m('portal.login.failed'));
 		} finally {
 			loading = false;
 		}

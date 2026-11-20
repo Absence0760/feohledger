@@ -404,7 +404,7 @@ test.describe('accessibility — KPI pending affordance (WCAG 4.1.2 / 1.3.1)', (
 			await page.goto('/cfo');
 			await expect(page.getByRole('heading', { name: 'Cash Flow', exact: true })).toBeVisible();
 			// The page's own in-flight state, not a guess at timing.
-			await expect(page.locator('.workspace > .loading')).toBeVisible();
+			await expect(page.getByTestId('cfo-loading')).toBeVisible();
 
 			const row = page.getByTestId('forecast-kpi-row');
 			await expect(row).toBeVisible();

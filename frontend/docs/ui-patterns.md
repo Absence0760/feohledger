@@ -139,7 +139,7 @@ Use **`<DataTable>`** (`#lib/components/ui/DataTable.svelte`) for every
 grid page instead of hand-rolling `<div class="grid-container"><table>`:
 
 ```svelte
-<DataTable columns={COLUMNS} isEmpty={items.length === 0} empty="No items.">
+<DataTable columns={COLUMNS} isEmpty={items.length === 0} {loading} {errored} empty={m('items.empty')}>
     {#snippet body()}
         {#each items as item (item.id)}
             <tr class:row-selected={selected.has(item.id)}>
@@ -159,11 +159,19 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
 - `isEmpty` + `empty` render the centred `td.empty` row, tagged
   `data-testid="table-empty"` so e2e specs can assert *which* empty state is
   showing.
-- **`empty` must distinguish loading / errored / genuinely-empty.** A list that
-  renders its "nothing here" copy while a fetch is in flight — or forever after
-  a failed one — is asserting something it never established. Compose it:
-  `empty={loading ? m('common.loading') : errored ? m('…empty.errored') : normalEmpty}`,
-  and set both flags in the fetch's `try`/`catch`/`finally`. `/notifications`,
+- **`empty` must distinguish loading / errored / filtered / genuinely-empty,
+  and DataTable does the distinguishing.** A list that renders its "nothing
+  here" copy while a fetch is in flight — or forever after a failed one — is
+  asserting something it never established. Pass the states as props and give
+  each message as a key; the component picks one, in this order:
+  `loading` → `common.loading` (rendered in a `role="status"` span, so it is
+  announced), `errored` → `emptyErrored` (default `common.loadFailed`),
+  `filtered` → `emptyFiltered` (default `common.emptyFiltered`), else `empty`
+  (default `common.empty`). Never hand-build `empty={loading ? m('common.loading') : …}`,
+  pass a page-private "Loading cards…" key, or give `empty` an English
+  literal: `src/lib/dataTableEmpty.test.ts` refuses all three (its `ALLOWED`
+  list may only shrink). A page that shows `ui/LoadError` in the table's place
+  on failure need not pass `errored`. `/notifications`,
   `/exceptions` and the dashboard are the reference implementations; on
   `/exceptions` in particular the empty copy ("Everything looks good!") is a
   claim about open fraud flags and compliance holds, so getting this wrong is a
@@ -345,7 +353,7 @@ appears when one or more rows are selected:
             label={m('things.bulk.delete', { n: selected.size })}
             confirmLabel={m('things.bulk.confirmDelete')}
         />
-        <!-- additional .bulk-action-btn buttons go here -->
+        <!-- additional .btn-secondary buttons go here -->
     {/snippet}
 </BulkBar>
 ```
@@ -356,13 +364,38 @@ appears when one or more rows are selected:
   (e.g. excluding the current user, the default workflow, or
   immutable-status invoices). Items that can't be selected render
   their `<td class="checkbox-col">` empty rather than disabled.
+- **One size throughout.** Every button in the bar is a shared class at its
+  standard box: Clear is `.btn-cancel`, `BulkDeleteButton` is `.btn-danger`
+  (`.armed` for its confirm), any other action or "select all N matching" is
+  `.btn-secondary`. No compact local copies.
+- While the bar shows, `BulkBar` reserves its measured height (it wraps on a
+  phone) under the page (`html.has-bulk-bar body { padding-bottom }` in
+  `app.css`), so the fixed bar never covers the last rows or the pagination.
+- `countLabel` overrides the count text when the page's noun takes a gender
+  (`invoices.bulk.selected`); the `lead` snippet sits between the count and
+  Clear, for the "select all N matching" button or its in-force note.
 - Delete is always armed-confirm (one click arms; outside-click or
   second click un-arms or commits). `BulkDeleteButton` does this.
   Pass `confirmLabel` (the armed label) from the catalogue too — its
   fallback, `"Confirm " + label`, is English-only. `title` sets a native
   tooltip; wrap the button in a `<span title>` instead when the tooltip
   must show while it is `disabled` (`/invoices` does). Never restyle a
-  local `.bulk-delete-btn` copy — `/invoices` carried one until it drifted.
+  local `.bulk-delete-btn` copy — `/invoices` carried one until it drifted,
+  and a hand-rolled `.bulk-bar` with it (it now uses `<BulkBar>`, so it has the
+  `role="toolbar"` and its name).
+- **Several variants of one action go behind one `MenuButton`.** `/invoices`'
+  CSV, JSON and XML exports are one **Export** menu (`ui/MenuButton.svelte`):
+  as three buttons they wrapped the bar to three rows at 375px. A page with a
+  single format (`/vendors`, `/contracts`: CSV only) keeps its one button —
+  a menu of one is a slower button. The menu flips above the bar, since the
+  bar is pinned to the bottom of the viewport. Placement measures against
+  what is visible of the menu — the viewport cut down to its nearest
+  ancestor whose `overflow` is not `visible` (`utils/menuButton.clipBounds`)
+  — so inside a scrolling pane (InvoiceModal's `.form-scroll`, which holds
+  the e-invoice download menu) it flips and shifts against the pane, not the
+  window. Specs open it first:
+  `getByRole('button', { name: 'Export' })`, then
+  `getByRole('menuitem', { name: 'CSV' })`.
 - Bulk endpoints return a partial-success shape — `{deleted: [],
   failed: [{id, reason, ...}]}` — and the page surfaces the per-row
   reason in a toast. See `bulk_delete_users` in `backend/app/api/admin.py`
@@ -393,22 +426,33 @@ rather than only the currently-loaded page.
 
 Default page size is **20** across all list endpoints. Backend
 returns `{items, total, page, page_size}`; the front-end renders the
-items, then a centred Load More button below the table:
+items, then **`ui/LoadMoreFooter.svelte`** below the table: a centred
+"Load more (20 of 87)" button while rows remain, "Showing all 87 <thing>s"
+once they are all loaded, and nothing for an empty list or a failed load.
 
 ```svelte
-{#if store.hasMore}
-    <div class="load-more-row">
-        <button class="btn-load-more" onclick={loadMore} disabled={store.loading}>
-            {store.loading ? 'Loading…' : `Load more (${store.items.length} of ${store.total})`}
-        </button>
-    </div>
-{:else if store.total > 0}
-    <div class="load-more-row">
-        <span class="load-more-end">Showing all {store.total} <thing>s</span>
-    </div>
-{/if}
+<LoadMoreFooter
+    shown={items.length}
+    {total}
+    {hasMore}
+    loading={loadingMore}
+    errored={loadFailed}
+    onloadmore={() => load({ append: true })}
+    moreKey="<list>.loadMore"
+    allKey="<list>.showingAll"
+/>
 ```
 
+- Never copy its markup into a page. `moreKey` gets `{shown}` and `{total}`
+  through `formatCount`; `allKey` gets the raw `{total}` its plural selects
+  on (`formattedCountPlural.test.ts`). `loadingKey` (default
+  `common.loading`; the portal passes `portal.common.loading`), `disabled`
+  (another load is in flight) and `testId` (on the button) are optional.
+  Its `.load-more-row` / `.btn-load-more` / `.load-more-end` classes are
+  styled in `app.css` and are what Playwright specs select on.
+  `src/lib/utils/pagedListFooter.test.ts` fails on a `.svelte` file other
+  than the component that renders those classes, and on a use whose two
+  keys name different lists.
 - Append, don't replace. `loadMore` issues `page=N+1` and appends the new
   items **via `appendUnique` (`#lib/utils/pagination.ts`)** — never a raw
   `[...existing, ...res.items]` spread. Offset pagination can re-surface a
@@ -426,9 +470,10 @@ items, then a centred Load More button below the table:
   rows it never fetched do not exist. Six lists (budgets, intake,
   catalogs, requisitions, and the `/expenses` Reports + Cards sub-lists)
   shipped that way — 50 rows under a footer reading "Showing all 87",
-  with no control to reach the other 37. `src/lib/utils/pagedListFooter.test.ts`
-  is the guard: any file referencing a `<list>.showingAll` message must
-  also reference the matching `<list>.loadMore`.
+  with no control to reach the other 37. The component makes the pairing
+  structural; `src/lib/utils/pagedListFooter.test.ts` also still fails a
+  file that renders a `<list>.showingAll` message without the matching
+  `<list>.loadMore`.
 - Stores expose `total`, `page`, `hasMore`, and any mutating actions
   (create / delete / bulk-delete) keep `total` in sync without a
   refetch.
@@ -645,6 +690,10 @@ pill-shaped status filter above the table:
 
 - `chips = [{key, label, count?, alert?}]`. Omit `count` for label-only
   chips; `alert: true` renders the red attention badge (`.count.alert`).
+  Pass `ariaLabel` to name the chip `<nav>` landmark.
+- The chips are painted by `app.css` alone: a scoped rule may place
+  `.filter-chip` but never repaint it, in any file
+  (`src/lib/sharedButtonClasses.test.ts`).
 - The "All" chip comes first; the active chip uses `var(--accent-strong)` +
   white — **not** `var(--accent)`, which is only 3.12:1 against white. See
   *Colour tokens and contrast* below.
@@ -700,6 +749,14 @@ centred dialog with backdrop-click + Esc to close:
   `{#snippet header()}…{/snippet}` instead of `title`. If the body
   dereferences a nullable var, gate `open={x !== null}` and wrap the
   children in `{#if x}…{/if}`.
+- `class="<name>"` puts a class on the dialog element beside `modal`, for a
+  dialog with its own size or layout (style it as `:global(.modal.<name>)`);
+  `fullscreen` drops the backdrop's gutter and fills the viewport (the
+  invoice dialog's toggle) — the dynamic viewport, `100dvh` / `100dvw` after
+  a `100vh` / `100vw` fallback, so on a phone a footer pinned to the dialog's
+  foot is not under the browser toolbar. Both are no-ops when omitted. `InvoiceModal`
+  (`invoice-dialog`) and `RunDetailModal` (`run-detail-dialog`) use them; a
+  `<svelte:window>` listener a dialog needs stays in the caller.
 - Cancel sits left of the primary action. Required-field markers use
   `<em class="required">*</em>`.
 - **A long dialog keeps its decisions out of the scroll.** When a dialog's body
@@ -730,7 +787,12 @@ centred dialog with backdrop-click + Esc to close:
   means the dialog's *body* (custom field grids, pickers, footers) is
   feature-specific — the shell, backdrop, and close behaviour are not.
   If you find yourself writing `position: fixed; inset: 0` or
-  `role="dialog"` in a component, stop and use `<Modal>`.
+  `role="dialog"` in a component, stop and use `<Modal>`. Guard:
+  `src/lib/modalShell.test.ts` fails on a `role="dialog"` attribute or a
+  `class="backdrop"` in any `.svelte` file but `ui/Modal.svelte`; its
+  allowlist (`NotificationBell`'s non-modal popover, the portal login's
+  decorative backdrop) is shrink-only and fails
+  when a listed file no longer needs its entry.
 - **The page behind an open dialog is `inert`** (decisions §384). While any
   modal dialog is open, everything outside the topmost one carries `inert`:
   no focus, no pointer or touch, nothing in the accessibility tree. A dialog
@@ -925,7 +987,11 @@ accessible:
    label from the visible string rather than retyping it — the catalogue
    template takes it as a parameter, so every locale keeps the match:
    `m('payments.quotes.openAria', { action: m('payments.quotes.open'), invoice })`
-   with `'{action} for invoice {invoice}'`. Keep a badge or other extra
+   with `'{action} for invoice {invoice}'`. Where the label is a separate
+   `<key>Aria` message beside the visible `<key>`, start it with the visible
+   words (`Choose ERP account for {code}`, not `Choose the ERP account for
+   {code}`): `frontend/src/lib/a11y/labelInName.test.ts` checks every such
+   pair in every locale, with no list of tolerated gaps. Keep a badge or other extra
    text *beside* the link, not inside it, or it becomes visible text the
    label lacks (the `/workflows` "Default" badge).
 
@@ -1068,14 +1134,14 @@ the `ui/` primitive in the Source column.
 | Data table | `.grid-container` + `table`/`th`/`td`/`.empty` | `ui/DataTable.svelte` |
 | Search input | `.search-box` | `ui/SearchBox.svelte` |
 | Bulk bar | `.bulk-bar` | `ui/BulkBar.svelte` |
-| Bulk delete | `.bulk-delete-btn` (+ `.armed`) | `ui/BulkDeleteButton.svelte` |
-| Bulk action | `.bulk-action-btn` | per-route, but always inside a BulkBar |
+| Bulk delete | `.btn-danger.bulk-delete-btn` (+ `.armed`) | `ui/BulkDeleteButton.svelte` |
+| Bulk action | `.btn-secondary` (`.btn-primary` for the bar's lead action) | `src/app.css`, always inside a BulkBar |
 | Per-row action | `<RowAction>` (variant + armed) | `ui/RowAction.svelte` |
 | Clickable-row open control | `<RowLink>` + `.clickable` row + `isRowOpenClick` | `ui/RowLink.svelte` / `utils/rowNav.ts` |
 | Filter pill | `.filter-chip` (+ `.active`, `.count`) | `ui/FilterChips.svelte` |
 | Tab bar | `.tab-row` / `.tab` (+ `.active`) | `ui/Tabs.svelte` |
 | Load more | `.btn-load-more` / `.load-more-row` / `.load-more-end` | per-route, copy /admin |
-| Buttons: lead / dismiss / other action / destructive trigger | `.btn-primary` / `.btn-cancel` / `.btn-secondary` / `.btn-danger` | `src/app.css` (see below) |
+| Buttons: lead / dismiss / other action / destructive trigger / link-like / icon-only | `.btn-primary` / `.btn-cancel` / `.btn-secondary` / `.btn-danger` / `.btn-ghost` / `.btn-icon` (+ `.armed`) | `src/app.css` (see below) |
 | Modal dialog | `.modal[role="dialog"]` + `.backdrop` | `ui/Modal.svelte` |
 | KPI card | `.kpi` / `.kpi-value` / `.kpi-label` | `ui/KpiCard.svelte` |
 | Status badge (invoice) | `<StatusBadge>` (tone from `INVOICE_STATUS_TONES`) | `ui/StatusBadge.svelte` |
@@ -1084,22 +1150,94 @@ the `ui/` primitive in the Source column.
 | Field-level advisory | `.field-warning` (`role="status"`) | `ui/FieldWarning.svelte` |
 | Zero-data onboarding block | `.empty-state` (+ `data-testid`) | `ui/EmptyState.svelte` |
 | Setup steps with done states | `.setup-checklist` (`li[data-done]`) | `ui/SetupChecklist.svelte` |
+| Standalone loading block (page, panel, modal, card) | `<LoadingState label? testId?>` (`role="status"`, polite) | `ui/LoadingState.svelte` |
 | Failed load + Retry (page, or whole screen) | `.load-error` (`role="alert"` in a page) | `ui/LoadError.svelte` |
 | Heading / label + ⓘ HelpTip | `.help-row` (+ a local class for spacing only) | `src/app.css` (see § Contextual help) |
 | Checkbox / radio / file | `input[type='checkbox'\|'radio'\|'file']` (global base) | `src/app.css` |
 
-**Buttons** are four shared classes in `src/app.css`, one box size so a
-toolbar mixing them is one height. Never re-declare one per route (the
-`/vendors` `.btn-outline` and `/invoices` `.btn-secondary` copies were
-folded into these):
+**Buttons** are six shared classes in `src/app.css`; the four boxed ones
+share one box size so a toolbar mixing them is one height. Never re-declare
+one per route, and never paint one from a scoped rule (placing it — margin,
+`align-self`, padding to fill a slot — is fine). The `/vendors` `.btn-outline`,
+`/invoices` `.btn-secondary`, `/payments` `.btn-pay` / `.btn-execute`,
+`RunDetailModal`'s `.btn-execute` / `.btn-discard` / `.btn-approve`, every
+bulk-bar `.bulk-action-btn`, `/vendors/screening`'s `.btn-block`, and the
+per-modal copies in `InvoiceModal`, `ContractModal`, the workflow-management
+modals and the rest, and every header `.close-btn` / `.icon-btn` and the
+`/invoices` `.advanced-btn`, were folded into these. Guard:
+`src/lib/sharedButtonClasses.test.ts` — a file joins its `COVERED` list in
+the change that migrates it:
 - `.btn-primary` — the page's one lead action (white on `--accent-strong`).
+  One per footer: `RunDetailModal` renders Execute as `.btn-secondary` while
+  the CFO sign-off (`.btn-primary`) is pending; `InvoiceModal`'s Save steps
+  back to `.btn-secondary` while Submit, Resubmit or a reviewer's Approve is
+  offered; `ContractModal`'s Save does while the Renew / Create PO sub-form
+  (whose confirm is the lead) is open.
+  `.btn-primary` and `.btn-cancel` share the `.btn-secondary` box
+  (`inline-flex`, a 1px border — transparent on the primary — and a
+  `<button>`'s `line-height`), so an icon + label centres the same way in all
+  four.
 - `.btn-cancel` — dismiss / back out, beside a Save. Reads in `--text-muted`.
 - `.btn-secondary` — any other action (Create beside Upload, Import CSV,
   Refresh, Merge duplicates). Reads in `--text`; works on an `<a>` that
   navigates, and on a hidden `<span>` slot reserve, with the same box.
-- `.btn-danger` — the outlined destructive *trigger* (Erase, Disable) that
-  opens a confirmation. The armed two-click confirm stays with
-  `<RowAction armed>` / `<BulkDeleteButton>`.
+- `.btn-danger` — the outlined destructive *trigger* (Erase, Disable, Reject)
+  that opens a confirmation. In a table row the armed two-click confirm stays
+  with `<RowAction armed>` / `<BulkDeleteButton>`.
+- `.btn-ghost` — an action that reads as a link: Back out of a detail view, a
+  Download inside the sentence that explains it. No box, underlined in
+  `--accent` so colour is not the only cue (WCAG 1.4.1). `inline-flex` with a
+  24px `min-height`, so standing alone it meets WCAG 2.5.8.
+- `.btn-icon` — a control whose whole label is a glyph: a header ✕, the
+  `InvoiceModal` fullscreen toggle, the `/invoices` advanced-filter button.
+  The name goes in `aria-label`. No box at rest; hover and press add one. A
+  24px minimum target both ways (WCAG 2.5.8), the global `:focus-visible`
+  ring, and a text glyph at 1.25rem (an `<svg>` keeps its own size). A
+  toggle sets `aria-pressed` and keeps ONE name: the on state is an
+  `--accent-tint` fill with `--accent-on-tint` glyph and an `--accent`
+  border, so a name that flipped with it ("Exit fullscreen") would say the
+  state twice. Scoped CSS may size it (`/invoices` makes its toggle 34px)
+  or style a child (that toggle's filters-set dot), never paint it.
+- `.armed` on `.btn-primary` / `.btn-danger` — the second, committing click
+  of a two-click confirm (execute a run, file 1099s, cancel a run, propose
+  bulk discounts, unblock a vendor's payments on `/vendors/screening`):
+  a `--danger-strong` fill, whatever the button looked like unarmed. Pair it
+  with a distinct armed label (`Confirm execute · …`), since a colour change
+  announces nothing to a screen reader — and when the button carries an
+  `aria-label`, switch that with the state too (`<key>Aria` /
+  `<confirmKey>Aria`, as `VendorModal`'s ERP unlink and `/organization`'s
+  webhook Remove and intake Rotate do) and drop it while busy, or the armed
+  name still says the unarmed words (WCAG 2.5.3; `a11y/labelInName.test.ts`
+  scans for a fixed label over switched text).
+  **Arming follows the precondition.** A commit has three looks, and `.armed`
+  is only on while the click would actually commit:
+  1. **Disabled, precondition unmet** (no reject reason typed, the workspace
+     slug not typed, the server's verdict refuses execute): no `.armed` — the
+     plain muted disabled look of its base class. A red fill on a button that
+     cannot be pressed reads as "ready".
+  2. **Ready**: `.armed` — the `--danger-strong` fill.
+  3. **Busy** (disabled while the request is in flight): `.armed` stays on,
+     and it shows the danger tint with `--danger-on-tint` text and the strong
+     border, never `opacity`.
+  So write `class:armed={precondition || busy}`, never a static
+  `class="… armed"` on a button whose `disabled` reads anything but busy
+  (`CloseWorkspacePanel`: `class:armed={canSubmit || submitting}`;
+  `InvoiceModal` Confirm reject: `class:armed={!!rejectReason.trim()}`).
+  A two-click arm is the precondition, so hold it through the request and
+  release it after (`/vendors/screening` Confirm unblock), and drop it when
+  something else disables the commit (a re-screen in flight there).
+  `tests-e2e/a11y/armed-buttons.spec.ts` walks each commit through all three.
+- **A confirmation dialog's destructive commit is `.btn-danger.armed`.** The
+  outlined `.btn-danger` trigger opened the dialog (or the inline confirm it
+  reveals), so that step is the first click and its commit is the second: Void payment, Dismiss compliance
+  hold, Accept short settlement (`/payments`), Confirm reject (an expense
+  report), Disable MFA (`/portal/company`), Clear credentials
+  (`CredentialResetPrompt`). Never a hand-rolled `--danger-strong` fill. The
+  one exception is the bank-file Reject submit in `RunDetailModal`, a plain
+  `.btn-danger`: its panel sits above the run footer, where a permanent red
+  fill would read as a second armed commit beside Execute's.
+  `CloseWorkspacePanel`'s typed-confirmation Close workspace and
+  `InvoiceModal`'s Confirm reject are `.btn-danger.armed` too.
 `.btn-secondary` / `.btn-danger` show disabled with `--text-muted` and a
 neutral border, not `opacity` (contrast measured per theme in the
 `app.css` comment).
@@ -1242,11 +1380,11 @@ inherit it for free. Reuse these; don't re-solve them per page.
   The page outside the topmost dialog is `inert` while it is open (§ Modals,
   decisions §384), and that is taken off before the restore runs, so the
   trigger can take focus again.
-  Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` uses it, and so do the four pre-existing hand-rolled
-  feature shells (`InvoiceModal`, `RunDetailModal`, `BulkRecodeGLModal`,
-  portal discount-accept) so every dialog gets identical focus management.
-  Prefer `ui/Modal` for new dialogs; if you must hand-roll a shell, add
-  `use:focusTrap` rather than re-implementing it.
+  Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` is its only
+  caller, and every dialog (`InvoiceModal` and `RunDetailModal` included)
+  renders through `ui/Modal`, so every dialog gets identical focus
+  management. New dialogs use `ui/Modal`; `src/lib/modalShell.test.ts` refuses
+  a new hand-rolled shell.
 - **Reorder controls** (WCAG 2.5.7 Dragging Movements) — any drag-to-reorder
   needs a single-pointer + keyboard alternative. The workflow-builder
   `StepNode` pairs its drag handle with per-node Move ↑ / Move ↓ buttons
@@ -1424,6 +1562,14 @@ inherit it for free. Reuse these; don't re-solve them per page.
 - **Icon-only controls** — every icon-only `<button>` needs an
   `aria-label` (NotificationBell reflects the unread count; the sidebar
   collapse toggle + profile button carry `aria-label` + `aria-expanded`).
+- **The sidebar's profile disclosure closes when focus leaves it** (WCAG
+  2.4.11). It is drawn above its trigger, over the Help link (and over the
+  icon column in the 60px rail), so a `focusout` whose `relatedTarget` is
+  outside `.profile-wrapper` closes it without moving focus — Shift+Tab to
+  Help or Tab past Log out never lands on a control hidden under it. Its
+  trigger's name is "Profile and account" (a disclosure, not a menu). Guard:
+  `tests-e2e/smoke/sidebar.spec.ts` (both directions, axe in the collapsed
+  rail in both themes).
 - **De-emphasised rows** (`.row-muted`, app.css; WCAG 1.4.3) — a paused
   subscription, a revoked API key, a deactivated user. Put
   `class:row-muted` on the `<tr>`; the shared rule colours its non-actions

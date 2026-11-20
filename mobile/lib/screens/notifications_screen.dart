@@ -2,17 +2,19 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/notification.dart';
 import 'package:feohledger_mobile/screens/invoice_detail_screen.dart';
 import 'package:feohledger_mobile/stores/notification_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/notification_list_tile.dart';
 
 /// In-app notification center — lists the current user's notifications
 /// (`GET /api/notifications`), with an All / Unread filter, mark-all-read, and
 /// per-row tap → mark read + deep-link to the invoice detail when the row links
-/// to one. Mirrors `ExceptionsScreen` (ListenableBuilder, filter chips,
-/// RefreshIndicator, empty / loading / error states).
+/// to one. Mirrors `ExceptionsScreen` (ListenableBuilder, filter chips, and
+/// the shared `AsyncListBody` for the loading / error / empty / stale states).
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
 
@@ -101,31 +103,36 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               listenable: NotificationStore.instance,
               builder: (context, _) {
                 final store = NotificationStore.instance;
+                final loadError = store.loadError;
 
-                if (store.loading && store.notifications.isEmpty) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (store.error != null && store.notifications.isEmpty) {
-                  return _ErrorState(onRetry: store.fetch);
-                }
-
-                if (store.notifications.isEmpty) {
-                  return _EmptyState(unreadOnly: store.unreadOnly);
-                }
-
-                return RefreshIndicator(
+                return AsyncListBody<AppNotification>(
+                  items: store.notifications,
+                  loading: store.loading,
+                  // The fetch's failure only — a refused mark-read leaves the
+                  // list live (actionError), so it raises no banner.
+                  hasError: loadError != null,
+                  fromCache: store.fromCache,
+                  errorMessage: loadError == null
+                      ? ''
+                      : describeLoadError(
+                          l,
+                          loadError,
+                          l.notificationsLoadErrorPrefix,
+                        ),
                   onRefresh: store.fetch,
-                  child: ListView.separated(
-                    itemCount: store.notifications.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final n = store.notifications[index];
-                      return NotificationListTile(
-                        notification: n,
-                        onTap: () => _onTap(n),
-                      );
-                    },
+                  empty: const _EmptyState(),
+                  // Under the Unread chip an empty list says only that
+                  // nothing is unread, with the way back to every
+                  // notification.
+                  filteredEmpty: store.unreadOnly
+                      ? FilteredEmptyState(
+                          message: l.notificationsEmptyUnread,
+                          onShowAll: () => store.setUnreadOnly(false),
+                        )
+                      : null,
+                  itemBuilder: (context, n) => NotificationListTile(
+                    notification: n,
+                    onTap: () => _onTap(n),
                   ),
                 );
               },
@@ -150,58 +157,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 }
 
 class _EmptyState extends StatelessWidget {
-  final bool unreadOnly;
-  const _EmptyState({required this.unreadOnly});
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ExcludeSemantics(
+          child: Icon(
             Icons.notifications_none,
             size: 64,
             color: Colors.grey.shade500,
           ),
-          const SizedBox(height: 16),
-          Text(
-            unreadOnly ? l.notificationsEmptyUnread : l.notificationsEmpty,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 4),
-          Text(unreadOnly ? l.notificationsCaughtUp : l.notificationsNothingYet),
-        ],
-      ),
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  final Future<void> Function() onRetry;
-  const _ErrorState({required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.cloud_off, size: 64, color: Colors.grey.shade700),
-          const SizedBox(height: 16),
-          Text(
-            l.notificationsLoadError,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.tonal(
-            onPressed: onRetry,
-            child: Text(l.commonRetry),
-          ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          l.notificationsEmpty,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 4),
+        Text(l.notificationsNothingYet, textAlign: TextAlign.center),
+      ],
     );
   }
 }

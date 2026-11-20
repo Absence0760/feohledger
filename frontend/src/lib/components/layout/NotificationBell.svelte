@@ -7,6 +7,7 @@
 	import { notificationHref } from '#lib/utils/notificationHref.ts';
 	import type { Notification } from '#lib/types/notification.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 
 	let { collapsed = false }: { collapsed?: boolean } = $props();
 
@@ -151,7 +152,7 @@
 			</div>
 			<div class="bell-list">
 				{#if loading && recent.length === 0}
-					<p class="bell-empty" role="status">{m('common.loading')}</p>
+					<LoadingState />
 				{:else if errored && recent.length === 0}
 					{@render loadError()}
 				{:else if recent.length === 0}

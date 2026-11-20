@@ -40,7 +40,11 @@ from app.schemas.credit_memo import (
 from app.schemas.money import json_money_string
 from app.services.audit_access import build_field_diff
 from app.services.audit_dispatch import dispatch_audit
-from app.services.currency_conversion import resolve_reporting_currency
+from app.services.currency_conversion import (
+    invoice_currency_key_sql,
+    resolve_reporting_currency,
+)
+from app.services.payment_runs import payable_currency_code
 from app.services.workflow_engine import VALID_TRANSITIONS
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.search import ilike_contains
@@ -63,6 +67,12 @@ CREDIT_MEMO_INVOICE_SETTLED = "credit_memo_invoice_settled"
 CREDIT_MEMO_NOT_EDITABLE = "credit_memo_not_editable"
 CREDIT_MEMO_NOT_APPLICABLE = "credit_memo_not_applicable"
 CREDIT_MEMO_EXCEEDS_BALANCE = "credit_memo_exceeds_balance"
+#: A linked create or an apply onto an invoice that records no usable currency
+#: (NULL, blank or malformed — `payment_runs.payable_currency_code`). The
+#: balance a credit reduces is a figure in no stated currency, so no memo's
+#: currency can be proved to match it, and a credit applied anyway would later
+#: decide the invoice's currency for it (decisions §473).
+CREDIT_MEMO_INVOICE_CURRENCY_UNKNOWN = "credit_memo_invoice_currency_unknown"
 
 _VENDOR_MISMATCH_DETAIL = coded_refusal(
     CREDIT_MEMO_VENDOR_MISMATCH, "Credit memo vendor does not match invoice vendor"
@@ -80,6 +90,11 @@ _ENTITY_MISMATCH_DETAIL = coded_refusal(
 )
 _CURRENCY_MISMATCH_DETAIL = coded_refusal(
     CREDIT_MEMO_CURRENCY_MISMATCH, "Credit memo currency does not match invoice currency"
+)
+_INVOICE_CURRENCY_UNKNOWN_DETAIL = coded_refusal(
+    CREDIT_MEMO_INVOICE_CURRENCY_UNKNOWN,
+    "The invoice records no currency, so a credit cannot be matched against its "
+    "balance. Set the invoice's currency first, then apply the credit.",
 )
 
 
@@ -156,7 +171,7 @@ def _statuses_a_payment_can_still_net() -> frozenset[InvoiceStatus]:
     — the status a payment is booked under — without first being `paid`, the
     status its payment settles into. That is a reachability question over the
     state machine, so it is answered from `VALID_TRANSITIONS` rather than written
-    out as a list (the `api/payments.SCHEDULABLE_INVOICE_STATUSES` rule): a status
+    out as a list (the `services/payment_gates.SCHEDULABLE_INVOICE_STATUSES` rule): a status
     added to the graph is classified by its edges, and a status with no entry at
     all is refused, never waved through.
 
@@ -254,15 +269,28 @@ def _assert_entity_matches(invoice: Invoice, memo_entity_id: uuid.UUID | None) -
         raise HTTPException(status_code=409, detail=_ENTITY_MISMATCH_DETAIL)
 
 
-def _assert_currency_matches(invoice: Invoice, memo_currency: str | None) -> None:
-    """The remaining-balance math subtracts the memo amount from the invoice
+def _assert_currency_matches(invoice: Invoice, memo_currency: str | None) -> str:
+    """The invoice's currency, proved to be the memo's; returns that code.
+
+    The remaining-balance math subtracts the memo amount from the invoice
     amount directly, so a EUR memo against a USD invoice would silently mix
-    currencies and corrupt the balance. Compared case-insensitively: the
-    invoice schemas don't normalise case, and `usd` is not a different
-    currency from `USD`."""
-    invoice_currency = (invoice.currency or "").strip().upper()
-    if memo_currency and invoice_currency and memo_currency.upper() != invoice_currency:
+    currencies and corrupt the balance. Compared case- and space-insensitively
+    through `payable_currency_code`, the predicate the run builder pays by: `usd`
+    is not a different currency from `USD`.
+
+    An invoice with no usable code (NULL, blank, malformed) is refused outright
+    — fail-closed, as discount offers are (decisions §473): its balance is in
+    no stated currency, so there is nothing to compare the memo with, and a
+    credit applied anyway would later force the invoice into the memo's
+    currency to pay. `memo_currency=None` (a linked create naming none)
+    inherits the code returned here.
+    """
+    invoice_currency = payable_currency_code(invoice.currency)
+    if invoice_currency is None:
+        raise HTTPException(status_code=409, detail=_INVOICE_CURRENCY_UNKNOWN_DETAIL)
+    if memo_currency and memo_currency.strip().upper() != invoice_currency:
         raise HTTPException(status_code=409, detail=_CURRENCY_MISMATCH_DETAIL)
+    return invoice_currency
 
 
 def _assert_editable(memo: CreditMemo) -> None:
@@ -277,12 +305,6 @@ def _assert_editable(memo: CreditMemo) -> None:
     """
     if memo.status != "open" or memo.invoice_id is not None or memo.applied_at is not None:
         raise HTTPException(status_code=409, detail=_not_editable_detail(memo.status))
-
-
-#: What Python's `str.strip()` removes from an ASCII string. `btrim` with no
-#: character list strips spaces only, so the SQL form of the currency guard
-#: names the set rather than quietly disagreeing about a tab.
-_STRIPPED_WHITESPACE = " \t\n\r\x0b\x0c"
 
 
 CREDIT_MEMO_NOT_VOIDABLE = "credit_memo_not_voidable"
@@ -389,9 +411,11 @@ def _eligible_invoices_query(
       an unlinked (NULL) invoice is never offered;
     - **entity** — `_assert_entity_matches`: a NULL on either side is
       admitted, a different entity is not;
-    - **currency** — `_assert_currency_matches`: case- and space-insensitive,
-      a blank invoice currency admitted, and no leg at all when the credit
-      asserts none (a linked create inherits the invoice's);
+    - **currency** — `_assert_currency_matches`: the invoice must record a
+      usable code (`invoice_currency_key_sql`, the run builder's predicate —
+      NULL, blank and malformed are never offered, decisions §473), equal
+      case- and space-insensitively to the credit's when it asserts one (a
+      linked create that asserts none inherits the invoice's);
     - **status** — `_assert_creditable_status`: only an invoice a payment will
       still read (`CREDITABLE_INVOICE_STATUSES` — never `paid` or `done`);
     - **balance** — the over-application guard: the invoice must still absorb
@@ -415,13 +439,11 @@ def _eligible_invoices_query(
     )
     if memo_entity_id is not None:
         query = query.where(or_(Invoice.entity_id.is_(None), Invoice.entity_id == memo_entity_id))
+    invoice_currency = invoice_currency_key_sql(Invoice.currency)
     if memo_currency:
-        invoice_currency = func.upper(
-            func.btrim(func.coalesce(Invoice.currency, ""), _STRIPPED_WHITESPACE)
-        )
-        query = query.where(
-            or_(invoice_currency == "", invoice_currency == memo_currency.strip().upper())
-        )
+        query = query.where(invoice_currency == memo_currency.strip().upper())
+    else:
+        query = query.where(invoice_currency.is_not(None))
     query = query.where(creditable >= amount if amount is not None else creditable > 0)
     return query
 
@@ -638,9 +660,11 @@ async def list_invoices_eligible_for_new_memo(
 
     Behind the create dialog's optional "Apply to invoice" picker. The vendor
     is resolved exactly as create resolves it — entity-scoped, 404 otherwise —
-    and the memo's entity follows it, as on create. No currency leg: a linked
-    create that asserts none INHERITS the invoice's, which is what the dialog
-    sends. See `_eligible_invoices_query` and `docs/decisions.md` §202.
+    and the memo's entity follows it, as on create. No currency EQUALITY leg: a
+    linked create that asserts none INHERITS the invoice's, which is what the
+    dialog sends — but an invoice with no usable currency is still left out,
+    since create refuses it (§473). See `_eligible_invoices_query` and
+    `docs/decisions.md` §202.
     """
     vendor = await _get_scoped_vendor(db, vendor_id, entity_id)
     return await _eligible_invoice_page(
@@ -790,10 +814,12 @@ async def create_credit_memo(
         _assert_vendor_matches(invoice, vendor_uuid)
         # The memo will be stamped with its vendor's entity (below).
         _assert_entity_matches(invoice, vendor.entity_id)
-        # When the caller named no currency the memo INHERITS the invoice's, so
-        # this only fires on a currency the caller actually asserted.
-        _assert_currency_matches(invoice, currency)
-        currency = currency or (invoice.currency or "").strip().upper() or None
+        # Refuses an invoice with no usable currency whether or not the caller
+        # named one (decisions §473). When the caller named none the memo
+        # INHERITS the invoice's code, so a mismatch only fires on a currency
+        # the caller actually asserted.
+        invoice_currency = _assert_currency_matches(invoice, currency)
+        currency = currency or invoice_currency
         already_applied = (
             await db.execute(
                 select(func.coalesce(func.sum(CreditMemo.amount), Decimal("0"))).where(
@@ -809,7 +835,8 @@ async def create_credit_memo(
             )
         invoice_number = invoice.invoice_number
 
-    # Last rung: the org's own reporting currency (which itself falls back to
+    # Last rung, for an UNLINKED memo only (a linked one resolved above or was
+    # refused): the org's own reporting currency (which itself falls back to
     # the platform default), so a single-currency EUR tenant never has to name
     # a currency and never gets a USD memo it can't apply.
     currency = currency or resolve_reporting_currency(org.settings)

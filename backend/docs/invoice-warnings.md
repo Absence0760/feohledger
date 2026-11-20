@@ -17,7 +17,7 @@ Four fields, and each carries its own job:
 
 | Field | What it is |
 |-------|------------|
-| `type` | The CATEGORY. Several codes share one, and code paths key on this (`UPSTREAM_WARNING_TYPES`, the modal's `missing_field` / `po_mismatch` filter, `EntityMixin`-free row filters). A new code never needs a new type. |
+| `type` | The CATEGORY. Several codes share one, and code paths key on this (`UPSTREAM_WARNING_TYPES`, the modal's `missing_field` / `po_mismatch` filter, `EntityMixin`-free row filters). A new code never needs a new type, unless one of those filters must treat it differently: `po_billed_beyond_total` is `po_overbilled`, not `po_mismatch`, because the modal hides `po_mismatch` warnings in favour of the PO-match panel's own issues, and this cross-invoice finding is not one of them (`decisions.md` §469). |
 | `severity` | `error` \| `warning` \| `info`. Chosen at the call site, not by the catalogue — the same code can be `info` or `warning` depending on which threshold it crossed (`price_variance_*`). |
 | `message` | The backend's rendered English. It is the **fallback**, not the thing to render. |
 | `code` | Stable identity for the SENTENCE. This is what a client localizes on. |
@@ -87,7 +87,15 @@ Rules that hold at every call site:
   `terminated` / `cancelled`, `(not-to-exceed)` — a client cannot splice an
   English word into a German sentence, so each variant is its own code
   (`price_variance_over` / `price_variance_under`,
-  `contract_spend_limit_exceeded{,_not_to_exceed}`).
+  `contract_spend_limit_exceeded{,_not_to_exceed}`). Severity is not a word in
+  the sentence, so it is NOT a code: `contract_currency_mismatch` is one code at
+  `error` or `warning`, following the contract's `not_to_exceed` as the
+  spend-limit codes' severity does. A missing invoice currency IS a different
+  sentence, so it is its own code
+  (`contract_currency_mismatch_invoice_currency_unknown`), as
+  `po_currency_mismatch` has its `_invoice_currency_unknown` twin. Both state
+  ISO codes as `text`: they are printed, never used to format a figure
+  (`docs/decisions.md` §472).
 - **A count is a `count` param and the template uses an ICU plural.** The
   catalogue resolves those with English rules for the fallback; the client
   resolves the same block through `Intl.PluralRules`. `=0 {}` is how an
@@ -328,7 +336,7 @@ themselves, rather than through `_ensure_exception`, pass a finding's
 |------|----------------|-------|
 | `services/extraction.py` | `extraction_failed` | `extraction_failed` — `errorClass` is the exception's CLASS name; `str(exc)` never reaches the row, because a provider or parser message can quote the document |
 | `api/positive_pay.py` | `fraud_flag` | `positive_pay_altered_amount`, `positive_pay_not_on_file` — `checkNumber` |
-| `api/vendors.flag_invoice_for_bank_change` | `fraud_flag` | `vendor_bank_changed` |
+| `services/vendor_bank_change.flag_invoice_for_bank_change` | `fraud_flag` | `vendor_bank_changed` |
 | `api/payments._open_compliance_hold_exception` | `payment_compliance_hold` | the `compliance_hold_findings` frame over the hold's reasons, below |
 | `services/payment_reconciler.flag_payment_for_reconciliation` (the reconciler's age-out, and `api/payments`' two in-doubt dispatch paths) | `payment_reconciliation` | `payment_aged_out`, `payment_dispatch_in_doubt`, `payment_dispatch_interrupted_failed`, `payment_dispatch_interrupted_cancelled` |
 | `services/payment_settlement_record.open_settlement_mismatch_exception` | `fraud_flag` | `settlement_currency_mismatch`, `settlement_amount_over`, `settlement_amount_under` (`payment_settlement.discrepancy_finding`) |

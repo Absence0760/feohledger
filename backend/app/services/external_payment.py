@@ -78,6 +78,7 @@ from app.models.organization import Organization
 from app.models.payment import Payment, PaymentRun
 from app.services.applied_credit_integrity import applied_credit_conflicts
 from app.services.approval_chain import violates_segregation
+from app.services.discount_opportunities import capture_discount_offers
 from app.services.payment_controls import run_segregation_enabled
 from app.services.payment_methods import (
     RAIL_SPLIT_APPLIED,
@@ -97,6 +98,7 @@ from app.services.payment_runs import (
     payable_amounts,
 )
 from app.services.workflow_engine import VALID_TRANSITIONS, transition_invoice
+from app.utils.currency_code import iso_currency_or_none
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +237,7 @@ async def check_recordable(
     very record answers, which therefore do not refuse it — see
     :func:`record_invoice_paid_outside`.
     """
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
+    from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 
     if invoice.status.value not in PAYABLE_INVOICE_STATUSES:
         return Refusal(
@@ -486,8 +488,8 @@ def _check_amount(
         stated is not None
         and currency_stated
         and (
-            not (stated_currency or "").strip()
-            or stated_currency.strip().upper() != (currency or "").strip().upper()
+            iso_currency_or_none(stated_currency) is None
+            or iso_currency_or_none(stated_currency) != iso_currency_or_none(currency)
         )
     ):
         raise ExternalPaymentRefused(
@@ -536,7 +538,6 @@ async def _complete(
     rail_parts: Sequence[RailPart] = (),
 ) -> None:
     """Book ``payment`` as completed outside FeohLedger and walk the invoice to ``paid``."""
-    from app.api.payments import _capture_discount_offers
     from app.services.audit_dispatch import dispatch_audit
 
     at = paid_on_timestamp(paid_on)
@@ -625,7 +626,7 @@ async def _complete(
         },
     )
 
-    await _capture_discount_offers(
+    await capture_discount_offers(
         db, org=org, payment=payment, actor_id=actor_id, now=at, invoice=invoice
     )
 

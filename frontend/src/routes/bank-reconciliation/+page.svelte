@@ -32,6 +32,7 @@
 		UnmatchedDebit
 	} from '#lib/types/bankReconciliation.ts';
 	import { isTruncated } from '#lib/types/bankReconciliation.ts';
+	import LoadMoreFooter from '#lib/components/ui/LoadMoreFooter.svelte';
 	import { paymentMethodLabelKey, paymentStatusLabelKey } from '#lib/types/payment.ts';
 	import {
 		deleteBankStatement,
@@ -62,6 +63,7 @@
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -554,7 +556,7 @@
 			</div>
 
 			{#if outstandingLoading}
-				<p class="state-note muted" data-testid="outstanding-loading">{m('common.loading')}</p>
+				<LoadingState testId="outstanding-loading" />
 			{:else if outstandingError}
 				<LoadError
 					message={m('bankRecon.error.load')}
@@ -583,7 +585,9 @@
 					<DataTable
 						columns={UNCLEARED_COLUMNS}
 						isEmpty={unclearedRows.length === 0}
-						empty={term ? m('bankRecon.empty.filtered') : m('bankRecon.empty.uncleared')}
+						filtered={!!term}
+						emptyFiltered={m('bankRecon.empty.filtered')}
+						empty={m('bankRecon.empty.uncleared')}
 						colspan={7}
 					>
 						{#snippet body()}
@@ -629,7 +633,9 @@
 					<DataTable
 						columns={UNMATCHED_COLUMNS}
 						isEmpty={unmatchedRows.length === 0}
-						empty={term ? m('bankRecon.empty.filtered') : m('bankRecon.empty.unmatched')}
+						filtered={!!term}
+						emptyFiltered={m('bankRecon.empty.filtered')}
+						empty={m('bankRecon.empty.unmatched')}
 						colspan={5}
 					>
 						{#snippet body()}
@@ -683,7 +689,9 @@
 					<DataTable
 						columns={DISCREPANCY_COLUMNS}
 						isEmpty={discrepancyRows.length === 0}
-						empty={term ? m('bankRecon.empty.filtered') : m('bankRecon.empty.discrepancies')}
+						filtered={!!term}
+						emptyFiltered={m('bankRecon.empty.filtered')}
+						empty={m('bankRecon.empty.discrepancies')}
 						colspan={7}
 					>
 						{#snippet body()}
@@ -776,9 +784,8 @@
 				<DataTable
 					columns={STATEMENT_COLUMNS}
 					isEmpty={statements.length === 0}
-					empty={statementsLoading
-						? m('common.loading')
-						: m('bankRecon.empty.statementsFiltered')}
+					loading={statementsLoading}
+					empty={m('bankRecon.empty.statementsFiltered')}
 					colspan={7}
 				>
 					{#snippet body()}
@@ -838,25 +845,15 @@
 					{/snippet}
 				</DataTable>
 
-				{#if hasMoreStatements}
-					<div class="load-more-row">
-						<button
-							class="btn-load-more"
-							onclick={() => loadStatements({ append: true })}
-							disabled={statementsLoadingMore}
-						>
-							{statementsLoadingMore
-								? m('common.loading')
-								: m('bankRecon.loadMore', { shown: statements.length, total: statementTotal })}
-						</button>
-					</div>
-				{:else if statementTotal > 0}
-					<div class="load-more-row">
-						<span class="load-more-end">
-							{m('bankRecon.showingAll', { total: statementTotal })}
-						</span>
-					</div>
-				{/if}
+				<LoadMoreFooter
+					shown={statements.length}
+					total={statementTotal}
+					hasMore={hasMoreStatements}
+					loading={statementsLoadingMore}
+					onloadmore={() => loadStatements({ append: true })}
+					moreKey="bankRecon.loadMore"
+					allKey="bankRecon.showingAll"
+				/>
 			{/if}
 		</div>
 	{/if}
@@ -908,11 +905,6 @@
 		margin: 2px 0 10px;
 		font-size: 0.8rem;
 		line-height: 1.45;
-	}
-
-	.state-note {
-		margin: 20px 0;
-		font-size: 0.9rem;
 	}
 
 	.truncated {

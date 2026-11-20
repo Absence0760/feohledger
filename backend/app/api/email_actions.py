@@ -53,6 +53,7 @@ from app.services.email_action_token import (
     approval_facts_changed,
     verify_action_token,
 )
+from app.utils.currency_code import iso_currency_or_none
 from app.utils.http import detail_text
 
 logger = logging.getLogger(__name__)
@@ -118,7 +119,11 @@ def _info_page(title: str, message: str) -> HTMLResponse:
 def _invoice_ref(invoice: Invoice) -> str:
     ref = f"Invoice {invoice.invoice_number} ({invoice.vendor_name})"
     if invoice.amount is not None:
-        ref += f" for {invoice.currency or 'USD'} {invoice.amount:,.2f}"
+        # No code at all when the invoice records none, or a malformed legacy
+        # value no reader could use (decisions §473).
+        currency = iso_currency_or_none(invoice.currency)
+        code = f"{currency} " if currency else ""
+        ref += f" for {code}{invoice.amount:,.2f}"
     return ref
 
 

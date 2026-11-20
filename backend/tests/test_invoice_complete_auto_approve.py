@@ -396,6 +396,40 @@ async def test_complete_floor_holds_an_invoice_whose_po_match_fails(realdb, case
             await c.patch(f"/api/workflows/{workflow_id}", json={"steps": original_steps})
 
 
+async def test_complete_floor_sends_a_cumulatively_over_billed_invoice_to_review(realdb):
+    """Each invoice fits the PO on its own, so the match raises no hold; with
+    the other bill already citing the PO the two pass its total, and that
+    warning is no hold either (decisions §469). The floor still stands aside:
+    no unattended approval past it."""
+    workflow_id = await _get_active_workflow_id(realdb)
+    async with realdb.client(key=TENANT, role="admin") as c:
+        original_steps = (await c.get(f"/api/workflows/{workflow_id}")).json()["steps_config"][
+            "steps"
+        ]
+    try:
+        await _set_auto_approve_below(realdb, workflow_id=workflow_id, threshold="5000.00")
+        po_number = await _purchase_order(realdb, total="1000.00", vendor_name=FLOOR_VENDOR)
+        await _create_under_floor(realdb, po_number=po_number, amount="600.00")
+        invoice_id = await _create_under_floor(realdb, po_number=po_number, amount="500.00")
+
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.post(f"/api/invoices/{invoice_id}/complete")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "ready_for_review"
+
+        async with realdb.sessionmaker(TENANT)() as s:
+            inv = await s.get(Invoice, invoice_id)
+            assert inv.status == InvoiceStatus.ready_for_review
+            assert inv.approved_by is None
+            assert inv.approval_date is None
+            assert "po_billed_beyond_total" in [w.get("code") for w in inv.warnings or []]
+        assert await _po_holds(realdb, invoice_id) == []
+        assert await _suppressed_reason(realdb, invoice_id) == "po_overbilled"
+    finally:
+        async with realdb.client(key=TENANT, role="admin") as c:
+            await c.patch(f"/api/workflows/{workflow_id}", json={"steps": original_steps})
+
+
 async def test_complete_floor_approves_an_invoice_whose_po_matches(realdb):
     """A clean match is no reason to stop the floor: the invoice auto-approves,
     with the match on the row and no hold."""

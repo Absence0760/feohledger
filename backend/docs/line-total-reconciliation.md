@@ -64,7 +64,7 @@ engine guessing which of the two numbers is wrong.
 Visibility alone wouldn't be enough: **approval doesn't gate on warning
 severity** (nothing in `services/review.py` or `workflow_engine.py` reads it), so
 a flagged invoice can still be approved. `line_total_mismatch` is therefore in
-`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES` alongside `duplicate` and
+`services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES` alongside `duplicate` and
 `fraud_flag` — an invoice carrying an unresolved one **cannot enter a payment
 run** (409). That is the later, narrower gate: the invoice can still be
 reviewed, corrected and re-run; only the money is stopped. Resolving or

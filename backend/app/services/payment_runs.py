@@ -434,7 +434,7 @@ async def blocking_exception_types(
     """Map each blocked invoice id → the TYPE of exception blocking it.
 
     ``types`` narrows the question to a subset — the ERP push passes
-    ``api/payments.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`` (decisions §286) — so
+    ``services/payment_gates.ERP_EXPORT_BLOCKING_EXCEPTION_TYPES`` (decisions §286) — so
     "which flags are still live" stays one predicate however many gates ask it.
     Precedence is the order of whichever tuple is in force.
 
@@ -453,7 +453,7 @@ async def blocking_exception_types(
     rendered to an operator and travels through a JSON body, and a description
     can carry vendor / bank / amount detail.
     """
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     if not invoice_ids:
         return {}
@@ -670,11 +670,11 @@ async def applied_credit_totals(
 ) -> dict[uuid.UUID, Decimal]:
     """Sum of the credit memos already APPLIED against each of ``invoice_ids``.
 
-    One grouped query for the whole batch. The single-invoice form below
-    delegates here so "what counts as applied credit" has exactly one
-    definition — the run builder needs this for a page of invoices at a time
-    and the payment queue for a page of ROWS, and neither should be issuing a
-    query per invoice to find out.
+    One grouped query for the whole batch, and the one definition of "what
+    counts as applied credit": a single invoice is asked for as a one-element
+    batch. The run builder needs this for a page of invoices at a time and the
+    payment queue for a page of ROWS, and neither should be issuing a query per
+    invoice to find out.
 
     Invoices with no applied memo are absent from the mapping (callers default
     to zero) rather than carrying a 0 row, so the result reflects what the
@@ -692,11 +692,6 @@ async def applied_credit_totals(
         .group_by(CreditMemo.invoice_id)
     )
     return {invoice_id: total for invoice_id, total in rows.all() if invoice_id is not None}
-
-
-async def applied_credit_total(db: AsyncSession, invoice_id: uuid.UUID) -> Decimal:
-    """Sum of the credit memos already APPLIED against an invoice."""
-    return (await applied_credit_totals(db, [invoice_id])).get(invoice_id, Decimal("0"))
 
 
 async def net_payable_amounts(
@@ -920,7 +915,7 @@ async def _live_payment_invoice_numbers(
 
 
 #: Stable, PII-free reason codes for the refusals that are not themselves an
-#: exception type. The members of ``api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES``
+#: exception type. The members of ``services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES``
 #: (``duplicate`` / ``fraud_flag`` / …) are already their own codes and are
 #: returned verbatim.
 #:
@@ -1177,7 +1172,7 @@ def _raise_refusal(
     refuses the run rather than falling through and staging it. A refusal the
     messages forgot must not become a payment.
     """
-    from app.api.payments import PAYMENT_BLOCKING_EXCEPTION_TYPES
+    from app.services.payment_gates import PAYMENT_BLOCKING_EXCEPTION_TYPES
 
     # All blocking exception types are ONE group: a batch holding a duplicate
     # and a fraud flag names both in a single message, as it always did. The
@@ -1331,7 +1326,7 @@ async def create_payment_run_for_invoices(
     # api/payments.py's shared status/exception-type constants). Mirrors the
     # existing lazy-import pattern api/cards.py already uses for the same
     # constant.
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
+    from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 
     if not items:
         raise HTTPException(status_code=422, detail="At least one invoice is required")
@@ -1346,8 +1341,8 @@ async def create_payment_run_for_invoices(
     # every gate below is a fresh statement that then sees what a concurrent
     # `/send-to-erp`, card mint, dispatch or second run committed while this
     # request waited. See `lock_run_invoices`.
-    from app.api.payments import INVOICE_LOCKED_DETAIL
     from app.config import settings as app_settings
+    from app.services.payment_gates import INVOICE_LOCKED_DETAIL
     from app.utils.db_locks import LockWaitTimeout
 
     try:
@@ -1650,7 +1645,7 @@ async def dispatch_preflight(
     booked figure is no longer what the invoice owes on ``as_of`` is refused,
     and a fresh run re-derives it. The caller holds ``invoice`` FOR UPDATE.
     """
-    from app.api.payments import PAYABLE_INVOICE_STATUSES
+    from app.services.payment_gates import PAYABLE_INVOICE_STATUSES
 
     if invoice.status.value not in PAYABLE_INVOICE_STATUSES:
         return f"invoice_not_payable:{invoice.status.value}"

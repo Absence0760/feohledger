@@ -211,7 +211,9 @@ ERP_PRODUCER_MODULES = (
 #: findings for them (compliance hold reasons, settlement discrepancies).
 DIRECT_EXCEPTION_PRODUCER_MODULES = (
     "app/api/positive_pay.py",
-    "app/api/vendors.py",
+    # The payee-change flag, raised for an approved bank change (moved out of
+    # `api/vendors`) and for the void's re-payment.
+    "app/services/vendor_bank_change.py",
     "app/api/payments.py",
     "app/services/compliance.py",
     "app/services/sanctions_categories.py",
@@ -412,10 +414,15 @@ def test_money_keeps_exact_digits_and_never_narrows_below_two_places():
     assert out["params"]["currency"] == "USD"
 
 
-def test_a_missing_currency_falls_back_rather_than_emitting_none():
-    out = warning("round_amount", "info", amount=Decimal("5000.00"), currency=None)
-    assert out["params"]["currency"] == cat.DEFAULT_CURRENCY
-    assert out["message"] == "Round amount: 5000.00 USD"
+@pytest.mark.parametrize("currency", [None, "", "   ", "US", "1$X"])
+def test_an_unknown_currency_is_carried_as_unknown_never_as_usd(currency):
+    """An invoice that records no currency (decisions §473) yields a blank
+    `currency` param, which both clients render as bare digits — never a
+    borrowed USD."""
+    out = warning("round_amount", "info", amount=Decimal("5000.00"), currency=currency)
+    assert out["params"]["currency"] == cat.UNKNOWN_CURRENCY == ""
+    assert "USD" not in out["message"]
+    assert out["message"].startswith("Round amount: 5000.00")
 
 
 def test_dates_are_iso_so_the_client_can_reformat_them():

@@ -240,11 +240,20 @@ test.describe('/vendors/change-requests — dual-control bank-change approvals',
 
 			const approve = mgrRow.getByRole('button', { name: 'Approve', exact: true });
 			await expect(approve).toBeEnabled();
+			// Only one commit is ever armed: arm Reject, then one click on
+			// Approve must retract Reject as it arms itself, or a row would
+			// hold two armed red buttons side by side.
+			await mgrRow.getByRole('button', { name: 'Reject', exact: true }).click();
+			await expect(mgrRow.getByRole('button', { name: 'Confirm reject' })).toBeVisible();
+
 			// Armed two-click confirm — this is the click that redirects where
 			// money goes, so one stray click must not commit it.
 			await approve.click();
 			const confirm = mgrRow.getByRole('button', { name: 'Confirm approve' });
 			await expect(confirm).toBeVisible();
+			await expect(mgrRow.getByRole('button', { name: 'Confirm reject' })).toHaveCount(0);
+			await expect(mgrRow.getByRole('button', { name: 'Reject', exact: true })).toBeVisible();
+			await expect(mgrRow.locator('button.armed')).toHaveCount(1);
 			await confirm.click();
 
 			await expect(page.locator('.toast', { hasText: 'Change approved' })).toBeVisible();

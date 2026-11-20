@@ -9,8 +9,10 @@
 	import { formatMoney, isNegativeAmount } from '#lib/utils/money.ts';
 	import type { MoneyAmount } from '#lib/utils/money.ts';
 	import { formatPeriod } from '#lib/utils/time.ts';
+	import { formatDays } from '#lib/utils/duration.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import type { CfoAccrualsByCurrency, CfoAnalytics } from '#lib/types/analytics.ts';
 
@@ -26,6 +28,9 @@
 	}
 
 	let { periodDays = 365 }: Props = $props();
+
+	/** Day figures keep the one decimal they always showed ("12.0d"), in the reader's notation. */
+	const DAYS_1DP = { minimumFractionDigits: 1, maximumFractionDigits: 1 } as const;
 
 	let data = $state<CfoAnalytics | null>(null);
 	let loading = $state(false);
@@ -123,7 +128,7 @@
 	     draws pending and unavailable identically. -->
 	<div class="kpi-row">
 		<KpiCard
-			value={data ? `${data.dpo_current.toFixed(1)}d` : null}
+			value={data ? formatDays(data.dpo_current, DAYS_1DP) : null}
 			label={m('cfoMetrics.kpi.dpo')}
 			pending={loading}
 		/>
@@ -133,7 +138,7 @@
 		     that a figure exists. -->
 		<KpiCard
 			value={data && data.cash_conversion_cycle !== null
-				? `${data.cash_conversion_cycle.toFixed(1)}d`
+				? formatDays(data.cash_conversion_cycle, DAYS_1DP)
 				: null}
 			label={m('cfoMetrics.kpi.ccc')}
 			sub={data && data.cash_conversion_cycle === null
@@ -162,7 +167,7 @@
 	{#if error}
 		<p class="cfm-error" role="alert">{error}</p>
 	{:else if loading && !data}
-		<p class="empty">{m('cfoMetrics.loading')}</p>
+		<LoadingState />
 	{:else if data}
 		{#if data.reporting_accounts_payable_balance.unconverted_count > 0}
 			<p class="cfm-skipped" data-testid="unconverted-ap-balance">
@@ -186,10 +191,10 @@
 					{#each data.dpo_trend as r (r.month)}
 						<div class="cf-bar-row">
 							<span class="cf-bar-label">{formatPeriod(r.month)}</span>
-							<div class="cf-bar-bg" role="img" aria-label={`${r.dpo.toFixed(1)} days`}>
+							<div class="cf-bar-bg" role="img" aria-label={formatDays(r.dpo, { ...DAYS_1DP, unitDisplay: 'long' })}>
 								<div class="cf-bar committed" style="width:{(r.dpo / maxDpo) * 100}%"></div>
 							</div>
-							<span class="cf-bar-amount">{r.dpo.toFixed(1)}d</span>
+							<span class="cf-bar-amount">{formatDays(r.dpo, DAYS_1DP)}</span>
 						</div>
 					{/each}
 				</div>
@@ -382,8 +387,8 @@
 </div>
 
 <style>
-	/* This component is mounted standalone (not via <slot>), so it needs its
-	   own copy of the .chart-card / .cf-bar* / .empty recipe rather than
+	/* This component is mounted standalone (not as a layout's routed children), so it needs its
+	   own copy of the .chart-card / .cf-bar* recipe rather than
 	   relying on the parent route's scoped <style> — Svelte scoped CSS never
 	   reaches into a child component's own template. Kept in sync with
 	   routes/cfo/+page.svelte's identical block by inspection. */
@@ -440,12 +445,6 @@
 		font-size: 0.82rem;
 		text-align: right;
 		font-variant-numeric: tabular-nums;
-	}
-
-	.empty {
-		color: var(--text-muted);
-		text-align: center;
-		padding: 20px;
 	}
 
 	.cfm-error {

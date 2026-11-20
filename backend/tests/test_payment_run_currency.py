@@ -127,10 +127,11 @@ async def test_payment_run_allows_same_currency_invoices(realdb):
 # ---------------------------------------------------------------------------
 
 
-async def _blank_currency(mk, invoice_id, value: str = "") -> None:
-    """The invoice PATCH's legacy "no currency" value, written past the API the
-    way a concurrent PATCH would land between `/draft-run`'s read and the
-    builder's lock."""
+async def _blank_currency(mk, invoice_id, value: str | None = None) -> None:
+    """An invoice that records no currency: NULL, the one spelling since
+    migration 0136 (an upload extraction found no code in), or the pre-0136
+    `""` sentinel. Written past the API the way a concurrent change would land
+    between `/draft-run`'s read and the builder's lock."""
     from sqlalchemy import update
 
     async with mk() as s:
@@ -149,7 +150,7 @@ async def _payment_rows(mk, invoice_ids):
         )
 
 
-@pytest.mark.parametrize("blank", ["", "   "])
+@pytest.mark.parametrize("blank", [None, "", "   "])
 async def test_payment_run_refuses_an_invoice_with_no_currency(realdb, blank):
     """A blank currency used to be read as USD and staged; now it is the coded
     `currency_unknown` 409 naming the invoice, and nothing is booked. Batched
@@ -157,13 +158,14 @@ async def test_payment_run_refuses_an_invoice_with_no_currency(realdb, blank):
     either: it is no currency."""
     info = realdb.info("a")
     mk = realdb.sessionmaker("a")
+    tag = "N" if blank is None else len(blank)
     async with mk() as s:
         ent = await _default_entity_id(s, info.org_id)
     blank_id = await _seed_vendor_and_invoice(
-        mk, info.org_id, ent, number=f"NOCUR-{len(blank)}", amount="100.00", currency="USD"
+        mk, info.org_id, ent, number=f"NOCUR-{tag}", amount="100.00", currency="USD"
     )
     usd_id = await _seed_vendor_and_invoice(
-        mk, info.org_id, ent, number=f"NOCUR-USD-{len(blank)}", amount="100.00", currency="USD"
+        mk, info.org_id, ent, number=f"NOCUR-USD-{tag}", amount="100.00", currency="USD"
     )
     await _blank_currency(mk, blank_id, blank)
 
@@ -177,8 +179,8 @@ async def test_payment_run_refuses_an_invoice_with_no_currency(realdb, blank):
         assert resp.status_code == 409, resp.text
         detail = resp.json()["detail"]
         assert detail.startswith("currency_unknown:"), detail
-        assert f"NOCUR-{len(blank)}" in detail
-        assert f"NOCUR-USD-{len(blank)}" not in detail
+        assert f"NOCUR-{tag}" in detail
+        assert f"NOCUR-USD-{tag}" not in detail
     assert await _payment_rows(mk, [blank_id, usd_id]) == []
 
 
@@ -265,3 +267,40 @@ async def test_currency_blanked_after_the_run_is_built_stops_dispatch(realdb):
     assert retry.status_code == 200, retry.text
     assert retry.json()["payments_retried"] == 0, retry.json()
     assert "currency_unknown" in retry.json()["skip_reasons"], retry.json()
+
+
+async def test_queue_rollup_keeps_an_unknown_currency_invoice_in_its_own_group(realdb):
+    """The payment queue's whole-set rollup (`_payment_queue_rollup`) groups a
+    NULL-currency invoice under a `None` key of its own (decisions §473): the
+    700.00 is never part of the USD group's 1000.00, and it counts once in
+    `unconverted_count`. The reporting total still adds its face value — the
+    flagged fallback every spend rollup makes — which is why the count is there."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        ent = await _default_entity_id(s, info.org_id)
+    usd_id = await _seed_vendor_and_invoice(
+        mk, info.org_id, ent, number="GRP-USD", amount="1000.00", currency="USD"
+    )
+    unknown_id = await _seed_vendor_and_invoice(
+        mk, info.org_id, ent, number="GRP-NULL", amount="700.00", currency="USD"
+    )
+    await _blank_currency(mk, unknown_id, None)
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.get("/api/payments/queue")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    groups = {g["currency"]: g for g in body["by_currency"]}
+    assert set(groups) == {"USD", None}
+    assert groups["USD"]["count"] == 1
+    assert Decimal(groups["USD"]["total_amount"]) == Decimal("1000.00")
+    assert groups[None]["count"] == 1
+    assert Decimal(groups[None]["total_amount"]) == Decimal("700.00")
+    # The unknown group sorts last.
+    assert [g["currency"] for g in body["by_currency"]] == ["USD", None]
+    assert body["unconverted_count"] == 1
+    assert body["currency"] == "USD"
+    assert Decimal(body["total_amount"]) == Decimal("1700.00")
+    ids = {row["id"] for row in body["items"]}
+    assert {usd_id, unknown_id} <= ids

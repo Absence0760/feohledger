@@ -15,12 +15,6 @@ void main() {
       expect(ContractStatus.fromString(''), ContractStatus.draft);
     });
 
-    test('every status has a human label', () {
-      for (final status in ContractStatus.values) {
-        expect(status.label, isNotEmpty);
-      }
-    });
-
     test('isActionable is true only for draft and active', () {
       expect(ContractStatus.draft.isActionable, isTrue);
       expect(ContractStatus.active.isActionable, isTrue);

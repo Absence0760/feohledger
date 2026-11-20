@@ -34,7 +34,7 @@ three fields **redacted**; a same-entity match is unchanged and still names them
 because there the viewer is entitled to the detail and needs it to act.
 
 The `duplicate` Exception this raises is in
-`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so a cross-entity hit still
+`services/payment_gates.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so a cross-entity hit still
 blocks the payment run until a human clears it. That is the intended behaviour
 for a suspected group double-bill — the human sign-off is the control — and the
 clearing path is unchanged.

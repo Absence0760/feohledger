@@ -41,6 +41,7 @@ from app.services.erp_adapters.syspro import (
     build_comfnd_query,
     classify_apstin_error,
     map_invoice_status,
+    po_is_foreign,
     po_total,
 )
 from app.utils.url_safety import UnsafeUrlError
@@ -1303,3 +1304,27 @@ def test_revoke_is_unsupported_and_calls_no_one():
     assert "company password" not in step
     for secret in (PASSWORD, COMPANY_PASSWORD, CONFIG["operator"]):
         assert secret not in step
+
+
+@pytest.mark.parametrize(
+    "header, local, expected",
+    [
+        # SYSPRO's own codes are not ISO 4217: `$` against `$` is local, not
+        # an unknown label to skip.
+        ("$", "$", False),
+        (" $ ", "$", False),
+        ("$", "USD", True),
+        ("USD", "$", True),
+        ("usd", "USD", False),
+        ("EUR", "USD", True),
+        # No header: local. No readable local currency: unknown.
+        (None, "USD", False),
+        ("  ", "USD", False),
+        ("EUR", None, None),
+        # A label matching neither rule is unknown, never local.
+        ("EURO", "USD", None),
+        ("€", "EUR", None),
+    ],
+)
+def test_po_is_foreign_compares_under_syspros_own_rule_first(header, local, expected):
+    assert po_is_foreign(header, local) is expected

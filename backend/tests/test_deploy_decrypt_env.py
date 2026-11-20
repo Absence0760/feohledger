@@ -338,6 +338,9 @@ def test_an_external_database_needs_no_postgres_password(
         # No port (libpq / asyncpg default 5432), and a percent-encoded password.
         "postgresql+asyncpg://feohadmin:p%40ss%2Fword@db.example.internal/feohledger",
     ],
+    # Readable ids: a credential-shaped URL in a test id lands in the
+    # shard-timing baseline and CI logs, where the secret scan flags it.
+    ids=["rds-host-and-port", "no-port-percent-encoded-password"],
 )
 def test_accepts_an_external_url_lib_sh_can_parse(deploy: Deploy, url: str) -> None:
     result = deploy.run(_rds({"FEOH_DATABASE_URL": url}))
@@ -368,6 +371,15 @@ def test_accepts_an_external_url_lib_sh_can_parse(deploy: Deploy, url: str) -> N
             "postgresql+asyncpg://feohadmin:pa%G1ss@db.example.internal/feohledger",
             "USER[:PASSWORD]@HOST",
         ),
+    ],
+    ids=[
+        "query-string",
+        "plain-postgresql-scheme",
+        "psycopg-scheme",
+        "no-database",
+        "ipv6-host",
+        "unencoded-character",
+        "broken-escape",
     ],
 )
 def test_refuses_an_external_url_the_tools_cannot_use_without_printing_it(

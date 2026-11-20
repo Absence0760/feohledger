@@ -87,11 +87,11 @@ function notifyModals() {
  * close). The node should carry `tabindex="-1"` so it can hold focus itself when
  * it has no focusable descendants.
  *
- * This is the single shared implementation used by `ui/Modal.svelte` AND the
- * feature dialogs that pre-date it and still hand-roll their own shell
- * (`InvoiceModal`, `RunDetailModal`, `BulkRecodeGLModal`, the supplier-portal
- * discount-accept dialog) — so every dialog gets identical focus management
- * without a risky structural rewrite of those e2e-load-bearing modals.
+ * This is the single shared implementation, and `ui/Modal.svelte` is its only
+ * caller: every modal dialog in the app — `InvoiceModal` and `RunDetailModal`
+ * included, and the supplier portal's discount-accept dialog — is a `Modal`,
+ * so every dialog gets identical focus management. `src/lib/modalShell.test.ts`
+ * fails on a hand-rolled dialog shell outside `Modal`.
  */
 /**
  * Where focus goes when a dialog closes (WCAG 2.4.3 Focus Order).

@@ -30,6 +30,7 @@ from app.api.deps import (
     require_roles,
 )
 from app.api.pagination import PaginationParams, paginated, pagination_params
+from app.api.refusals import coded_refusal
 from app.models.discount import (
     OFFER_SCOPE_INVOICE,
     OFFER_SCOPE_VENDOR,
@@ -59,12 +60,13 @@ from app.services import discount_offers as offers_svc
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
 from app.services.discount_auto_trigger import (
-    _resolve_due_date,
     _tier_deadline,
     settled_invoice_status,
 )
-from app.services.discount_optimizer import OfferOpportunity, optimize
+from app.services.discount_opportunities import build_opportunity, name_maps
+from app.services.discount_optimizer import optimize
 from app.services.discount_roi import compute_roi, days_between
+from app.services.payment_runs import payable_currency_code
 from app.services.payment_schedules import latest_schedule
 from app.tenant import (
     apply_entity_scope,
@@ -74,6 +76,14 @@ from app.tenant import (
     get_write_entity_id,
 )
 from app.utils.dates import utc_today
+
+#: An invoice-scoped offer on an invoice that records no usable currency (NULL,
+#: blank or malformed — `payment_runs.payable_currency_code`, the predicate the
+#: run builder and the credit-memo guard read), whether or not the body names
+#: one. The offer prices a payable in no stated currency, and an accepted offer
+#: in a caller-named code would later all but decide the invoice's currency for
+#: it — the same reasoning as `credit_memo_invoice_currency_unknown` (§473).
+DISCOUNT_OFFER_INVOICE_CURRENCY_UNKNOWN = "discount_offer_invoice_currency_unknown"
 
 router = APIRouter(prefix="/discounts", tags=["discounts"])
 
@@ -122,27 +132,6 @@ def _cost_of_capital(org: Organization) -> Decimal:
     return Decimal(str(raw))
 
 
-async def _name_maps(
-    db: AsyncSession, offers: list[DiscountOffer]
-) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, tuple[str, str | None]]]:
-    """Batch-resolve vendor names + invoice (number, vendor_name) for a page."""
-    vendor_ids = {o.vendor_id for o in offers if o.vendor_id}
-    invoice_ids = {o.invoice_id for o in offers if o.invoice_id}
-    vmap: dict[uuid.UUID, str] = {}
-    imap: dict[uuid.UUID, tuple[str, str | None]] = {}
-    if vendor_ids:
-        rows = await db.execute(select(Vendor.id, Vendor.name).where(Vendor.id.in_(vendor_ids)))
-        vmap = {vid: name for vid, name in rows.all()}
-    if invoice_ids:
-        rows = await db.execute(
-            select(Invoice.id, Invoice.invoice_number, Invoice.vendor_name).where(
-                Invoice.id.in_(invoice_ids)
-            )
-        )
-        imap = {iid: (num, vname) for iid, num, vname in rows.all()}
-    return vmap, imap
-
-
 def _response(
     offer: DiscountOffer,
     vmap: dict[uuid.UUID, str],
@@ -166,56 +155,6 @@ def _response(
         vendor_name=vendor_name,
         invoice_number=invoice_number,
         effective_status=offers_svc.effective_status(offer, as_of=today or utc_today()),
-    )
-
-
-async def _build_opportunity(
-    db: AsyncSession, offer: DiscountOffer, *, today: date
-) -> OfferOpportunity | None:
-    """Turn an open offer into a ranked optimizer opportunity (best tier today).
-
-    Returns ``None`` when no tier is still achievable, or the offer's invoice is
-    already paid / done. Reuses the sweep's
-    deadline / due-date economics so router and background sweep agree.
-    """
-    tier = offers_svc.best_tier_for_date(
-        offer.tiers or [],
-        today,
-        offer.valid_until,
-        reference_date=offers_svc.offer_reference_date(offer),
-    )
-    if tier is None:
-        return None
-    # An offer whose invoice is already paid / done can never be taken, so it is
-    # not an opportunity: ranking it inflated `/optimize`'s totals, the
-    # dashboard's `projected_savings` and the copilot's plan by savings nobody
-    # can realize — the same gate every accept path refuses on.
-    if await settled_invoice_status(db, offer) is not None:
-        return None
-    pay_by = _tier_deadline(offer, tier, today)
-    # `pay_by` is deliberately NOT the last fallback. It used to be, and it made
-    # `days_accelerated` exactly 0 for any offer with no schedule/invoice due
-    # date and no `valid_until` — every bulk negotiation — producing an ROI that
-    # contradicted itself: a 0.00 % APR and `worthwhile: false` beside a
-    # positive `net_benefit`, so the offer was permanently unrecommendable.
-    # `None` means "no horizon"; the optimizer reports it as unrankable rather
-    # than ranking it at zero.
-    due_date = await _resolve_due_date(db, offer) or offer.valid_until
-    return OfferOpportunity(
-        offer_id=str(offer.id),
-        invoice_id=str(offer.invoice_id) if offer.invoice_id else None,
-        vendor_id=str(offer.vendor_id) if offer.vendor_id else None,
-        vendor_name=None,
-        invoice_number=None,
-        base_amount=offer.base_amount,
-        # `base_amount`'s own currency. The optimizer's totals are sums, and a
-        # sum across currencies is not a number — see `optimize`'s
-        # `reporting_currency` guard.
-        currency=(offer.currency or "USD").upper(),
-        tier_days=int(tier["days"]),
-        discount_percent=offers_svc.tier_percent(tier),
-        pay_by=pay_by,
-        due_date=due_date,
     )
 
 
@@ -303,7 +242,7 @@ async def list_offers(
         .limit(pagination.limit)
     )
     rows = list((await db.execute(query)).scalars().all())
-    vmap, imap = await _name_maps(db, rows)
+    vmap, imap = await name_maps(db, rows)
     items = [_response(o, vmap, imap, today=today) for o in rows]
     return paginated(items, total, pagination)
 
@@ -360,7 +299,21 @@ async def create_offer(
                 status_code=422, detail="vendor_id does not match the invoice's vendor"
             )
         base_amount = base_amount if base_amount is not None else invoice.amount
-        currency = currency or invoice.currency
+        invoice_currency = payable_currency_code(invoice.currency)
+        if invoice_currency is None:
+            # Refused even when the caller names a currency: a EUR offer on a
+            # balance in no stated currency cannot be proved to price it, and
+            # the run builder refuses the invoice as `currency_unknown` until
+            # someone sets its code anyway (decisions §473).
+            raise HTTPException(
+                status_code=409,
+                detail=coded_refusal(
+                    DISCOUNT_OFFER_INVOICE_CURRENCY_UNKNOWN,
+                    "The invoice records no currency, so no discount can be offered "
+                    "against it. Set the invoice's currency first.",
+                ),
+            )
+        currency = currency or invoice_currency
     elif body.scope == OFFER_SCOPE_VENDOR:
         if not body.vendor_id:
             raise HTTPException(status_code=422, detail="vendor_id required for vendor scope")
@@ -403,7 +356,7 @@ async def create_offer(
     )
     await db.commit()
     await db.refresh(offer)
-    vmap, imap = await _name_maps(db, [offer])
+    vmap, imap = await name_maps(db, [offer])
     return _response(offer, vmap, imap)
 
 
@@ -415,7 +368,7 @@ async def get_offer(
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     offer = await _get_offer_scoped(db, offer_id, entity_id)
-    vmap, imap = await _name_maps(db, [offer])
+    vmap, imap = await name_maps(db, [offer])
     return _response(offer, vmap, imap)
 
 
@@ -469,7 +422,7 @@ async def accept_offer(
     )
     await db.commit()
     await db.refresh(offer)
-    vmap, imap = await _name_maps(db, [offer])
+    vmap, imap = await name_maps(db, [offer])
     return _response(offer, vmap, imap)
 
 
@@ -509,7 +462,7 @@ async def decline_offer(
     )
     await db.commit()
     await db.refresh(offer)
-    vmap, imap = await _name_maps(db, [offer])
+    vmap, imap = await name_maps(db, [offer])
     return _response(offer, vmap, imap, today=today)
 
 
@@ -635,11 +588,11 @@ async def optimize_discounts(
     offer_by_id = {str(o.id): o for o in rows}
     opportunities = []
     for offer in rows:
-        opp = await _build_opportunity(db, offer, today=today)
+        opp = await build_opportunity(db, offer, today=today)
         if opp is not None:
             opportunities.append(opp)
 
-    vmap, imap = await _name_maps(db, rows)
+    vmap, imap = await name_maps(db, rows)
     result = optimize(
         opportunities,
         cash_budget=cash_budget,
@@ -800,7 +753,7 @@ async def bulk_negotiate(
     )
     await db.commit()
     await db.refresh(offer)
-    vmap, imap = await _name_maps(db, [offer])
+    vmap, imap = await name_maps(db, [offer])
     return _response(offer, vmap, imap)
 
 
@@ -922,7 +875,7 @@ async def dashboard(
     )
     opportunities = []
     for offer in open_offers:
-        opp = await _build_opportunity(db, offer, today=today)
+        opp = await build_opportunity(db, offer, today=today)
         if opp is not None:
             opportunities.append(opp)
     result = optimize(

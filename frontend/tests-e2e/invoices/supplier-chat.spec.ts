@@ -72,11 +72,13 @@ test.describe('/invoices supplier chat — AP surface', () => {
 		// Resolve requires at least one message in the thread (the control is
 		// disabled on an empty thread). Post one first if the thread is open
 		// and empty.
+		// The pill's TEXT is the localized label ("Open" / "Offen"); the thread
+		// state is read off `data-status`, the raw wire value.
 		const status = chat.locator('[data-testid="chat-status"]');
-		if ((await status.textContent())?.trim() === 'resolved') {
+		if ((await status.getAttribute('data-status')) === 'resolved') {
 			// A prior run left it resolved — reopen so this run starts at open.
 			await chat.getByRole('button', { name: 'Reopen chat thread' }).click();
-			await expect(status).toHaveText('open', { timeout: 10_000 });
+			await expect(status).toHaveAttribute('data-status', 'open', { timeout: 10_000 });
 		}
 
 		await chat.locator('[data-testid="chat-input"]').fill(`e2e resolve seed ${Date.now()}`);
@@ -85,17 +87,19 @@ test.describe('/invoices supplier chat — AP surface', () => {
 			timeout: 10_000,
 		});
 
-		await expect(status).toHaveText('open');
+		await expect(status).toHaveAttribute('data-status', 'open');
+		await expect(status).toHaveText('Open');
 		await chat.getByRole('button', { name: 'Resolve chat thread' }).click();
 
 		// The pill flips and a resolve Activity row lands.
-		await expect(status).toHaveText('resolved', { timeout: 10_000 });
+		await expect(status).toHaveAttribute('data-status', 'resolved', { timeout: 10_000 });
+		await expect(status).toHaveText('Resolved');
 		await expect(
 			modal.locator('.activity-section').getByText('Resolved chat thread').first(),
 		).toBeVisible({ timeout: 10_000 });
 
 		// Restore the thread to open so the suite is re-runnable.
 		await chat.getByRole('button', { name: 'Reopen chat thread' }).click();
-		await expect(status).toHaveText('open', { timeout: 10_000 });
+		await expect(status).toHaveAttribute('data-status', 'open', { timeout: 10_000 });
 	});
 });

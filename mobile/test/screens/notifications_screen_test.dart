@@ -11,6 +11,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/notifications_screen.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/notification_store.dart';
+import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/notification_list_tile.dart';
 
 Widget _localized(Widget home) => MaterialApp(
@@ -111,17 +112,136 @@ void main() {
     expect(find.byType(NotificationListTile), findsNothing);
   });
 
-  testWidgets('renders the error state with a Retry on network failure',
-      (tester) async {
+  testWidgets('a failed load shows Retry, never the empty copy', (
+    tester,
+  ) async {
+    var calls = 0;
     ApiClient().debugConfigure(
-      client: MockClient((req) async => throw Exception('offline')),
+      client: MockClient((req) async {
+        calls++;
+        if (calls == 1) throw http.ClientException('offline');
+        return _page([_notificationJson('1')]);
+      }),
     );
 
     await tester.pumpWidget(_localized(const NotificationsScreen()));
-    await _pumpUntil(tester, find.text("Couldn't load notifications"));
+    await _pumpUntil(tester, find.widgetWithText(FilledButton, 'Retry'));
 
-    expect(find.text("Couldn't load notifications"), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, 'Retry'), findsOneWidget);
+    // No server answered, so the connection sentence — and never "No
+    // notifications", which would claim there is nothing to read.
+    expect(
+      find.text(
+        "Couldn't reach FeohLedger. Check your connection and tap Retry.",
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('No notifications'), findsNothing);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+    await _pumpUntil(tester, find.byType(NotificationListTile));
+    expect(find.byType(NotificationListTile), findsOneWidget);
+  });
+
+  testWidgets('a server refusal is worded with its reason', (tester) async {
+    ApiClient().debugConfigure(
+      client: MockClient(
+        (req) async => http.Response(
+          jsonEncode({'detail': 'Not permitted'}),
+          403,
+          headers: {'content-type': 'application/json'},
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(_localized(const NotificationsScreen()));
+    await _pumpUntil(tester, find.widgetWithText(FilledButton, 'Retry'));
+
+    expect(
+      find.text("Couldn't load notifications: Not permitted"),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('the empty state can be pulled to refresh', (tester) async {
+    var calls = 0;
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        calls++;
+        return _page([]);
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const NotificationsScreen()));
+    await _pumpUntil(tester, find.text('No notifications'));
+    expect(calls, 1);
+
+    await tester.fling(
+      find.text('No notifications'),
+      const Offset(0, 300),
+      1000,
+    );
+    await tester.pumpAndSettle();
+    await _pumpUntilTrue(tester, () => calls >= 2);
+
+    expect(calls, 2);
+  });
+
+  testWidgets('a failed mark-read over a loaded list raises no stale banner', (
+    tester,
+  ) async {
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (req.method == 'POST') {
+          return http.Response(
+            jsonEncode({'detail': 'Not permitted'}),
+            403,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return _page([_notificationJson('1')]);
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const NotificationsScreen()));
+    await _pumpUntil(tester, find.byType(NotificationListTile));
+
+    bool? ok;
+    store.markAllRead().then((v) => ok = v);
+    await _pumpUntilTrue(tester, () => ok != null);
+
+    expect(ok, isFalse);
+    expect(store.actionError, 'Not permitted');
+    expect(store.loadError, isNull);
+    // The rows are live: the refusal is the action's, not the list's.
+    expect(find.byType(StaleDataBanner), findsNothing);
+    expect(find.byType(NotificationListTile), findsOneWidget);
+  });
+
+  testWidgets('the Unread chip filtering every row out says so, and Show all '
+      'clears it', (tester) async {
+    ApiClient().debugConfigure(
+      client: MockClient(
+        (req) async => req.url.queryParameters['unread_only'] == 'true'
+            ? _page([])
+            : _page([_notificationJson('1', read: true)]),
+      ),
+    );
+
+    await tester.pumpWidget(_localized(const NotificationsScreen()));
+    await _pumpUntil(tester, find.byType(NotificationListTile));
+
+    await tester.tap(find.widgetWithText(FilterChip, 'Unread'));
+    await _pumpUntil(tester, find.text('No unread notifications'));
+
+    expect(find.text('No unread notifications'), findsOneWidget);
+    // Not the whole-inbox copy: read notifications exist.
+    expect(find.text('No notifications'), findsNothing);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Show all'));
+    await _pumpUntil(tester, find.byType(NotificationListTile));
+
+    expect(store.unreadOnly, isFalse);
+    expect(find.byType(NotificationListTile), findsOneWidget);
   });
 
   testWidgets('the All / Unread filter chips narrow the request',

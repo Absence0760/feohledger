@@ -118,10 +118,11 @@
 		</fieldset>
 
 		<footer>
-			<button type="button" class="btn-clear" onclick={clear}>{m('advancedSearch.clearAll')}</button>
+			<button type="button" class="btn-ghost" onclick={clear}>{m('advancedSearch.clearAll')}</button>
 			<div class="footer-right">
 				<button type="button" class="btn-cancel" onclick={onclose}>{m('common.cancel')}</button>
-				<button type="submit" class="btn-apply">{m('advancedSearch.applyFilters')}</button>
+				<!-- `.btn-apply` is an e2e hook (tests-e2e/invoices/advanced-status.spec.ts), no CSS. -->
+				<button type="submit" class="btn-primary btn-apply">{m('advancedSearch.applyFilters')}</button>
 			</div>
 		</footer>
 	</form>
@@ -209,45 +210,4 @@
 		gap: 10px;
 	}
 
-	.btn-clear,
-	.btn-cancel,
-	.btn-apply {
-		padding: 8px 18px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		border: 1px solid var(--border);
-		font-family: inherit;
-	}
-
-	.btn-clear {
-		background: none;
-		color: var(--text-muted);
-		border-color: transparent;
-	}
-
-	.btn-clear:hover {
-		color: var(--text);
-		text-decoration: underline;
-	}
-
-	.btn-cancel {
-		background: var(--surface);
-		color: var(--text-muted);
-	}
-
-	.btn-cancel:hover {
-		background: var(--bg);
-	}
-
-	.btn-apply {
-		background: var(--accent-strong);
-		color: #fff;
-		border-color: var(--accent-strong);
-	}
-
-	.btn-apply:hover {
-		opacity: 0.9;
-	}
 </style>
