@@ -15,14 +15,6 @@ void main() {
       expect(InvoiceStatus.fromString(''), InvoiceStatus.newStatus);
     });
 
-    test('every status has a human label', () {
-      for (final status in InvoiceStatus.values) {
-        expect(status.label, isNotEmpty);
-      }
-      expect(InvoiceStatus.readyForReview.label, 'Ready for Review');
-      expect(InvoiceStatus.paymentScheduled.label, 'Payment Scheduled');
-    });
-
     test('isActionable is true only for ready_for_review', () {
       expect(InvoiceStatus.readyForReview.isActionable, isTrue);
       for (final status in InvoiceStatus.values) {

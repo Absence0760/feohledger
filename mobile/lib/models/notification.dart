@@ -37,18 +37,6 @@ class AppNotification {
   /// mark read.)
   bool get linksToInvoice => entityType == 'invoice' && entityId != null;
 
-  /// Human-readable label for the originating event.
-  @Deprecated('use enum_labels')
-  String get eventLabel => switch (eventType) {
-        'invoice_assigned' => 'Invoice assigned',
-        'invoice_approved' => 'Invoice approved',
-        'invoice_rejected' => 'Invoice rejected',
-        'invoice_paid' => 'Invoice paid',
-        'contract_renewal_due' => 'Contract renewal due',
-        'chat_message' => 'New message',
-        _ => eventType.replaceAll('_', ' '),
-      };
-
   factory AppNotification.fromJson(Map<String, dynamic> json) {
     return AppNotification(
       id: json['id'] as String,

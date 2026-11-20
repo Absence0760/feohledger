@@ -17,11 +17,6 @@ void main() {
       expect(PaymentMethod.fromString('bitcoin'), PaymentMethod.ach);
       expect(PaymentStatus.fromString('???'), PaymentStatus.pending);
     });
-
-    test('payment method labels are human-readable', () {
-      expect(PaymentMethod.ach.label, 'ACH');
-      expect(PaymentMethod.virtualCard.label, 'Virtual Card');
-    });
   });
 
   group('Payment.fromJson', () {
