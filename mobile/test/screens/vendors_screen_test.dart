@@ -32,7 +32,15 @@ http.Response _json(Object body, [int status = 200]) => http.Response(
 http.Response _list(List<Map<String, dynamic>> items) =>
     _json({'items': items, 'total': items.length, 'page': 1});
 
-Map<String, dynamic> _vendorJson(String id, {String status = 'unverified'}) => {
+/// One row of `GET /api/vendors/`, with the caller's `status_actions` as
+/// `vendor_status_actions` builds them for a reader holding `vendor.manage`
+/// (the status table: verify from `unverified`, reject from `unverified` or
+/// `active`). [actions] overrides them; pass `null` for a row carrying none.
+Map<String, dynamic> _vendorJson(
+  String id, {
+  String status = 'unverified',
+  Object? actions = _managerDefault,
+}) => {
   'id': id,
   'name': 'Vendor $id',
   'code': 'V$id',
@@ -41,6 +49,28 @@ Map<String, dynamic> _vendorJson(String id, {String status = 'unverified'}) => {
   'source': 'manual',
   'invoice_count': 1,
   'created_at': '2026-01-01T12:00:00',
+  'status_actions': identical(actions, _managerDefault)
+      ? {
+          'verify': status == 'unverified' ? null : _statusRefused,
+          'reject': status == 'unverified' || status == 'active'
+              ? null
+              : _statusRefused,
+        }
+      : actions,
+};
+
+const _managerDefault = Object();
+
+const _statusRefused = {
+  'code': 'vendor_status_not_allowed',
+  'message': 'Vendor is not in unverified status',
+  'params': <String, dynamic>{},
+};
+
+const _roleRefused = {
+  'code': 'role_not_permitted',
+  'message': 'Your role does not permit this action',
+  'params': <String, dynamic>{},
 };
 
 Map<String, dynamic> _me(List<String> roles) => {
@@ -226,6 +256,132 @@ void main() {
       greaterThanOrEqualTo(2),
       reason: 'verify should refetch after the initial load',
     );
+  });
+
+  // Verify / Reject are offered from the row's `status_actions`, never from
+  // the reader's role or the vendor's status.
+  group('Verify / Reject verdicts', () {
+    Future<void> pumpRows(
+      WidgetTester tester,
+      List<String> roles,
+      List<Map<String, dynamic>> rows,
+    ) async {
+      await loginThen(roles, MockClient((req) async => _list(rows)));
+      await tester.pumpWidget(_localized(const VendorsScreen()));
+      await _pumpUntil(tester, find.byType(VendorListTile));
+    }
+
+    testWidgets('an unverified vendor offers both, swiping either way', (
+      tester,
+    ) async {
+      await pumpRows(tester, ['ap_manager'], [_vendorJson('1')]);
+
+      final swipe = tester.widget<Dismissible>(find.byType(Dismissible));
+      expect(swipe.direction, DismissDirection.horizontal);
+
+      await tester.tap(find.byType(VendorListTile));
+      await tester.pumpAndSettle();
+      expect(find.text('Verify'), findsOneWidget);
+      expect(find.text('Reject'), findsOneWidget);
+    });
+
+    testWidgets('an active vendor offers Reject only — the server accepts it',
+        (tester) async {
+      await pumpRows(tester, ['ap_manager'], [
+        _vendorJson('1', status: 'active'),
+      ]);
+
+      final swipe = tester.widget<Dismissible>(find.byType(Dismissible));
+      expect(swipe.direction, DismissDirection.endToStart);
+
+      await tester.tap(find.byType(VendorListTile));
+      await tester.pumpAndSettle();
+      expect(find.text('Verify'), findsNothing);
+      expect(find.text('Reject'), findsOneWidget);
+    });
+
+    testWidgets('a rejected vendor is a read-only row', (tester) async {
+      await pumpRows(tester, ['ap_manager'], [
+        _vendorJson('1', status: 'rejected'),
+      ]);
+
+      expect(find.byType(Dismissible), findsNothing);
+      await tester.tap(find.byType(VendorListTile));
+      await tester.pumpAndSettle();
+      expect(find.text('Verify'), findsNothing);
+      expect(find.text('Reject'), findsNothing);
+    });
+
+    testWidgets('a reader without vendor.manage gets a read-only row', (
+      tester,
+    ) async {
+      await pumpRows(tester, ['cfo'], [
+        _vendorJson(
+          '1',
+          actions: {'verify': _roleRefused, 'reject': _roleRefused},
+        ),
+      ]);
+
+      expect(find.byType(Dismissible), findsNothing);
+      await tester.tap(find.byType(VendorListTile));
+      await tester.pumpAndSettle();
+      expect(find.text('Verify'), findsNothing);
+    });
+
+    testWidgets('a row with no verdict offers nothing (fail closed)', (
+      tester,
+    ) async {
+      await pumpRows(tester, ['admin'], [_vendorJson('1', actions: null)]);
+
+      expect(find.byType(Dismissible), findsNothing);
+      await tester.tap(find.byType(VendorListTile));
+      await tester.pumpAndSettle();
+      expect(find.text('Verify'), findsNothing);
+      expect(find.text('Reject'), findsNothing);
+    });
+
+    testWidgets('any other refusal shows the action disabled with its reason', (
+      tester,
+    ) async {
+      var posts = 0;
+      await loginThen(
+        ['ap_manager'],
+        MockClient((req) async {
+          if (req.method == 'POST') posts++;
+          return _list([
+            _vendorJson(
+              '1',
+              actions: {
+                'verify': {
+                  'code': 'vendor_some_new_gate',
+                  'message': 'A newer gate refuses this verify.',
+                  'params': <String, dynamic>{},
+                },
+                'reject': null,
+              },
+            ),
+          ]);
+        }),
+      );
+      await tester.pumpWidget(_localized(const VendorsScreen()));
+      await _pumpUntil(tester, find.byType(VendorListTile));
+
+      // The refused direction is not swipeable.
+      final swipe = tester.widget<Dismissible>(find.byType(Dismissible));
+      expect(swipe.direction, DismissDirection.endToStart);
+
+      await tester.tap(find.byType(VendorListTile));
+      await tester.pumpAndSettle();
+      final verify = tester.widget<ListTile>(
+        find.ancestor(of: find.text('Verify'), matching: find.byType(ListTile)),
+      );
+      expect(verify.enabled, isFalse);
+      expect(find.text('A newer gate refuses this verify.'), findsOneWidget);
+
+      await tester.tap(find.text('Verify'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(posts, 0);
+    });
   });
 
   testWidgets('the empty state can be pulled to refresh', (tester) async {

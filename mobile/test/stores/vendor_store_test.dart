@@ -61,6 +61,38 @@ void main() {
       },
     );
 
+    test('the offline cache round-trips the Verify / Reject verdicts',
+        () async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _list([
+            {
+              ..._vendorJson('1', status: 'active'),
+              'status_actions': {
+                'verify': {
+                  'code': 'vendor_status_not_allowed',
+                  'message': 'Vendor is not in unverified status',
+                  'params': <String, dynamic>{},
+                },
+                'reject': null,
+              },
+            },
+          ]),
+        ),
+      );
+      await store.fetch();
+
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => throw Exception('offline')),
+      );
+      await store.fetch();
+
+      expect(store.fromCache, isTrue);
+      final v = store.vendors.single;
+      expect(v.verifyVerdict.code, 'vendor_status_not_allowed');
+      expect(v.rejectVerdict.allowed, isTrue);
+    });
+
     test('falls back to the offline cache when the network fails', () async {
       ApiClient().debugConfigure(
         client: MockClient((req) async => _list([_vendorJson('1')])),
