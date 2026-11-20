@@ -1,4 +1,4 @@
-"""Every `Invoice(...)` names its currency (decisions §473, §475).
+"""Every `Invoice(...)` names its currency (decisions §473, §476).
 
 The model has no currency default of any kind: an omitted `currency` is NULL,
 "unknown", exactly as `currency=None` is. So an application construction site
@@ -111,7 +111,7 @@ def test_every_app_construction_site_names_its_currency():
 
 
 def test_the_model_has_no_currency_default():
-    """An omitted currency is NULL, the same as `currency=None` (§475). A
+    """An omitted currency is NULL, the same as `currency=None` (§476). A
     constructor fallback or a column default would label every row that forgot
     to say with a code nobody stated, and a column `default` would also turn an
     explicit `None` back into it at INSERT (§473)."""
@@ -128,7 +128,7 @@ def test_the_model_has_no_currency_default():
 def test_every_fixture_and_script_construction_names_its_currency():
     """Fixtures, seeds and scripts say which currency they mean too, so no test
     passes only because an omitted currency used to read as USD, and adding a
-    default back would not be needed by anything (§475). A test of the unknown
+    default back would not be needed by anything (§476). A test of the unknown
     path passes `currency=None`. A helper that builds from `**kwargs` must name
     `currency` at the call and let its callers override it."""
     sites = list(_fixture_constructions())

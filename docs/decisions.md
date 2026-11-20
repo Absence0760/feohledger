@@ -24014,7 +24014,7 @@ by-id portal route, so one supplier gets the same 404 for another's id as for
 an unknown one. `tests/test_tenant_isolation.py` pins the refusal and the MFA
 exemption.
 
-## 475. An `Invoice` built without a currency is NULL; fixtures name theirs (closes the last §473 followup; round 32, 2026-11-20)
+## 476. An `Invoice` built without a currency is NULL; fixtures name theirs (closes the last §473 followup; round 32, 2026-11-20)
 
 §473 removed the `invoices.currency` column default but kept a constructor
 fallback: `Invoice.__init__` set `"USD"` whenever a construction did not

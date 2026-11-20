@@ -53,7 +53,7 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     # No column default: a column `default` also replaces an explicit `None` at
     # INSERT, which would turn the upload's "unknown" back into USD. Nor a
     # constructor default: a construction that omits `currency` is NULL too
-    # (decisions §475), so every `Invoice(...)` names it.
+    # (decisions §476), so every `Invoice(...)` names it.
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     # Materialized conversion of `amount` into the org's reporting (base)
     # currency. Populated by `services.currency_conversion.materialize_reporting_amount`
