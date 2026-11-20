@@ -123,6 +123,21 @@ Map<String, dynamic> _runResponse({
       'cfo_approved_at': cfoApprovedAt,
     };
 
+/// `GET /api/payments/runs/{id}` for a run awaiting CFO sign-off, carrying
+/// the caller's `actions.approve` verdict (`run_action_refusals`):
+/// `null` = the server would accept, a map = the coded refusal it would answer.
+Map<String, dynamic> _pendingCfoDetail(Map<String, dynamic>? approve) => {
+      ..._runResponse(requiresCfoApproval: true),
+      'actions': {'approve': approve},
+    };
+
+/// `actions.approve` for a caller without the cfo role (`holds_any_role`).
+const _roleRefused = {
+  'code': 'role_not_permitted',
+  'message': 'Your role does not permit this action',
+  'params': <String, dynamic>{},
+};
+
 /// `GET /api/payments/execution-mode`'s `mode`. Defaults to `processor` so the
 /// screen's Execute tests keep reading a tenant FeohLedger sends payments for;
 /// `null` makes the read fail, which must hide Execute (fail closed).
@@ -530,6 +545,7 @@ void main() {
         _screenClient(
           queue: [],
           runs: [_runResponse(requiresCfoApproval: true)],
+          runDetail: _pendingCfoDetail(null),
           onPost: (req) {
             if (req.url.path.endsWith('/approve')) {
               approvePaths.add(req.url.path);
@@ -588,6 +604,7 @@ void main() {
         _screenClient(
           queue: [],
           runs: [_runResponse(requiresCfoApproval: true)],
+          runDetail: _pendingCfoDetail(null),
           onPost: (req) {
             if (req.url.path.endsWith('/approve')) approveCalls++;
             return _json({'message': 'ok'});
@@ -613,6 +630,7 @@ void main() {
         _screenClient(
           queue: [],
           runs: [_runResponse(requiresCfoApproval: true)],
+          runDetail: _pendingCfoDetail(_roleRefused),
         ),
       );
 
@@ -630,11 +648,14 @@ void main() {
         (tester) async {
       // The backend gate is `require_roles(ROLE_CFO)`, which does NOT
       // special-case admin — showing the item to an admin would 403 every tap.
+      // The verdict says so (`role_not_permitted`); the app no longer
+      // restates the role.
       await loginThen(
         ['admin'],
         _screenClient(
           queue: [],
           runs: [_runResponse(requiresCfoApproval: true)],
+          runDetail: _pendingCfoDetail(_roleRefused),
         ),
       );
 
@@ -687,6 +708,7 @@ void main() {
         _screenClient(
           queue: [],
           runs: [_runResponse(requiresCfoApproval: true)],
+          runDetail: _pendingCfoDetail(null),
           onPost: (req) {
             if (req.url.path.endsWith('/approve')) {
               return _json(
@@ -713,6 +735,102 @@ void main() {
         findsOneWidget,
       );
       expect(find.textContaining('{"detail"'), findsNothing);
+    });
+
+    // Maker-checker (`payment_controls.run_approve_refusal`): the CFO who
+    // CREATED the run may not sign it off. A role check alone used to offer
+    // that CFO an Approve that could only 403; the verdict now renders it
+    // disabled with the localized reason, as the web run dialog does.
+    testWidgets('the CFO who created the run sees Approve disabled with the '
+        'maker-checker reason, and nothing is sent', (tester) async {
+      var approveCalls = 0;
+      await loginThen(
+        ['cfo'],
+        _screenClient(
+          queue: [],
+          runs: [_runResponse(requiresCfoApproval: true)],
+          runDetail: _pendingCfoDetail({
+            'code': 'payment_run_segregation',
+            'message': 'The user who created this run cannot approve it.',
+            'params': {'step': 'approve'},
+          }),
+          onPost: (req) {
+            if (req.url.path.endsWith('/approve')) approveCalls++;
+            return _json({'message': 'ok'});
+          },
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await openRunsTab(tester);
+      await openRunMenu(tester);
+
+      final item = find.ancestor(
+        of: find.text('Approve as CFO'),
+        matching: find.byType(PopupMenuItem<String>),
+      );
+      expect(item, findsOneWidget);
+      expect(tester.widget<PopupMenuItem<String>>(item).enabled, isFalse);
+      // The reason in the reader's language, not the server's English.
+      expect(
+        find.text(
+          'Segregation of duties: the user who created this payment run '
+          'cannot also approve or execute it. A different user must.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text('The user who created this run cannot approve it.'),
+        findsNothing,
+      );
+
+      await tester.tap(find.text('Approve as CFO'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.text('Approve payment run?'), findsNothing);
+      expect(approveCalls, 0);
+    });
+
+    testWidgets('a refusal this build cannot localize shows the server sentence',
+        (tester) async {
+      await loginThen(
+        ['cfo'],
+        _screenClient(
+          queue: [],
+          runs: [_runResponse(requiresCfoApproval: true)],
+          runDetail: _pendingCfoDetail({
+            'code': 'payment_run_some_new_gate',
+            'message': 'A newer gate refuses this sign-off.',
+            'params': <String, dynamic>{},
+          }),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await openRunsTab(tester);
+      await openRunMenu(tester);
+
+      expect(find.text('Approve as CFO'), findsOneWidget);
+      expect(find.text('A newer gate refuses this sign-off.'), findsOneWidget);
+    });
+
+    testWidgets('no verdict (the detail read failed) offers no sign-off',
+        (tester) async {
+      // No `runDetail`: `GET /runs/{id}` answers without `actions`, so the
+      // verdict is unanswered and the screen fails closed.
+      await loginThen(
+        ['cfo'],
+        _screenClient(
+          queue: [],
+          runs: [_runResponse(requiresCfoApproval: true)],
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+      await openRunsTab(tester);
+      await openRunMenu(tester);
+
+      expect(find.text('Approve as CFO'), findsNothing);
+      expect(find.text('Execute'), findsOneWidget);
     });
   });
 

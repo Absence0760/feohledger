@@ -365,4 +365,54 @@ void main() {
       expect(sel.toJson(), {'invoice_id': 'inv1', 'method': 'wire'});
     });
   });
+
+  // `GET /api/payments/runs/{id}`'s `actions` (`run_action_refusals`): the
+  // Runs tab offers "Approve as CFO" from `approve`, never from a role check.
+  group('PaymentRunRecordDetail.approve', () {
+    Map<String, dynamic> detail(Object? actions) => {
+          'id': 'run1',
+          'status': 'draft',
+          'total_amount': '10.00',
+          'created_at': '2026-01-10T12:00:00',
+          'requires_cfo_approval': true,
+          'cfo_approved_at': null,
+          'actions': actions,
+        };
+
+    test('null is the server accepting the sign-off', () {
+      final d = PaymentRunRecordDetail.fromJson(detail({'approve': null}));
+      expect(d.approve.allowed, isTrue);
+    });
+
+    test('a coded refusal is carried with its code', () {
+      final d = PaymentRunRecordDetail.fromJson(detail({
+        'approve': {
+          'code': 'payment_run_segregation',
+          'message': 'm',
+          'params': {'step': 'approve'},
+        },
+      }));
+      expect(d.approve.allowed, isFalse);
+      expect(d.approve.code, 'payment_run_segregation');
+      expect(d.approve.isOffered(), isTrue);
+    });
+
+    test('role_not_permitted is not offered at all', () {
+      final d = PaymentRunRecordDetail.fromJson(detail({
+        'approve': {'code': 'role_not_permitted', 'message': 'm'},
+      }));
+      expect(d.approve.isOffered(), isFalse);
+    });
+
+    test('a missing verdict fails closed', () {
+      expect(
+        PaymentRunRecordDetail.fromJson(detail({})).approve.answered,
+        isFalse,
+      );
+      expect(
+        PaymentRunRecordDetail.fromJson(detail(null)).approve.answered,
+        isFalse,
+      );
+    });
+  });
 }
