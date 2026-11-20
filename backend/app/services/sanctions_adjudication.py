@@ -481,6 +481,43 @@ async def unblock_refusal(
     )
 
 
+async def uncover_for_material_edit(
+    db: AsyncSession,
+    *,
+    vendor: Vendor,
+    organization_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
+) -> bool:
+    """A write changed what a screen sends the provider (name, tax id, bank
+    details, beneficial owners: the :func:`screened_inputs_hash` inputs), so the
+    adjudication the stored screen is shown under no longer describes it.
+
+    Clears ``vendors.screening_adjudication_id`` in the caller's transaction,
+    BEFORE the best-effort re-screen: if that screen fails, the vendor is left
+    uncovered (held), never covered by the old stamp. The adjudication row is
+    not revoked; a re-screen that returns the same result on the same inputs
+    is covered by it again. Called by ``vendor_screening.screen_best_effort``,
+    the re-screen every material-edit path runs. Returns whether it cleared."""
+    if vendor.screening_adjudication_id is None:
+        return False
+    vendor.screening_adjudication_id = None
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=organization_id,
+        actor_id=actor_id,
+        action=CLEARANCE_CHANGED_ACTION,
+        entity_type="vendor",
+        entity_id=vendor.id,
+        details={
+            "from": CLEARANCE_ADJUDICATED,
+            "to": vendor.screening_status,
+            "trigger": "material_edit",
+        },
+    )
+    return True
+
+
 def _audit_details(adj: SanctionsAdjudication) -> dict:
     # PII-free: the list NAME, provider, verdict and hash; never match details.
     return {

@@ -57,6 +57,7 @@ from app.services.sanctions_adjudication import (
     check_fingerprint,
     covering_adjudication,
     screened_inputs_hash,
+    uncover_for_material_edit,
 )
 from app.services.sanctions_categories import (
     has_adverse_media,
@@ -338,6 +339,11 @@ async def screen_best_effort(
     only the screen's partial mutations, leaving the vendor row intact, and the
     exception is logged + swallowed.
 
+    It is also the material-edit door: it first clears the vendor's
+    false-positive adjudication pointer
+    (``sanctions_adjudication.uncover_for_material_edit``), so every caller
+    must be a write that changed a screened input.
+
     Lives here rather than in ``api/vendors.py`` because it has two callers:
     the vendor router's create/update/bank-change paths, and the enrichment
     apply path (``POST /api/enrichment/vendors/{id}/apply``), which writes
@@ -346,6 +352,11 @@ async def screen_best_effort(
     """
     from app.config import settings
 
+    # Every caller runs this because a write changed a screened input. The old
+    # adjudication stops covering first, outside the savepoint, so a screen
+    # that fails below leaves the vendor held rather than cleared by a stamp
+    # made on other inputs (decisions §477).
+    await uncover_for_material_edit(db, vendor=vendor, organization_id=org_id, actor_id=actor_id)
     if not settings.vendor_screening_enabled:
         return
     try:
