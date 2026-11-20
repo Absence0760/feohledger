@@ -31,10 +31,17 @@ What this file pins:
      loop is left, and the assertion demands an ``Index Cond`` on
      ``po_number``.
    * a few thousand invoices with distinct numbers are inserted in the same
-     rolled-back transaction, so the planner's row estimate for ``invoices``
-     comes from the table's real size rather than from whatever the shared
-     harness left behind. Nothing is ANALYZEd (that would leak ``reltuples``
-     past the rollback).
+     rolled-back transaction and the three tables the query reads are
+     ANALYZEd there, so the planner prices them from what they hold now.
+     Inserting alone was not enough: CI's shard left ``invoices`` statistics
+     that priced a full ``invoices_pkey`` scan at one page (cost 8.28 over
+     3000 rows), and the planner drove the query from that scan — it hands
+     the window function its ``PARTITION BY invoices.id`` order for free —
+     so ``ix_invoices_po_number`` never appeared. ``pg_statistic`` rows roll
+     back with the transaction; ``pg_class.reltuples`` / ``relpages`` are
+     written in place and survive it, an overestimate of rows that are now
+     dead tuples, which the next autovacuum corrects and which only pushes
+     later plans toward index scans.
 
 Real-Postgres harness (``realdb``) for 2 and 3.
 """
@@ -213,6 +220,10 @@ async def test_relief_attribution_uses_the_po_number_index(realdb):
                 for n in range(SEEDED_INVOICES)
             )
             await s.flush()
+            # Price the tables from their contents now, not from the shard's
+            # leftovers (see the module docstring, point 3).
+            for table in ("invoices", "purchase_orders", "purchase_requisitions"):
+                await s.execute(text(f"ANALYZE {table}"))
             await s.execute(text("SET LOCAL enable_seqscan = off"))
             await s.execute(text("SET LOCAL enable_hashjoin = off"))
             await s.execute(text("SET LOCAL enable_mergejoin = off"))
