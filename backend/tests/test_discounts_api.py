@@ -187,7 +187,9 @@ async def test_create_invoice_offer_defaults_base_amount_and_audits(realdb):
         assert audit.entity_type == "discount_offer"
 
 
-@pytest.mark.parametrize("unknown", [None, "", "   ", "EURO"])
+# Malformed values fit `invoices.currency` (varchar(3)): "US$" is the shape a
+# legacy row or an ERP stamp actually leaves; "EURO" cannot be stored at all.
+@pytest.mark.parametrize("unknown", [None, "", "   ", "US$"])
 @pytest.mark.parametrize("named", [None, "EUR"])
 async def test_an_invoice_offer_on_an_unknown_currency_invoice_is_refused(realdb, unknown, named):
     """An invoice that records no usable currency (NULL, blank or malformed,

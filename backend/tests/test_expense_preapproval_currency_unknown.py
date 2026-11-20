@@ -25,7 +25,10 @@ from app.models.expense import (
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stored, covered", [("USD", True), (None, False), ("  ", False)])
+# `expense_preapprovals.currency` is NOT NULL (migration 0039, model default
+# USD), so a NULL cannot be stored; the reachable "no currency" values are the
+# blank ones, which the coalesce-to-USD read used to turn into USD as well.
+@pytest.mark.parametrize("stored, covered", [("USD", True), ("", False), ("  ", False)])
 async def test_a_currency_less_preapproval_covers_nothing(realdb, stored, covered):
     info = realdb.info("a")
     owner = info.users["ap_clerk"]

@@ -10,7 +10,8 @@ seconds per test). These tests pin what that rewrite must still guarantee:
   `audit_log_no_delete` trigger would refuse an ordinary DELETE — is gone after
   the reset;
 * the probe covers every table physically present in a tenant DB, so nothing
-  can escape it by not being in `Base.metadata`;
+  can escape it by not being in `Base.metadata` (bar `alembic_version`, the
+  provisioning stamp, which the reset must keep);
 * no tenant table owns a sequence, because the DELETE path has no counterpart to
   TRUNCATE's RESTART IDENTITY. If this one fails, teach the reset to restart
   the new sequence; do not delete the assertion.
@@ -106,6 +107,13 @@ async def test_reset_empties_what_a_test_wrote_including_the_audit_log(realdb):
     await _assert_baseline(info.db_name, info.org_id)
 
 
+#: Tables a tenant DB holds that are not test data, so the reset must keep them.
+#: `alembic_version` is the head revision `_create_tenant_tables` records on a
+#: fresh tenant (`services/schema_version.record_head`, #575); emptying it would
+#: make the DB read as unstamped.
+_KEPT_BY_THE_RESET = {"alembic_version"}
+
+
 async def test_the_probe_covers_every_table_in_a_tenant_db(realdb):
     probed = set(_tenant_tables())
     for info in realdb.tenants.values():
@@ -119,9 +127,15 @@ async def test_the_probe_covers_every_table_in_a_tenant_db(realdb):
                         )
                     ).scalars()
                 )
+                stamped = (
+                    await conn.exec_driver_sql("SELECT count(*) FROM alembic_version")
+                ).scalar()
         finally:
             await engine.dispose()
-        assert physical <= probed, f"tables the reset never empties: {sorted(physical - probed)}"
+        unprobed = physical - probed - _KEPT_BY_THE_RESET
+        assert not unprobed, f"tables the reset never empties: {sorted(unprobed)}"
+        # The kept table survived every earlier test's reset with its one row.
+        assert stamped == 1
 
 
 async def test_no_tenant_table_owns_a_sequence(realdb):
