@@ -172,7 +172,18 @@ docker compose up -d
 python scripts/seed.py
 ```
 
-If you see connection errors, wait a few seconds for PostgreSQL to finish starting, then retry.
+If you see connection errors, wait for Postgres to report healthy (`docker compose up -d --wait`, or `docker compose ps` showing `healthy`), then retry.
+
+### `the database system is shutting down` on a fresh volume
+
+The first boot after `down -v` (or a new CI runner) runs a temporary
+socket-only Postgres for initdb and `init-tenants.sql`, then restarts it. A
+healthcheck that runs `pg_isready` over the socket reports that temporary
+server as ready, and the first client lands on its shutdown. Every Postgres
+healthcheck in the repo therefore probes over TCP (`pg_isready -U postgres -h
+127.0.0.1`; `backend/docs/docker.md` § Health Checks). If you see this error,
+check that the healthcheck you are relying on still has `-h 127.0.0.1` — a copy
+without it fails `backend/tests/test_postgres_healthchecks.py`.
 
 The seed script creates tenant databases (`feoh_acme`, `feoh_techflow`) automatically if they don't exist. If Docker was reset with `down -v`, the init SQL re-creates them on startup as well.
 

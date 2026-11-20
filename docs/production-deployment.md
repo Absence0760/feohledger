@@ -116,6 +116,16 @@ named tenant DB. Deployed by the `lambdas` job in `aws-deploy.yml`.
 | MinIO container | S3 |
 | localhost | Route 53 + CloudFront + ALB |
 
+**TLS certificate monitoring.** On this architecture every public certificate
+is ACM's (CloudFront and the ALB), renewed by ACM and watched by the
+`DaysToExpiry` alarm in `infra/uptime.tf`. The single-VM stack that runs today
+(`docs/minimal-deployment.md`) also serves `api.<domain>` on a Let's Encrypt
+certificate Caddy renews on the VM, which no AWS metric sees; `infra/canary.tf`
+watches it with an hourly CloudWatch Synthetics canary that validates the
+certificate and pages under 14 days to expiry (`infra/README.md` § Certificate
+canary). Moving the API behind the ALB retires that canary along with Caddy's
+certificate.
+
 ## Environment Configuration
 
 The FastAPI app uses `pydantic-settings` (`backend/app/config.py`) with the `FEOH_` prefix. **Every variable below MUST be prefixed with `FEOH_`** — pydantic-settings ignores unprefixed names and silently falls back to defaults.

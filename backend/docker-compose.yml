@@ -30,7 +30,12 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./init-tenants.sql:/docker-entrypoint-initdb.d/02-tenants.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      # Over TCP, not the socket: on a fresh volume the entrypoint runs a
+      # temporary socket-only server for initdb (and init-tenants.sql), which
+      # socket-form `pg_isready` reports ready, so the first client met "the
+      # database system is shutting down". Same as deploy/compose.prod.yml;
+      # tests/test_postgres_healthchecks.py keeps every probe this way.
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -118,7 +123,8 @@ services:
     volumes:
       - authentik-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      # TCP for the same reason as `postgres` above.
+      test: ["CMD-SHELL", "pg_isready -U authentik -h 127.0.0.1"]
       interval: 5s
       timeout: 5s
       retries: 10

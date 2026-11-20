@@ -12,10 +12,12 @@
 # on the 404 rate with the monitoring subscription that publishes that metric,
 # and DNS that stays on
 # the VM until frontend_on_cloudfront moves it — with api. on the VM regardless;
-# the VM's database grant: rds-db:connect on the app role alone; and the
+# the VM's database grant: rds-db:connect on the app role alone; the
 # external uptime checks (uptime.tf): which hosts are checked and how,
 # that each alarm pages and emails, that the phone subscription exists only
-# when a number is set, and the certificate-expiry backstop.
+# when a number is set, and the certificate-expiry backstop; and the
+# certificate canary (canary.tf): what it fetches, its pinned runtime, its
+# paging alarm and its artifacts bucket's baseline.
 
 mock_provider "aws" {
   # A mocked policy document renders a random string, which the KMS key and
@@ -167,6 +169,15 @@ override_resource {
   values = {
     arn                         = "arn:aws:s3:::feohledger-frontend-test"
     bucket_regional_domain_name = "feohledger-frontend-test.s3.us-east-1.amazonaws.com"
+  }
+}
+
+override_resource {
+  target          = aws_s3_bucket.canary_artifacts
+  override_during = plan
+  values = {
+    arn = "arn:aws:s3:::feohledger-canary-test"
+    id  = "feohledger-canary-test"
   }
 }
 
@@ -355,10 +366,11 @@ run "access_log_sink_accepts_s3_log_delivery" {
         aws_s3_bucket.audit_logs.arn,
         aws_s3_bucket.backups.arn,
         aws_s3_bucket.frontend.arn,
+        aws_s3_bucket.canary_artifacts.arn,
       ])
       if contains(flatten([for p in s.principals : tolist(p.identifiers)]), "logging.s3.amazonaws.com")
     ])
-    error_message = "The S3 delivery grant must name exactly the four source buckets, or any bucket in the account could log into the sink."
+    error_message = "The S3 delivery grant must name exactly the five source buckets, or any bucket in the account could log into the sink."
   }
 
   assert {
@@ -1149,4 +1161,108 @@ run "pager_refuses_a_region_its_default_provider_alarms_cannot_reach" {
   }
 
   expect_failures = [aws_sns_topic.pager, aws_s3_bucket.frontend]
+}
+
+# ── Certificate canary (canary.tf) ───────────────────────────────────────────
+
+run "certificate_canary_watches_the_api_hourly_on_a_pinned_runtime" {
+  command = plan
+
+  assert {
+    condition     = aws_synthetics_canary.certificate.name == "feohledger-prod-cert" && length(aws_synthetics_canary.certificate.name) <= 21
+    error_message = "The canary name must fit Synthetics' 21-character limit."
+  }
+
+  assert {
+    condition     = can(regex("^syn-nodejs-puppeteer-[0-9]+\\.[0-9]+$", aws_synthetics_canary.certificate.runtime_version))
+    error_message = "The canary runtime must be pinned to an exact version, never a floating one."
+  }
+
+  assert {
+    condition     = aws_synthetics_canary.certificate.schedule[0].expression == "rate(1 hour)" && aws_synthetics_canary.certificate.start_canary
+    error_message = "The certificate canary runs hourly and is started on apply."
+  }
+
+  assert {
+    condition     = aws_synthetics_canary.certificate.run_config[0].environment_variables["CANARY_HOST"] == "api.feohledger.com" && aws_synthetics_canary.certificate.run_config[0].environment_variables["CANARY_PATH"] == "/api/health"
+    error_message = "The canary must fetch https://api.<domain>/api/health, the host Caddy serves on its own certificate."
+  }
+
+  assert {
+    condition     = aws_synthetics_canary.certificate.run_config[0].environment_variables["CANARY_MIN_DAYS"] == "14" && aws_synthetics_canary.certificate.run_config[0].environment_variables["CANARY_EXPECT"] == "\"status\":\"ok\""
+    error_message = "The canary fails under 14 days to expiry and matches the liveness probe's body."
+  }
+
+  assert {
+    condition     = aws_synthetics_canary.certificate.artifact_config[0].s3_encryption[0].encryption_mode == "SSE_KMS"
+    error_message = "Canary artifacts are encrypted under the app KMS key."
+  }
+}
+
+run "certificate_canary_pages_and_emails_after_two_failed_runs" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.certificate_canary.namespace == "CloudWatchSynthetics" && aws_cloudwatch_metric_alarm.certificate_canary.metric_name == "SuccessPercent" && aws_cloudwatch_metric_alarm.certificate_canary.dimensions["CanaryName"] == "feohledger-prod-cert"
+    error_message = "The alarm watches the canary's SuccessPercent."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.certificate_canary.threshold == 100 && aws_cloudwatch_metric_alarm.certificate_canary.comparison_operator == "LessThanThreshold" && aws_cloudwatch_metric_alarm.certificate_canary.evaluation_periods == 2 && aws_cloudwatch_metric_alarm.certificate_canary.datapoints_to_alarm == 2
+    error_message = "Two failed hourly runs in a row alarm."
+  }
+
+  assert {
+    condition     = toset(aws_cloudwatch_metric_alarm.certificate_canary.alarm_actions) == toset(["arn:aws:sns:us-east-1:000000000000:feohledger-prod-pager", "arn:aws:sns:us-east-1:000000000000:feohledger-prod-alerts"])
+    error_message = "An invalid or expiring API certificate pages and emails: every browser will refuse the API."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.certificate_canary.treat_missing_data == "breaching"
+    error_message = "A canary that stops running must not stay quiet."
+  }
+}
+
+run "certificate_canary_artifacts_bucket_meets_the_bucket_baseline" {
+  command = plan
+
+  assert {
+    condition     = aws_s3_bucket_versioning.canary_artifacts.versioning_configuration[0].status == "Enabled"
+    error_message = "The canary artifacts bucket is versioned like every other bucket."
+  }
+
+  assert {
+    condition     = one(aws_s3_bucket_server_side_encryption_configuration.canary_artifacts.rule).apply_server_side_encryption_by_default[0].sse_algorithm == "aws:kms"
+    error_message = "The canary artifacts bucket is SSE-KMS."
+  }
+
+  assert {
+    condition = alltrue([
+      aws_s3_bucket_public_access_block.canary_artifacts.block_public_acls,
+      aws_s3_bucket_public_access_block.canary_artifacts.block_public_policy,
+      aws_s3_bucket_public_access_block.canary_artifacts.ignore_public_acls,
+      aws_s3_bucket_public_access_block.canary_artifacts.restrict_public_buckets,
+    ])
+    error_message = "The canary artifacts bucket blocks all public access."
+  }
+
+  assert {
+    condition     = aws_s3_bucket_logging.canary_artifacts.target_prefix == "canary-artifacts/"
+    error_message = "The canary artifacts bucket is access-logged to the sink."
+  }
+
+  assert {
+    condition     = anytrue([for r in aws_s3_bucket_lifecycle_configuration.canary_artifacts.rule : try(r.expiration[0].days, 0) == 30])
+    error_message = "Canary run artifacts expire after 30 days."
+  }
+}
+
+run "rejects_a_canary_threshold_inside_caddys_renewal_window" {
+  command = plan
+
+  variables {
+    certificate_canary_min_days = 30
+  }
+
+  expect_failures = [var.certificate_canary_min_days]
 }
