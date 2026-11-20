@@ -24048,7 +24048,9 @@ Admin create, SCIM create and the supplier-portal invite now flush inside a
 savepoint. A create that loses the race to the index gets the same 409 its
 pre-check gives (coded `email_in_this_workspace` / `email_in_other_workspace`,
 SCIM `uniqueness`, the portal's "already exists"), never a 500. SSO JIT already
-did this.
+did this. Renames get the same treatment: admin `PATCH /users/{id}` and SCIM
+`PUT` / `PATCH /Users/{id}` flush inside a savepoint, so a rename onto an
+address a concurrent writer just took is the same 409, not a 500.
 
 Rejected:
 

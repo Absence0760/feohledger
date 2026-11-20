@@ -197,7 +197,8 @@ async def _refuse_taken_username(
     ANYWHERE on the platform.
 
     Scoped platform-wide, not to the calling tenant, because `users.email`
-    carries a global UNIQUE constraint — it is the login identifier, and
+    is unique platform-wide without regard to case (`uq_users_email_lower`,
+    §475) — it is the login identifier, and
     `/auth/login` resolves an account by address alone with no tenant hint.
 
     Checking only `organization_id == org.id` (which is what create and PUT used
@@ -608,7 +609,14 @@ async def replace_user(
     if body.externalId is not None:
         user.sso_provider_id = body.externalId
     user.is_active = body.active
-    await db.flush()
+    # Savepoint: a concurrent writer taking `email` after the check above trips
+    # `uq_users_email_lower` (§475); answer the same 409 `uniqueness`, not a 500.
+    try:
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        await _refuse_taken_username(db, org, email, exclude_user_id=user.id)
+        raise
     # `_commit_user_change` reloads the row before we serialize — the same
     # `updated_at` onupdate-expiry guard as patch_user.
     await _commit_user_change(db, org, user, before, operation="put")
@@ -701,7 +709,15 @@ async def patch_user(
     if new_full_name is not None:
         user.full_name = new_full_name
 
-    await db.flush()
+    # Savepoint, as PUT: a rename that loses the race to `uq_users_email_lower`
+    # (§475) is the 409 `uniqueness`, not a 500.
+    try:
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        if new_email is not None:
+            await _refuse_taken_username(db, org, new_email, exclude_user_id=user.id)
+        raise
     # The UPDATE fires `updated_at`'s server-side `onupdate=func.now()`, which
     # SQLAlchemy then marks expired. `_commit_user_change` reloads it inside the
     # async context, so building the SCIM response (which reads `updated_at` for

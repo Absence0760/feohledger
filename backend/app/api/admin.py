@@ -785,9 +785,11 @@ async def update_user(
     if body.full_name is not None and body.full_name != target.full_name:
         target.full_name = body.full_name
         changed_fields.append("full_name")
+    target_email_new: str | None = None
     if body.email is not None:
         new_email = normalize_email(body.email)
         if new_email != normalize_email(target.email):
+            target_email_new = new_email
             await _refuse_taken_email(db, org_id, new_email, exclude_user_id=user_id)
             target.email = new_email
             changed_fields.append("email")
@@ -813,7 +815,16 @@ async def update_user(
     if roles_changed:
         changed_fields.append("role_names")
 
-    await db.flush()
+    # A savepoint, as on create: a concurrent writer that takes the new address
+    # between the pre-check and this flush trips `uq_users_email_lower` (§475),
+    # and the rename answers with the same coded 409 rather than a 500.
+    try:
+        async with db.begin_nested():
+            await db.flush()
+    except IntegrityError:
+        if "email" in changed_fields:
+            await _refuse_held_email(db, org_id, target_email_new, exclude_user_id=user_id)
+        raise
 
     # `populate_existing()`: the role change above deletes `UserRole` rows via
     # a raw Core-level `.delete()`, which bypasses the ORM unit-of-work and

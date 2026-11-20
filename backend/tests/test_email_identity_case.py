@@ -622,6 +622,66 @@ async def test_scim_create_that_loses_the_race_is_a_409(realdb, mixed_case_user,
     assert len(await _accounts_for(realdb, email)) == 1
 
 
+async def test_admin_rename_that_loses_the_race_is_the_coded_409(
+    realdb, mixed_case_user, monkeypatch
+):
+    from app.api import admin
+
+    _held_id, email = await mixed_case_user()  # held in A
+    target_id, _target_email = await mixed_case_user()  # renamed onto it
+
+    async def _check_passed(*_a, **_kw):
+        return None  # the pre-check ran before the other writer committed
+
+    monkeypatch.setattr(admin, "_refuse_taken_email", _check_passed)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.patch(f"/api/admin/users/{target_id}", json={"email": email.lower()})
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "email_in_this_workspace"
+    assert len(await _accounts_for(realdb, email)) == 1
+
+
+@pytest.mark.plan("scale")
+@pytest.mark.parametrize("operation", ["put", "patch"])
+async def test_scim_rename_that_loses_the_race_is_a_409(
+    realdb, mixed_case_user, monkeypatch, operation
+):
+    from app.api import scim
+    from app.api.scim import patch_user, replace_user
+    from app.schemas.scim import SCIMPatchOp, SCIMPatchRequest
+
+    _held_id, email = await mixed_case_user()
+    target_id, _target_email = await mixed_case_user()
+    org = await _org_a(realdb)
+    real_check = scim._refuse_taken_username
+    calls = {"n": 0}
+
+    async def _first_says_free(db, org_, address, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return await real_check(db, org_, address, **kw)
+
+    monkeypatch.setattr(scim, "_refuse_taken_username", _first_says_free)
+    async with realdb.control_sessionmaker()() as s:
+        with pytest.raises(HTTPException) as exc:
+            if operation == "put":
+                await replace_user(
+                    target_id, SCIMUserCreate(userName=email.lower()), _REQUEST, org, s
+                )
+            else:
+                body = SCIMPatchRequest(
+                    Operations=[SCIMPatchOp(op="replace", path="userName", value=email.lower())]
+                )
+                await patch_user(target_id, body, _REQUEST, org, s)
+        await s.rollback()
+
+    assert calls["n"] == 2
+    assert exc.value.status_code == 409
+    assert exc.value.detail["scimType"] == "uniqueness"
+    assert len(await _accounts_for(realdb, email)) == 1
+
+
 async def test_portal_invite_that_loses_the_race_is_a_409(realdb, monkeypatch):
     """`vendor_users` carries the same index per tenant. The race: the
     invite's existence check reads before a concurrent invite commits."""

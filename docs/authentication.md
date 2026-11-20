@@ -295,7 +295,9 @@ choice of which account keeps it to the operator —
 `backend/docs/database.md` § Email case collisions). A create that passes the
 app's pre-check and then loses the race to a concurrent one hits the index, and
 admin create, SCIM create and the portal invite each answer with the same 409
-the pre-check gives, never a 500. A single-row lookup still orders an exact
+the pre-check gives, never a 500. So does a rename onto a taken address that
+loses the same race: admin `PATCH /api/admin/users/{id}` and SCIM `PUT` /
+`PATCH /Users/{id}` flush the change inside a savepoint too. A single-row lookup still orders an exact
 match first (`exact_email_first`); with the index in place that decides
 nothing, and is kept only so a second match can never 500 a login.
 `tests/test_email_identity_case.py` pins each path against a mixed-case row and
