@@ -33,9 +33,20 @@ const ALLOWLIST: Record<string, string> = {
 		'class="backdrop" there is the decorative, aria-hidden brand background behind the sign-in card (issue #422; selected by tests-e2e/portal/login-background.spec.ts), not a dialog backdrop.'
 };
 
+/** Apply `re` until the text stops changing: one pass can leave a fresh match
+ *  where a removed one was nested (CodeQL js/incomplete-multi-character-sanitization). */
+function stripAll(text: string, re: RegExp): string {
+	let prev: string;
+	do {
+		prev = text;
+		text = text.replace(re, '');
+	} while (text !== prev);
+	return text;
+}
+
 /** HTML comments may quote the patterns while explaining them. */
 function stripComments(src: string): string {
-	return src.replace(/<!--[\s\S]*?-->/g, '');
+	return stripAll(src, /<!--[\s\S]*?-->/g);
 }
 
 // An attribute, so preceded by whitespace: `'[role="dialog"]'` selectors in

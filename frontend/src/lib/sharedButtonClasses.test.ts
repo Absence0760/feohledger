@@ -127,8 +127,19 @@ const APP_CSS_CLASSES = new Set(parseRules(appCss).flatMap((r) => classesIn(r.se
 /** A `btn-*` class name in markup — whole, so `bulk-btn-wrap` is not `btn-wrap`. */
 const BTN_CLASS = /(?<![\w-])btn-[a-z]+(?:-[a-z]+)*(?![\w-])/g;
 
+/** Apply `re` until the text stops changing: one pass can leave a fresh match
+ *  where a removed one was nested (CodeQL js/incomplete-multi-character-sanitization). */
+function stripAll(text: string, re: RegExp): string {
+	let prev: string;
+	do {
+		prev = text;
+		text = text.replace(re, '');
+	} while (text !== prev);
+	return text;
+}
+
 function markup(source: string): string {
-	return source.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+	return stripAll(source, /<style[^>]*>[\s\S]*?<\/style>/gi);
 }
 
 describe('shared button classes', () => {

@@ -72,9 +72,20 @@ const FOOTER = '/src/lib/components/ui/LoadMoreFooter.svelte';
 /** The footer markup's own hooks: only the component may render them. */
 const HAND_ROLLED = /(?<![\w-])(load-more-row|btn-load-more)(?![\w-])/;
 
+/** Apply `re` until the text stops changing: one pass can leave a fresh match
+ *  where a removed one was nested (CodeQL js/incomplete-multi-character-sanitization). */
+function stripAll(text: string, re: RegExp): string {
+	let prev: string;
+	do {
+		prev = text;
+		text = text.replace(re, '');
+	} while (text !== prev);
+	return text;
+}
+
 /** Strip comments, so a sentence that names a class is not a copy of it. */
 function code(source: string): string {
-	return source.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+	return stripAll(stripAll(source, /<!--[\s\S]*?-->/g), /\/\*[\s\S]*?\*\//g);
 }
 
 /** Files outside the component that render the footer markup by hand. */
