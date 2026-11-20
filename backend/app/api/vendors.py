@@ -73,6 +73,7 @@ from app.schemas.portal import (
 from app.schemas.sanctions import (
     SanctionsAdjudicateRequest,
     SanctionsAdjudicationResponse,
+    SanctionsAdjudicationRevokeRequest,
     SanctionsCheckResponse,
     ScreeningReviewItem,
     VendorBlockRequest,
@@ -1050,43 +1051,25 @@ async def screening_review_queue(
     )
     vendors = (await db.execute(query)).scalars().all()
 
-    # The newest `sanctions_checks` row for every vendor on the page in ONE
-    # query. `DISTINCT ON (vendor_id)` with a matching leading `ORDER BY` is
-    # Postgres' own "first row per group", so it returns exactly what the
-    # per-vendor `ORDER BY checked_at DESC LIMIT 1` did — asked once instead of
-    # once per row. `.id DESC` is appended purely as a tie-break: a bulk
-    # re-screen stamps a whole batch inside one transaction, and without it
-    # Postgres may pick a different row of that batch between two identical
-    # reads (the per-vendor `LIMIT 1` had the same latitude — this narrows it).
-    vendor_ids = [v.id for v in vendors]
-    latest_by_vendor: dict[uuid.UUID, SanctionsCheck] = {}
-    if vendor_ids:
-        latest_rows = (
-            (
-                await db.execute(
-                    select(SanctionsCheck)
-                    .where(SanctionsCheck.vendor_id.in_(vendor_ids))
-                    .distinct(SanctionsCheck.vendor_id)
-                    .order_by(
-                        SanctionsCheck.vendor_id,
-                        SanctionsCheck.checked_at.desc(),
-                        SanctionsCheck.id.desc(),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        latest_by_vendor = {c.vendor_id: c for c in latest_rows}
+    # Per page, not per row: the stored screen each row shows (the newest
+    # non-`pre_payment` `sanctions_checks` row, `DISTINCT ON (vendor_id)` with
+    # an `id DESC` tie-break, exactly the row an adjudication stamps), every
+    # active adjudication, and the latest applied bank change, in one query
+    # each (`sanctions_adjudication.load_contexts`).
+    contexts = await sanctions_adjudication.load_contexts(db, vendors)
 
     may_adjudicate = holds_any_permission(user, {PERM_VENDOR_SANCTIONS_ADJUDICATE})
     items: list[ScreeningReviewItem] = []
     for v in vendors:
-        latest = latest_by_vendor.get(v.id)
+        ctx = contexts[v.id]
+        latest = ctx.latest
         categories = categories_from_raw_response(latest.raw_response) if latest else ()
-        adjudication, adjudicate_verdict, revoke_verdict = await _adjudication_verdicts(
-            db, v, user, may_adjudicate
-        )
+        (
+            adjudication,
+            active_adjudications,
+            adjudicate_verdict,
+            revoke_verdict,
+        ) = await _adjudication_verdicts(db, v, user, may_adjudicate, ctx)
         items.append(
             ScreeningReviewItem(
                 vendor_id=str(v.id),
@@ -1100,9 +1083,11 @@ async def screening_review_queue(
                 ),
                 latest_matched_list=latest.matched_list if latest else None,
                 latest_provider=latest.provider if latest else None,
+                latest_check_id=str(latest.id) if latest else None,
                 latest_categories=list(categories),
                 adverse_media=has_adverse_media(categories),
                 adjudication=adjudication,
+                active_adjudications=active_adjudications,
                 adjudicate_refusal=adjudicate_verdict,
                 revoke_adjudication_refusal=revoke_verdict,
             )
@@ -1613,6 +1598,11 @@ async def unblock_vendor_payments(
         db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
     )
     vendor = await _get_vendor_or_404(db, vendor_id)
+    # Two people clear a sanctions match: whoever adjudicated it may not also
+    # lift the block it set (decisions §477; admin holds both permissions).
+    refusal = await sanctions_adjudication.unblock_refusal(db, vendor, user.id)
+    if refusal is not None:
+        raise refusal.http()
     reason = (body.reason if body else None) or "manually unblocked by AP"
 
     vendor.payments_blocked = False
@@ -1636,18 +1626,30 @@ async def unblock_vendor_payments(
 
 
 async def _adjudication_verdicts(
-    db: AsyncSession, vendor: Vendor, user: User, may_adjudicate: bool
-) -> tuple[SanctionsAdjudicationResponse | None, dict | None, dict | None]:
-    """The review queue's adjudication state and its two action verdicts, from
-    the gates the adjudicate / revoke endpoints raise (issue #575)."""
-    active = await sanctions_adjudication.active_adjudication(db, vendor)
-    adjudication = SanctionsAdjudicationResponse.from_db(active) if active else None
+    db: AsyncSession,
+    vendor: Vendor,
+    user: User,
+    may_adjudicate: bool,
+    ctx: sanctions_adjudication.AdjudicationContext,
+) -> tuple[
+    SanctionsAdjudicationResponse | None,
+    list[SanctionsAdjudicationResponse],
+    dict | None,
+    dict | None,
+]:
+    """The review queue's adjudication state (the one covering the stored
+    screen, and every active one) and its two action verdicts, from the gates
+    the adjudicate / revoke endpoints raise (issue #575), over the page-wide
+    context `screening_review_queue` loads once."""
+    adjudication = SanctionsAdjudicationResponse.from_db(ctx.pointer) if ctx.pointer else None
+    all_active = [SanctionsAdjudicationResponse.from_db(a) for a in ctx.active]
     if not may_adjudicate:
-        return adjudication, role_not_permitted(), role_not_permitted()
-    adjudicate = await sanctions_adjudication.adjudicate_refusal(db, vendor, user.id)
-    revoke = await sanctions_adjudication.revoke_refusal(db, vendor)
+        return adjudication, all_active, role_not_permitted(), role_not_permitted()
+    adjudicate = await sanctions_adjudication.adjudicate_refusal(db, vendor, user.id, ctx=ctx)
+    revoke = await sanctions_adjudication.revoke_refusal(db, vendor, ctx=ctx)
     return (
         adjudication,
+        all_active,
         adjudicate.verdict() if adjudicate else None,
         revoke.verdict() if revoke else None,
     )
@@ -1692,9 +1694,13 @@ async def adjudicate_sanctions_false_positive(
     dispatch, `/compliance/release`, the run gate and the ERP push; a new or
     different hit holds again. Does not lift a sticky payment block: that is
     `POST /{id}/unblock` (`vendor.block`). 403 for the vendor's onboarder or the
-    people behind its current bank details."""
+    people behind its current bank details; 409
+    `sanctions_adjudication_stale_screen` when `sanctions_check_id` (the screen
+    the reviewer saw) is no longer the vendor's latest stored screen."""
     vendor = await _lock_vendor_for_adjudication(db, vendor_id, entity_id)
-    refusal = await sanctions_adjudication.adjudicate_refusal(db, vendor, user.id)
+    refusal = await sanctions_adjudication.adjudicate_refusal(
+        db, vendor, user.id, sanctions_check_id=body.sanctions_check_id
+    )
     if refusal is not None:
         raise refusal.http()
     adj = await sanctions_adjudication.adjudicate(
@@ -1707,28 +1713,37 @@ async def adjudicate_sanctions_false_positive(
 
 @router.post(
     "/{vendor_id}/screening/adjudication/revoke",
-    response_model=SanctionsAdjudicationResponse,
+    response_model=list[SanctionsAdjudicationResponse],
 )
 async def revoke_sanctions_adjudication(
     vendor_id: uuid.UUID,
-    body: SanctionsAdjudicateRequest,
+    body: SanctionsAdjudicationRevokeRequest,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_permission(PERM_VENDOR_SANCTIONS_ADJUDICATE)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    """End the vendor's active false-positive adjudication; the gates hold on
-    the stored screen again at once."""
+    """End EVERY active false-positive adjudication of the vendor; the gates
+    hold on the stored screen again at once. A revoked `match` re-sets the
+    sticky block and closes the vendor's live cards in the same transaction,
+    as the uncovered screen would have."""
     vendor = await _lock_vendor_for_adjudication(db, vendor_id, entity_id)
     refusal = await sanctions_adjudication.revoke_refusal(db, vendor)
     if refusal is not None:
         raise refusal.http()
-    adj = await sanctions_adjudication.revoke(
-        db, vendor=vendor, actor_id=user.id, organization_id=org_id, reason=body.reason
+    rows = await sanctions_adjudication.revoke(
+        db,
+        vendor=vendor,
+        actor_id=user.id,
+        organization_id=org_id,
+        org_settings=org.settings,
+        reason=body.reason,
     )
     await db.commit()
-    await db.refresh(adj)
-    return SanctionsAdjudicationResponse.from_db(adj)
+    for adj in rows:
+        await db.refresh(adj)
+    return [SanctionsAdjudicationResponse.from_db(adj) for adj in rows]
 
 
 @router.post("/{vendor_id}/verify", response_model=VendorResponse)
