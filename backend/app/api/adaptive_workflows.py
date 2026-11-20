@@ -39,8 +39,10 @@ from app.api.deps import (
     ROLE_AP_MANAGER,
     ROLE_CFO,
     get_control_db,
+    holds_any_role,
     require_roles,
 )
+from app.api.refusals import ActionRefusal, role_not_permitted
 from app.models.adaptive_suggestion import WorkflowSuggestion
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.invoice_status import APPROVED_OR_BEYOND_STATUSES, IN_REVIEW_STATUSES
@@ -768,8 +770,40 @@ async def anomalies(
 # ---------------------------------------------------------------------------
 
 
-def _suggestion_dict(s: WorkflowSuggestion) -> dict:
+#: Dismiss refused: the suggestion is already dismissed (the repeat POST is an
+#: idempotent no-op, so the verdict does not offer it) or `applied` — an
+#: applied suggestion records a change that was made, and overwriting it with
+#: `dismissed` would erase that from the row. `open` and `stale` dismiss; a
+#: dismissed stale row stays down when its condition holds again.
+WORKFLOW_SUGGESTION_NOT_DISMISSABLE = "workflow_suggestion_not_dismissable"
+
+
+def dismiss_refusal(row: WorkflowSuggestion) -> ActionRefusal | None:
+    """Why ``POST /suggestions/{id}/dismiss`` would refuse, or ``None`` — the
+    gate the endpoint raises from and the row's ``actions.dismiss`` verdict
+    (issue #575). The endpoint answers an already-dismissed row with the
+    unchanged row before asking this, so only the verdict sees that case."""
+    if row.status not in ("open", "stale"):
+        return ActionRefusal(
+            WORKFLOW_SUGGESTION_NOT_DISMISSABLE,
+            f"A suggestion that is {row.status} cannot be dismissed.",
+            409,
+            params={"status": row.status},
+        )
+    return None
+
+
+def _suggestion_actions(row: WorkflowSuggestion, user: User) -> dict:
+    """The caller's verdict on each row action — ``dismiss`` today."""
+    if not holds_any_role(user, _WRITE_ROLES):
+        return {"dismiss": role_not_permitted()}
+    refusal = dismiss_refusal(row)
+    return {"dismiss": refusal.verdict() if refusal else None}
+
+
+def _suggestion_dict(s: WorkflowSuggestion, user: User) -> dict:
     return {
+        "actions": _suggestion_actions(s, user),
         "id": s.id,
         "kind": s.kind,
         "vendor_id": str(s.vendor_id) if s.vendor_id else None,
@@ -887,7 +921,7 @@ async def suggestions(
     if status != "all":
         q = q.where(WorkflowSuggestion.status == status)
     rows = (await db.execute(q)).scalars().all()
-    return SuggestionListResponse(suggestions=[_suggestion_dict(r) for r in rows])
+    return SuggestionListResponse(suggestions=[_suggestion_dict(r, user) for r in rows])
 
 
 # ---------------------------------------------------------------------------
@@ -918,11 +952,14 @@ async def dismiss_suggestion(
         raise HTTPException(status_code=404, detail="Suggestion not found")
     # Idempotent — dismissing an already-dismissed row is a no-op.
     if row.status != "dismissed":
+        refusal = dismiss_refusal(row)
+        if refusal is not None:
+            raise refusal.http()
         row.status = "dismissed"
         row.dismissed_by = user.id
         row.dismissed_at = datetime.now(UTC)
         await db.flush()
-    return SuggestionListResponse(suggestions=[_suggestion_dict(row)])
+    return SuggestionListResponse(suggestions=[_suggestion_dict(row, user)])
 
 
 # ---------------------------------------------------------------------------

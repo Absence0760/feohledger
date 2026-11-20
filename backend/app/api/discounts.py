@@ -27,10 +27,11 @@ from app.api.deps import (
     ROLE_AP_MANAGER,
     ROLE_CFO,
     get_org_id,
+    holds_any_role,
     require_roles,
 )
 from app.api.pagination import PaginationParams, paginated, pagination_params
-from app.api.refusals import coded_refusal
+from app.api.refusals import ActionRefusal, coded_refusal, role_not_permitted
 from app.models.discount import (
     OFFER_SCOPE_INVOICE,
     OFFER_SCOPE_VENDOR,
@@ -61,7 +62,7 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
 from app.services.discount_auto_trigger import (
     _tier_deadline,
-    settled_invoice_status,
+    settled_invoice_statuses,
 )
 from app.services.discount_opportunities import build_opportunity, name_maps
 from app.services.discount_optimizer import optimize
@@ -173,16 +174,139 @@ def _roi_response(roi) -> DiscountROIResponse:
     )
 
 
-async def _refuse_settled_invoice(db: AsyncSession, offer: DiscountOffer) -> None:
-    """409 when the offer's invoice is already paid / done — accepting would
-    record a deduction no payment can ever take
-    (``discount_auto_trigger.settled_invoice_status``)."""
-    settled = await settled_invoice_status(db, offer)
-    if settled is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"The invoice is already {settled}; there is no payment left to discount",
+# --------------------------------------------------------------------------- #
+# Accept / decline gates — what the endpoints raise from AND what each offer
+# row's `actions` verdict is built from (issue #575 § One rule, one place)
+# --------------------------------------------------------------------------- #
+
+#: Accept refused: the offer's invoice is already `paid` / `done`, so accepting
+#: would record a deduction no payment can ever take
+#: (``discount_auto_trigger.settled_invoice_status``). ``params.status``.
+DISCOUNT_OFFER_INVOICE_SETTLED = "discount_offer_invoice_settled"
+#: Accept refused: no tier's window is still open today (or the offer's own
+#: ``valid_until`` has passed).
+DISCOUNT_OFFER_NO_CAPTURABLE_TIER = "discount_offer_no_capturable_tier"
+#: Accept refused: the tier the caller named does not exist on the offer, or
+#: its window has closed. Only an explicit ``tier_days`` can reach it.
+DISCOUNT_OFFER_TIER_UNAVAILABLE = "discount_offer_tier_unavailable"
+#: Accept or decline refused: the offer is no longer ``offered``
+#: (``params.status``).
+DISCOUNT_OFFER_NOT_OPEN = "discount_offer_not_open"
+#: Decline refused: the offer lapsed more than ``DECLINE_GRACE_DAYS`` ago, so a
+#: decline would record a refusal nobody made (``decline_window_closed``).
+DISCOUNT_OFFER_DECLINE_WINDOW_CLOSED = "discount_offer_decline_window_closed"
+
+
+def _accept_tier(offer: DiscountOffer, *, today: date, tier_days: int | None) -> dict | None:
+    """The tier an accept would record: the named one while its window is
+    open, else the best one still capturable today."""
+    reference = offers_svc.offer_reference_date(offer)
+    if tier_days is not None:
+        return offers_svc.select_tier_for_date(
+            offer.tiers or [], tier_days, today, offer.valid_until, reference_date=reference
         )
+    return offers_svc.best_tier_for_date(
+        offer.tiers or [], today, offer.valid_until, reference_date=reference
+    )
+
+
+def capturable_tier_days(offer: DiscountOffer, *, today: date) -> list[int]:
+    """Every tier ``POST /accept`` would take by name today — the accept
+    dialog offers these and no others (``_accept_tier``)."""
+    return [
+        int(t["days"])
+        for t in (offer.tiers or [])
+        if _accept_tier(offer, today=today, tier_days=int(t["days"])) is not None
+    ]
+
+
+def accept_refusal(
+    offer: DiscountOffer,
+    *,
+    settled_status: str | None,
+    today: date,
+    tier_days: int | None = None,
+) -> ActionRefusal | None:
+    """Why ``POST /offers/{id}/accept`` would refuse, or ``None``.
+
+    Every refusal the endpoint answers past its role dependency and the 404,
+    in its order: a settled invoice, no tier to take, an offer no longer
+    ``offered``. ``settled_status`` is ``settled_invoice_status`` for this
+    offer, resolved by the caller (one query for a whole list page). Plain
+    string details at the endpoint, as before; the verdict carries the code.
+    """
+    if settled_status is not None:
+        return ActionRefusal(
+            DISCOUNT_OFFER_INVOICE_SETTLED,
+            f"The invoice is already {settled_status}; there is no payment left to discount",
+            status.HTTP_409_CONFLICT,
+            params={"status": settled_status},
+        )
+    if _accept_tier(offer, today=today, tier_days=tier_days) is None:
+        if tier_days is not None:
+            return ActionRefusal(
+                DISCOUNT_OFFER_TIER_UNAVAILABLE,
+                "No tier matches the requested days, or its window has closed",
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        return ActionRefusal(
+            DISCOUNT_OFFER_NO_CAPTURABLE_TIER,
+            "Offer has no capturable tier today",
+            status.HTTP_409_CONFLICT,
+        )
+    return _not_open_refusal(offer, verb="accept")
+
+
+def _not_open_refusal(offer: DiscountOffer, *, verb: str) -> ActionRefusal | None:
+    if offer.status != OFFER_STATUS_OFFERED:
+        return ActionRefusal(
+            DISCOUNT_OFFER_NOT_OPEN,
+            f"cannot {verb} an offer in status {offer.status!r} (must be 'offered')",
+            status.HTTP_409_CONFLICT,
+            params={"status": offer.status},
+        )
+    return None
+
+
+def decline_refusal(offer: DiscountOffer, *, today: date) -> ActionRefusal | None:
+    """Why ``POST /offers/{id}/decline`` would refuse, or ``None`` — the same
+    two checks, in the same order, as ``discount_offers.decline_offer``, which
+    still raises on them as a backstop for its other callers."""
+    if offers_svc.decline_window_closed(offer, as_of=today):
+        return ActionRefusal(
+            DISCOUNT_OFFER_DECLINE_WINDOW_CLOSED,
+            "cannot decline an offer whose validity window has closed (expired)",
+            status.HTTP_409_CONFLICT,
+        )
+    return _not_open_refusal(offer, verb="decline")
+
+
+async def _offer_responses(
+    db: AsyncSession, offers: list[DiscountOffer], user: User, *, today: date
+) -> list[DiscountOfferResponse]:
+    """The wire rows, each with the caller's verdict on Accept / Decline
+    (``actions``) and the tiers Accept would take (``capturable_tier_days``)."""
+    vmap, imap = await name_maps(db, offers)
+    may_decide = holds_any_role(user, _ACCEPT_ROLES)
+    settled = await settled_invoice_statuses(db, offers) if may_decide else {}
+    out: list[DiscountOfferResponse] = []
+    for offer in offers:
+        resp = _response(offer, vmap, imap, today=today)
+        if may_decide:
+            accept = accept_refusal(offer, settled_status=settled.get(offer.id), today=today)
+            decline = decline_refusal(offer, today=today)
+            resp.actions = {
+                "accept": accept.verdict() if accept else None,
+                "decline": decline.verdict() if decline else None,
+            }
+            resp.capturable_tier_days = (
+                capturable_tier_days(offer, today=today) if accept is None else []
+            )
+        else:
+            resp.actions = {"accept": role_not_permitted(), "decline": role_not_permitted()}
+            resp.capturable_tier_days = []
+        out.append(resp)
+    return out
 
 
 async def _get_offer_scoped(
@@ -242,8 +366,7 @@ async def list_offers(
         .limit(pagination.limit)
     )
     rows = list((await db.execute(query)).scalars().all())
-    vmap, imap = await name_maps(db, rows)
-    items = [_response(o, vmap, imap, today=today) for o in rows]
+    items = await _offer_responses(db, rows, user, today=today)
     return paginated(items, total, pagination)
 
 
@@ -368,8 +491,7 @@ async def get_offer(
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     offer = await _get_offer_scoped(db, offer_id, entity_id)
-    vmap, imap = await name_maps(db, [offer])
-    return _response(offer, vmap, imap)
+    return (await _offer_responses(db, [offer], user, today=utc_today()))[0]
 
 
 @router.post("/offers/{offer_id}/accept", response_model=DiscountOfferResponse)
@@ -383,29 +505,12 @@ async def accept_offer(
 ):
     offer = await _get_offer_scoped(db, offer_id, entity_id)
     today = utc_today()
-    await _refuse_settled_invoice(db, offer)
-    if body.tier_days is not None:
-        tier = offers_svc.select_tier_for_date(
-            offer.tiers or [],
-            body.tier_days,
-            today,
-            offer.valid_until,
-            reference_date=offers_svc.offer_reference_date(offer),
-        )
-        if tier is None:
-            raise HTTPException(
-                status_code=422,
-                detail="No tier matches the requested days, or its window has closed",
-            )
-    else:
-        tier = offers_svc.best_tier_for_date(
-            offer.tiers or [],
-            today,
-            offer.valid_until,
-            reference_date=offers_svc.offer_reference_date(offer),
-        )
-        if tier is None:
-            raise HTTPException(status_code=409, detail="Offer has no capturable tier today")
+    # One gate, shared with the row's `actions.accept` verdict.
+    settled = (await settled_invoice_statuses(db, [offer])).get(offer.id)
+    refusal = accept_refusal(offer, settled_status=settled, today=today, tier_days=body.tier_days)
+    if refusal is not None:
+        raise refusal.http()
+    tier = _accept_tier(offer, today=today, tier_days=body.tier_days)
     try:
         offers_svc.accept_offer(offer, tier=tier, actor_id=user.id, now=datetime.now(UTC))
     except ValueError as exc:
@@ -422,8 +527,7 @@ async def accept_offer(
     )
     await db.commit()
     await db.refresh(offer)
-    vmap, imap = await name_maps(db, [offer])
-    return _response(offer, vmap, imap)
+    return (await _offer_responses(db, [offer], user, today=today))[0]
 
 
 @router.post("/offers/{offer_id}/decline", response_model=DiscountOfferResponse)
@@ -441,6 +545,10 @@ async def decline_offer(
 ):
     offer = await _get_offer_scoped(db, offer_id, entity_id)
     today = utc_today()
+    # One gate, shared with the row's `actions.decline` verdict.
+    refusal = decline_refusal(offer, today=today)
+    if refusal is not None:
+        raise refusal.http()
     try:
         # `as_of` is what refuses a LAPSED offer. Accept already refuses one
         # (no tier is capturable past `valid_until`); without this, decline was
@@ -462,8 +570,7 @@ async def decline_offer(
     )
     await db.commit()
     await db.refresh(offer)
-    vmap, imap = await name_maps(db, [offer])
-    return _response(offer, vmap, imap, today=today)
+    return (await _offer_responses(db, [offer], user, today=today))[0]
 
 
 # --------------------------------------------------------------------------- #

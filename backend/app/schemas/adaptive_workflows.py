@@ -124,6 +124,10 @@ class SuggestionResponse(BaseModel):
     status: str
     created_at: str | None = None
     dismissed_at: str | None = None
+    # The caller's verdict on each row action — `{"dismiss"}`, a coded refusal
+    # or `None` — from the endpoint's own gate (`api/adaptive_workflows.
+    # dismiss_refusal`, issue #575). The page offers Dismiss by it.
+    actions: dict | None = None
 
 
 class SuggestionListResponse(BaseModel):
