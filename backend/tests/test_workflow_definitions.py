@@ -663,6 +663,7 @@ async def test_deactivating_the_last_active_workflow_is_refused(realdb):
         created = await c.post(
             "/api/invoices",
             json={
+                "currency": "USD",
                 "vendor": "Guard Vendor",
                 "invoice_number": f"WF-GUARD-{uuid.uuid4().hex[:8]}",
                 "amount": "10.00",

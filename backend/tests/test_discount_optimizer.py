@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
+
 from app.services.discount_optimizer import (
     OfferOpportunity,
     optimize,
@@ -26,7 +28,7 @@ def _opp(
     pay_by: date,
     due_date: date | None = None,
     tier_days: int = 10,
-    currency: str = "USD",
+    currency: str | None = "USD",
 ) -> OfferOpportunity:
     # Default the net due date 20 days after the discount deadline, so
     # days_accelerated = days_between(pay_by, due_date) = 20 unless overridden.
@@ -243,6 +245,26 @@ def test_no_reporting_currency_disables_the_guard():
     assert result.unconvertible_count == 0
     assert result.total_savings_selected == Decimal("20.00")
     assert result.recommendations[0].unconvertible is False
+
+
+@pytest.mark.parametrize("reporting_currency", ["USD", None])
+@pytest.mark.parametrize("currency", [None, "", "EURO"])
+def test_an_offer_in_no_stated_currency_joins_no_total(currency, reporting_currency):
+    """An offer whose code is missing or malformed is unconvertible whatever
+    the caller's reporting currency, never summed as if it were USD
+    (decisions §473)."""
+    opp = _opp("x", base="1000.00", percent="2.00", pay_by=date(2026, 1, 21), currency=currency)
+    result = optimize(
+        [opp],
+        cash_budget=None,
+        cost_of_capital_pct=Decimal("8.00"),
+        today=_TODAY,
+        reporting_currency=reporting_currency,
+    )
+    assert result.unconvertible_count == 1
+    assert result.total_savings_selected == Decimal("0.00")
+    assert result.total_savings_available == Decimal("0.00")
+    assert result.recommendations[0].unconvertible is True
 
 
 # ---------------------------------------------------------------------------

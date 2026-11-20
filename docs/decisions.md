@@ -23904,12 +23904,12 @@ books NULL; an invoice warning carries an unknown currency as `""`, which both
 clients render as bare digits; the supplier portal's payment list, the
 email-approval page, the virtual-card email and the workflow builder's context
 omit the code instead of saying USD; and an invoice-scoped discount offer on
-such an invoice is refused (`discount_offer_currency_required`) unless the
-caller names a currency. `tests/test_invoice_currency_explicit.py` also
-refuses a literal or `or`-defaulted currency, `Invoice(**kwargs)` and
-`module.Invoice(...)` at an application construction site. `InvoiceCreate`
-still defaults `currency` to USD for an API caller that omits it (the web form
-no longer relies on it); that is tracked in `docs/followups.md`.
+such an invoice is refused (`discount_offer_currency_required`, superseded in
+round 31 below) unless the caller names a currency.
+`tests/test_invoice_currency_explicit.py` also refuses a literal or
+`or`-defaulted currency, `Invoice(**kwargs)` and `module.Invoice(...)` at an
+application construction site. `InvoiceCreate` still defaulted `currency` to
+USD for an API caller that omitted it; closed in round 31 below.
 
 Amended in the round 29 gate review. **A credit takes no unknown-currency
 invoice.** A linked credit-memo create and `POST /credit-memos/{id}/apply` on
@@ -23926,6 +23926,60 @@ credit then all but decided which code that would be. This supersedes the
 "blank invoice currency admitted" clause of the currency leg in §202 for
 create, apply and both pickers. §214's edit guard keeps its legacy-blank
 admission, which now only ever covers a credit applied before this amendment.
+
+Amended in round 31. **A create states its currency.** `POST /api/invoices`
+no longer defaults an omitted `currency` to USD: an omitted, null or blank code
+is the coded 422 `invoice_currency_required`, a malformed one
+`invoice_currency_invalid`, through the PATCH's own
+`refusals.invoice_currency(..., creating=True)` (§460). The field is raw on the
+schema so the refusal is coded rather than Pydantic's list; every pytest and
+Playwright caller that leaned on the default now names USD, and the web form
+already refused a blank field. **A discount offer takes no unknown-currency
+invoice either.** An invoice-scoped offer on an invoice whose currency is
+unknown (by `payable_currency_code`) is the 409
+`discount_offer_invoice_currency_unknown` whether or not the caller names a
+currency, for the reason the credit memo is (round 29 above): a EUR offer on a
+balance in no stated currency cannot be proved to price it, and once accepted
+it would all but decide the invoice's code. `discount_offer_currency_required`
+is gone. **An offer's own unknown code is unconvertible.** `build_opportunity`
+read `offer.currency or "USD"`; it now carries `iso_currency_or_none`, and the
+optimizer treats `None` as unconvertible whatever the reporting currency (even
+for a caller that passes none), so the offer keeps its currency-free ROI but
+joins no total and never spends a cash budget. Persisted offers are NOT NULL,
+so this only reaches a legacy malformed row.
+
+**Settings: only UNSET falls back.** `settings.payments.home_currency` that is
+set but not a code used to read as USD on the payment path: `"EURO"` paid a
+USD→EUR leg at a real FX lock, and a GBP org that typed `"GBR"` paid a USD
+invoice as domestic and skipped the international KYC.
+`international_payments.resolve_home_currency` now falls back to
+`DEFAULT_HOME_CURRENCY` only for an unset value (absent, null, blank) and
+raises `HomeCurrencyInvalidError` (`home_currency_invalid`) for a malformed
+one, the rule `expense_policy.threshold_currency_for` already applies.
+`_execute_single_payment` resolves it once, before the card and processor
+legs, and fails the payment `international_payment_error:
+home_currency_invalid` (retry-safe: no order exists yet);
+`prepare_international_payment` refuses it; the card mint skips the invoice as
+`card_skip_home_currency_invalid`. `PATCH /api/organization` validates the
+field on write (422 `organization_home_currency_invalid`; blank stores null),
+so only a row written before that check, or by hand, reaches the refusal.
+`currency_conversion.resolve_reporting_currency` applies the same rule to each
+rung: unset falls through, set returns its code, set-but-malformed answers
+`""`, a currency nothing is denominated in, so every amount reads as
+unconverted — never a garbled code passed on (rungs 1 and 3 did) and never a
+fall-through to a currency the org did not choose (rung 2 did).
+`payment_controls.cfo_approval_decision` carries such a reporting currency as
+`None`, not a `USD` label, and requires sign-off (`amount_not_expressible`).
+Rejected: raising from `resolve_reporting_currency`, which has 56 callers and
+backs every dashboard; `""` fails closed without a 500.
+
+**Three more readers.** SYSPRO's `po_is_foreign` compares a header with the
+local currency under SYSPRO's own code rule first (`$` is valid there and not
+ISO), so `$` against `$` is local; only a label matching neither rule is
+unknown. Bank reconciliation's settlement pair, and its SQL mirror, read a
+whitespace-only `source_currency` as no FX stamp (`reconciliation_currency`),
+so the currency check is not skipped on it. An expense pre-approval with no
+currency is unknown rather than USD and covers nothing.
 
 ## 474. An employee access token with no `org` claim is refused, not trusted to a later lookup (round 30, 2026-11-19)
 

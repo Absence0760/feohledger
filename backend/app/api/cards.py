@@ -838,6 +838,14 @@ async def _mint_one_locked(
     if net <= 0:
         return card_skip(inv.id, ci.CARD_SKIP_NOTHING_OWED)
 
+    # The compliance thresholds are denominated in the org's home currency; a
+    # setting that is set but not a code is refused, never read as USD
+    # (decisions §473, amended), the same rule as the payment dispatch.
+    from app.services.international_payments import home_currency_is_malformed
+
+    if home_currency_is_malformed(org.settings):
+        return card_skip(inv.id, ci.CARD_SKIP_HOME_CURRENCY_INVALID)
+
     # Compliance gate: mirrors execute_payment_run's virtual_card leg. No
     # screenable vendor (no vendor_id, or the row was deleted) → skip rather
     # than mint unscreened; a refuse/hold verdict also skips.

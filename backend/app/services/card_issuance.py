@@ -879,6 +879,9 @@ CARD_SKIP_COMPLIANCE_HOLD = "card_skip_compliance_hold"
 CARD_SKIP_ERP_BILL = "card_skip_erp_bill"
 #: The invoice records no currency, so there is nothing to denominate a card in.
 CARD_SKIP_CURRENCY_UNKNOWN = "card_skip_currency_unknown"
+#: The org's `settings.payments.home_currency` is set but is not a currency
+#: code, so the compliance thresholds it denominates cannot be read (§473).
+CARD_SKIP_HOME_CURRENCY_INVALID = "card_skip_home_currency_invalid"
 #: The provider did not issue a card, or the card could not be recorded.
 CARD_SKIP_ISSUE_FAILED = "card_skip_issue_failed"
 
@@ -909,6 +912,10 @@ CARD_SKIP_MESSAGES: dict[str, str] = {
     CARD_SKIP_ERP_BILL: "The ERP could not confirm this bill is still open and unpaid.",
     CARD_SKIP_CURRENCY_UNKNOWN: (
         "The invoice records no currency; set its currency before issuing a card."
+    ),
+    CARD_SKIP_HOME_CURRENCY_INVALID: (
+        "The organisation's home currency setting is not a three-letter currency code; "
+        "an administrator must correct it before cards can be issued."
     ),
     CARD_SKIP_ISSUE_FAILED: "The card provider did not issue a card.",
 }

@@ -7,7 +7,6 @@ from app.models.invoice_status import (
     InvoiceStatus,  # the one enum; see that module
     financially_locked,
 )
-from app.schemas.currency import CurrencyCode
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 from app.services.storage import invoice_file_url
 from app.services.vendor_consolidation import mask_tax_id
@@ -17,7 +16,8 @@ from app.services.vendor_consolidation import mask_tax_id
 #: verbatim turned a save that changed nothing into an `invoice.edited` row
 #: recording `null -> ""` on the SOX trail (the modal's Send to ERP saves the
 #: form first). `vendor` and `invoice_number` are NOT NULL columns and
-#: `currency` has a default, so they are not in this list.
+#: `currency` is checked through `api/refusals.invoice_currency`, so they are
+#: not in this list.
 OPTIONAL_TEXT_FIELDS = (
     "payment_terms",
     "po_number",
@@ -55,7 +55,13 @@ class InvoiceBase(BaseModel):
     invoice_number: str = Field(..., max_length=100)
     # Digits match `invoices.amount` Numeric(15, 2).
     amount: Decimal = Field(..., ge=0, max_digits=15, decimal_places=2)
-    currency: CurrencyCode = "USD"
+    # Required, with no default: an omitted code used to book the invoice in
+    # USD (decisions §473). Raw here, like `InvoiceUpdate.currency`, so the
+    # create handler's `api/refusals.invoice_currency(..., creating=True)`
+    # answers an omitted, blank or malformed code with the coded 422
+    # `invoice_currency_required` / `invoice_currency_invalid` a client can
+    # state, not Pydantic's field list.
+    currency: str | None = None
     invoice_date: date | None = None
     received_date: date | None = None
     due_date: date | None = None

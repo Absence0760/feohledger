@@ -194,16 +194,15 @@ def test_the_canonical_resolver_is_called_from_exactly_one_place():
     )
 
 
-#: The ONLY currency-code literals allowed, per module, with the reason.
-#: `build_opportunity` (moved verbatim from `api/discounts` into
-#: `services/discount_opportunities`) reads `offer.currency or "USD"` for an
-#: in-memory offer; `discount_offers.currency` is `nullable=False` with a
-#: server-side default, so the fallback is unreachable from a persisted row.
-#: Every figure a caller sees is labelled from `_org_currency`, so the router
-#: itself names no code at all.
+#: The ONLY currency-code literals allowed, per module, with the reason. None:
+#: `build_opportunity` used to read `offer.currency or "USD"`; it now carries
+#: `iso_currency_or_none(offer.currency)`, so a missing or malformed code is
+#: `None` and the optimizer reads it as unconvertible (decisions §473). Every
+#: figure a caller sees is labelled from `_org_currency`, so the router itself
+#: names no code at all.
 _ALLOWED_CURRENCY_LITERALS = {
     "api/discounts": {},
-    "services/discount_opportunities": {("build_opportunity", "USD"): 1},
+    "services/discount_opportunities": {},
 }
 
 _CURRENCY_LITERALS = {"USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF"}

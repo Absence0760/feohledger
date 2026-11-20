@@ -7,7 +7,7 @@ payment-level FX (international_payments). Pins:
     - explicit settings.reporting_currency wins
     - falls back to payments.home_currency, then invoice_defaults.currency,
       then the platform default
-    - always uppercased; empty/garbage degrades to default
+    - always uppercased; empty degrades to the next rung, a set malformed rung answers "" (§473)
 
   convert_amount
     - same currency → rate 1, no adapter call, exact

@@ -781,6 +781,17 @@ def test_settlement_pair_is_the_amount_that_left_the_account():
     # No invoice row to read → currency unknown, never guessed.
     assert settlement_amount_and_currency(domestic, None) == (Decimal("1000.00"), "")
 
+    # A whitespace-only FX stamp is no currency: the leg is not read as an
+    # unknown-currency source amount (which skipped the currency check), it
+    # falls back to the invoice-currency figure, which a home-currency bank
+    # line then fails to match (fail closed).
+    blank_stamp = _payment(
+        amount=Decimal("1000.00"),
+        source_amount=Decimal("1086.96"),
+        source_currency="   ",
+    )
+    assert settlement_amount_and_currency(blank_stamp, "EUR") == (Decimal("1000.00"), "EUR")
+
 
 def test_classify_discrepancy_precedence_and_clean_case():
     """Currency → amount → status. A currency mismatch outranks the amount

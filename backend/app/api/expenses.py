@@ -602,8 +602,10 @@ async def _approved_preapproval_amount(db: AsyncSession, expense: Expense) -> De
                     ExpensePreapproval.status == PreapprovalStatus.approved,
                     ExpensePreapproval.requester_user_id == owner,
                     # "" (no usable code on the expense) matches no
-                    # pre-approval, so nothing covers it.
-                    func.upper(func.coalesce(ExpensePreapproval.currency, "USD"))
+                    # pre-approval, and a pre-approval with no currency (NULL)
+                    # is unknown, never USD: NULL compares as no match, so a
+                    # currency-less pre-approval covers nothing (§473).
+                    func.upper(func.btrim(ExpensePreapproval.currency))
                     == (normalize_currency(expense.currency) or ""),
                     or_(*conditions),
                 )

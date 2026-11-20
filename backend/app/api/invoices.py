@@ -1352,6 +1352,9 @@ async def create_invoice(
         db, organization_id=org.id, entity_id=entity_id, codes=[body.gl_account]
     )
     refuse_due_before_invoice_date(body.invoice_date, body.due_date)
+    # A create states its currency: an omitted, blank or malformed code is the
+    # coded 422, never a USD default (decisions §473).
+    currency = invoice_currency(body.currency, creating=True)
     invoice = Invoice(
         organization_id=org.id,
         entity_id=entity_id,
@@ -1364,7 +1367,7 @@ async def create_invoice(
         vendor_name=body.vendor,
         description=body.description,
         amount=body.amount,
-        currency=body.currency,
+        currency=currency,
         invoice_date=body.invoice_date,
         received_date=body.received_date,
         due_date=body.due_date,

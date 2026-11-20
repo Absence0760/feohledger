@@ -723,7 +723,9 @@ def cfo_approval_decision(
     comparison. Pure: no DB, no clock, no FX call.
     """
     raw = (payment_config or {}).get("cfo_approval_above")
-    currency = iso_currency_or_none(reporting_currency) or "USD"
+    # A reporting currency that is not a code is carried as `None`, never
+    # labelled USD (§160, §473): no figure is expressible in it.
+    currency = iso_currency_or_none(reporting_currency)
     if raw is None:
         return CfoThresholdDecision(required=False, currency=currency)
 
@@ -739,7 +741,7 @@ def cfo_approval_decision(
     if threshold <= 0:
         return CfoThresholdDecision(required=False, threshold=threshold, currency=currency)
 
-    if unconverted:
+    if unconverted or currency is None:
         return CfoThresholdDecision(
             required=True,
             reason=CFO_REASON_AMOUNT_NOT_EXPRESSIBLE,

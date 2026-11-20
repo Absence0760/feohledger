@@ -52,7 +52,7 @@ async function createLinkedInvoice(
 ): Promise<string> {
 	const resp = await page.request.post(`${API_BASE}/api/invoices`, {
 		headers: await authedTenantHeaders(page),
-		data: { vendor: vendorName, invoice_number: number, amount: '100.00' }
+		data: { vendor: vendorName, invoice_number: number, amount: '100.00', currency: 'USD' }
 	});
 	expect(resp.status()).toBe(201);
 	const id = ((await resp.json()) as { id: string }).id;
