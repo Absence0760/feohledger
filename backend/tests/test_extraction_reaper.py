@@ -278,6 +278,7 @@ async def _add_pending_invoice(mk, org_id, *, created_at):
             invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
             vendor_name="Acme",
             amount=Decimal("10.00"),
+            currency="USD",
             status=InvoiceStatus.pending,
         )
         s.add(inv)

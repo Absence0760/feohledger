@@ -637,6 +637,7 @@ async def test_an_erp_send_without_openable_credentials_lands_failed(realdb):
             invoice_number="INV-CRED-1",
             vendor_name="Vendor Co",
             amount=Decimal("10.00"),
+            currency="USD",
             status=InvoiceStatus.sending_to_erp,
             organization_id=realdb.info("a").org_id,
         )

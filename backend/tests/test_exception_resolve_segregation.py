@@ -741,6 +741,7 @@ def _transient(*, approved_by=None, uploaded_by=None, exception_type="po_mismatc
         approved_by_user_id=approved_by,
         uploaded_by_id=uploaded_by,
         segregation_actor_ids=None,
+        currency="USD",
     )
     row = APException(id=uuid.uuid4(), exception_type=exception_type, invoice_id=inv.id, **exc)
     return row, inv

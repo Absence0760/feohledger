@@ -24070,3 +24070,35 @@ half only where its table lives; model parity).
 `tests/test_email_identity_case.py` covers the index refusing a case-variant
 insert, and admin create, SCIM create and the portal invite each losing the
 race and getting their 409.
+
+## 476. An `Invoice` built without a currency is NULL; fixtures name theirs (closes the last §473 followup; round 32, 2026-11-20)
+
+§473 removed the `invoices.currency` column default but kept a constructor
+fallback: `Invoice.__init__` set `"USD"` whenever a construction did not
+mention `currency`, because about a hundred test fixtures relied on it. No
+application site reached it, yet it was still a default currency in the model,
+the substitution §160/§196/§200 forbid, one forgotten keyword away from
+labelling a real document.
+
+The override is gone. An omitted `currency` is now NULL, the same "unknown" as
+`currency=None`. Every fixture, seed and script construction under
+`backend/tests/` and `backend/scripts/` names its currency, almost always the
+`"USD"` it already got, so no test changes meaning. A helper that built from
+`**kwargs` takes a `currency` parameter and names it at the call (its callers
+still override it). The seeds' tax-exclusive header no longer carries the code
+inside its kwargs dict. The extraction golden harness starts its invoice with
+`currency=None`, as the upload does (§473), rather than the old USD
+placeholder.
+
+`tests/test_invoice_currency_explicit.py` now also scans `tests/` and
+`scripts/`, follows `Invoice` imported under an alias, and refuses a
+construction there that omits `currency`. Fixtures may state a literal code;
+only a test whose subject is the omission itself may omit it, declared with its
+reason. It also asserts that the model has no column, server or constructor
+default (`Invoice().currency is None`), so a default cannot come back without
+failing a test that says why.
+
+Rejected: keeping the fallback and only guarding `app/` (the §473 state),
+which leaves a default in the model for the next non-`app` caller, such as a
+script, to reach; and a column `default`, which also overwrites an explicit
+`None` at INSERT (§473).

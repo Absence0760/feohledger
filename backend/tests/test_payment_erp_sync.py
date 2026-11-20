@@ -92,6 +92,7 @@ async def _seed_run(
                 invoice_number="INV-SYNC-1",
                 vendor_name="Vendor Co",
                 amount=amount,
+                currency="USD",
                 status=invoice_status,
                 organization_id=org_id,
             )
@@ -211,6 +212,7 @@ async def test_no_erp_configured_does_not_strand_an_unsettled_invoice(realdb):
                 invoice_number="INV-NOERP-INFLIGHT",
                 vendor_name="Vendor Co",
                 amount=Decimal("100.00"),
+                currency="USD",
                 status=InvoiceStatus.payment_scheduled,
                 organization_id=org_id,
             )
@@ -292,6 +294,7 @@ async def test_sync_does_not_pay_in_flight_payment_invoice(realdb):
                     invoice_number=num,
                     vendor_name="V",
                     amount=Decimal("50.00"),
+                    currency="USD",
                     status=InvoiceStatus.payment_scheduled,
                     organization_id=org_id,
                 )
@@ -353,6 +356,7 @@ async def test_sync_tenant_isolation(realdb):
                 invoice_number="INV-B",
                 vendor_name="B Vendor",
                 amount=Decimal("10.00"),
+                currency="USD",
                 status=InvoiceStatus.payment_scheduled,
                 organization_id=org_b,
             )
@@ -579,6 +583,7 @@ async def test_failed_leg_does_not_discard_a_sibling_leg_that_already_synced(rea
                     invoice_number=num,
                     vendor_name="V",
                     amount=Decimal("40.00"),
+                    currency="USD",
                     status=InvoiceStatus.payment_scheduled,
                     organization_id=org_id,
                 )
@@ -845,6 +850,7 @@ async def test_retry_endpoint_409s_when_no_payment_settled(realdb):
                 invoice_number="INV-FLIGHT-ONLY",
                 vendor_name="V",
                 amount=Decimal("12.00"),
+                currency="USD",
                 status=InvoiceStatus.payment_scheduled,
                 organization_id=org_id,
             )

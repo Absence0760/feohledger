@@ -122,6 +122,7 @@ async def _add_invoice(mk, org_id, *, status, created_at, amount=Decimal("10.00"
             invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
             vendor_name="Acme",
             amount=amount,
+            currency="USD",
             status=status,
         )
         s.add(inv)

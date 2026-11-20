@@ -86,6 +86,7 @@ async def _add_invoice(session, org_id, entity_id, *, po_number, amount):
         invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
         vendor_name="Acme",
         amount=Decimal(amount),
+        currency="USD",
         po_number=po_number,
         # `refresh_warnings` deliberately skips PO matching on a draft `new`
         # invoice (nothing has been extracted yet), so the end-to-end tests

@@ -284,7 +284,7 @@ async def _run(monkeypatch, case: Golden):
 
     assert result.success, result.error
     convention = extraction_amount_convention(result)
-    invoice = Invoice()
+    invoice = Invoice(currency=None)  # the upload creates it unknown (decisions §473)
     _apply_extraction(invoice, result, convention, org_settings=case.org_settings)
     lines = [extracted_line_values(li, convention) for li in result.line_items]
     return result, invoice, lines

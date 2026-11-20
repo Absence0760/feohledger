@@ -146,6 +146,7 @@ async def _seed_invoice_id(session, org_id):
         invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
         vendor_name="Acme",
         amount=Decimal("1.00"),
+        currency="USD",
     )
     session.add(inv)
     await session.flush()

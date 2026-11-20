@@ -253,6 +253,7 @@ async def _seed_card_with_token(mk, org_id):
             invoice_number="INV-CARD-1",
             vendor_name="Acme",
             amount=Decimal("100.00"),
+            currency="USD",
         )
         s.add(invoice)
         await s.flush()
@@ -354,6 +355,7 @@ async def test_consume_refuses_a_card_in_another_org_without_burning(realdb):
             invoice_number="INV-CARD-XORG",
             vendor_name="Acme",
             amount=Decimal("100.00"),
+            currency="USD",
         )
         s.add(invoice)
         await s.flush()

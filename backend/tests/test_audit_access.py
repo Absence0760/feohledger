@@ -128,6 +128,7 @@ async def test_payment_detail_view_logs_payment_viewed(realdb):
                 invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
                 vendor_name="Acme",
                 amount=Decimal("500.00"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
         )
@@ -182,6 +183,7 @@ async def test_audit_trail_view_is_itself_audited(realdb):
                 invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
                 vendor_name="Acme",
                 amount=Decimal("10.00"),
+                currency="USD",
                 status=InvoiceStatus.new,
             )
         )

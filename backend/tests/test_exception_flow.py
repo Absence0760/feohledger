@@ -399,6 +399,7 @@ async def test_summary_by_type_follows_the_status_filter(realdb):
             invoice_number=f"EXSUM-{_uuid.uuid4().hex[:6]}",
             vendor_name="Summary Vendor",
             amount=Decimal("100.00"),
+            currency="USD",
             status=InvoiceStatus.new,
         )
         s.add(inv)

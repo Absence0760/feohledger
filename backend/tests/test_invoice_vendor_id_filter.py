@@ -48,6 +48,7 @@ async def _add_invoices(
                 vendor_name=vendor_name,
                 vendor_id=uuid.UUID(vendor_id) if vendor_id else None,
                 amount=Decimal("100.00"),
+                currency="USD",
                 status=status,
                 entity_id=entity_id,
             )

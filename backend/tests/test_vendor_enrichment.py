@@ -366,6 +366,7 @@ async def _seed_vendor_with_history(
                 vendor_name=vendor_name,
                 vendor_id=vendor.id,
                 amount=Decimal("1000.00"),
+                currency="USD",
                 status=InvoiceStatus.approved,
                 gl_account=gl,
                 payment_terms="NET30",
@@ -406,6 +407,7 @@ async def _seed_draft(mk, org_id, *, vendor_id, vendor_name, item_code="W-A", un
             vendor_name=vendor_name,
             vendor_id=vendor_id,
             amount=Decimal("1000.00"),
+            currency="USD",
             status=InvoiceStatus.ready_for_review,
         )
         s.add(inv)
@@ -498,6 +500,7 @@ async def test_suggestions_vendorless_draft_empty(realdb):
             invoice_number="NOVEN-1",
             vendor_name="Mystery",
             amount=Decimal("500.00"),
+            currency="USD",
             status=InvoiceStatus.ready_for_review,
         )
         s.add(inv)
@@ -636,6 +639,7 @@ async def test_suggestions_endpoint_does_not_overwrite_populated_terms(realdb):
             vendor_name="Acme Supplies",
             vendor_id=vid,
             amount=Decimal("1000.00"),
+            currency="USD",
             status=InvoiceStatus.ready_for_review,
             payment_terms="NET60",  # already set → must be suppressed
         )
@@ -763,6 +767,7 @@ async def test_score_ontime_proxy_computes_when_gr_present(realdb):
                     vendor_name="GR Co",
                     vendor_id=vid,
                     amount=Decimal("100.00"),
+                    currency="USD",
                     status=InvoiceStatus.approved,
                     po_number=po_number,
                     due_date=due,
@@ -850,6 +855,7 @@ async def test_score_ontime_expected_date_computes_without_proxy(realdb):
             vendor_name="Delivery Co",
             vendor_id=vid,
             amount=Decimal("100.00"),
+            currency="USD",
             status=InvoiceStatus.approved,
         )
         s.add(inv)
@@ -899,6 +905,7 @@ async def test_score_accuracy_dedupes_multi_approval_invoice(realdb):
             vendor_name="Reapprove Co",
             vendor_id=vid,
             amount=Decimal("100.00"),
+            currency="USD",
             status=InvoiceStatus.approved,
         )
         # Invoice B: approved once, with field corrections.
@@ -908,6 +915,7 @@ async def test_score_accuracy_dedupes_multi_approval_invoice(realdb):
             vendor_name="Reapprove Co",
             vendor_id=vid,
             amount=Decimal("200.00"),
+            currency="USD",
             status=InvoiceStatus.approved,
         )
         s.add_all([inv_a, inv_b])
@@ -1161,6 +1169,7 @@ async def test_consolidation_endpoint_canonical_pick(realdb):
                     vendor_name="Beta Co Inc",
                     vendor_id=v_big.id,
                     amount=Decimal("100.00"),
+                    currency="USD",
                     status=InvoiceStatus.approved,
                 )
             )
@@ -1171,6 +1180,7 @@ async def test_consolidation_endpoint_canonical_pick(realdb):
                 vendor_name="Beta Co LLC",
                 vendor_id=v_small.id,
                 amount=Decimal("100.00"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
         )
@@ -1245,6 +1255,7 @@ async def test_score_dispute_subscore_counts_exceptions(realdb):
                 vendor_name="Disputey Co",
                 vendor_id=vid,
                 amount=Decimal("100.00"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
             s.add(inv)

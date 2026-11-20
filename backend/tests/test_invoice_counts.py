@@ -34,6 +34,7 @@ async def _add_invoices(
                     invoice_number=f"{number_prefix or 'INV'}-{status.value}-{i}",
                     vendor_name=vendor_name,
                     amount=Decimal("100.00"),
+                    currency="USD",
                     status=status,
                 )
             )

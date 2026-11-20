@@ -25,6 +25,7 @@ async def _add_invoices(mk, org_id, n: int, *, prefix: str, created_at=None) -> 
                     invoice_number=f"{prefix}-{i:03d}",
                     vendor_name="Pagey Vendor",
                     amount=Decimal("100.00"),
+                    currency="USD",
                     status=InvoiceStatus.new,
                     **({"created_at": created_at} if created_at is not None else {}),
                 )
