@@ -22,7 +22,10 @@ vi.mock('#lib/entity.ts', () => ({ getSelectedEntityId: () => null }));
 // The mocked `m` names the key it resolved, bracketed: a bare key is what the
 // real `m()` returns for one it cannot resolve, which the registry reads as
 // "not loaded yet" and answers with the server's sentence.
-vi.mock('#lib/i18n/store.svelte.ts', () => ({ m: (key: string) => `[${key}]` }));
+vi.mock('#lib/i18n/store.svelte.ts', () => ({
+	m: (key: string) => `[${key}]`,
+	localeReady: () => Promise.resolve()
+}));
 
 const fetchMock = vi.fn();
 

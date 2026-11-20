@@ -453,10 +453,17 @@
 		gap: 10px;
 	}
 
+	/* Title, status pill and the resolve / reopen action share one row, which
+	   wraps rather than overflows: in the invoice modal's 320px dialog the three
+	   are wider than the pane once the system font is wider than the designer's
+	   (CI's), and the action pushed the scroll region 5px sideways (WCAG 1.4.10
+	   reflow). `margin-left: auto` on the action keeps it at the end of
+	   whichever line it lands on. */
 	.chat-head {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
-		gap: 10px;
+		gap: 6px 10px;
 	}
 
 	.chat-title {
