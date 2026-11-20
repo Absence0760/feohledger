@@ -1518,6 +1518,89 @@ void main() {
           findsOneWidget);
       handle.dispose();
     });
+    testWidgets(
+        'a run row keeps its "Run actions" menu reachable beside its merged '
+        'announcement', (tester) async {
+      final handle = tester.ensureSemantics();
+      http.Response j(Object body) => http.Response(jsonEncode(body), 200,
+          headers: {'content-type': 'application/json'});
+      final run = {
+        'id': 'run1',
+        'status': 'draft',
+        'total_amount': '5000.00',
+        'currency': 'USD',
+        'initiated_by': 'u1',
+        'executed_at': null,
+        'created_at': '2026-01-10T12:00:00',
+        'payment_count': 2,
+        'payments_completed': 0,
+        'payments_failed': 0,
+        'payments_in_flight': 0,
+        'payments_pending': 2,
+        'requires_cfo_approval': false,
+        'cfo_approved_at': null,
+      };
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          final path = req.url.path;
+          if (path == '/api/auth/login') return j({'access_token': 'tok'});
+          if (path.endsWith('/auth/me')) {
+            return j({
+              'id': 'u1',
+              'email': 'demo@acme.com',
+              'full_name': 'Demo User',
+              'organization_id': 'org1',
+              'roles': ['ap_manager'],
+            });
+          }
+          if (path.endsWith('/payments/execution-mode')) {
+            return j({'mode': 'processor', 'reason': 'configured'});
+          }
+          // The run detail: Execute and Cancel accepted, so the menu holds
+          // items and renders.
+          if (path.endsWith('/payments/runs/run1')) {
+            return j({
+              ...run,
+              'actions': {'execute': null, 'cancel': null},
+            });
+          }
+          if (path.endsWith('/payments/queue')) {
+            return j({'items': [], 'total': 0});
+          }
+          if (path.endsWith('/payments/summary')) {
+            return j({
+              'total_paid': 0.0,
+              'total_pending': 0.0,
+              'payment_count': 0,
+              'total_rebates': 0.0,
+              'queue_count': 0,
+            });
+          }
+          if (path.contains('/payments/runs')) {
+            return j({
+              'items': [run],
+              'total': 1,
+            });
+          }
+          return j({'items': [], 'total': 0});
+        }),
+      );
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+
+      await tester.pumpWidget(_screenHost(const PaymentQueueScreen()));
+      await _pumpUntil(tester, find.text('Runs'));
+      await tester.tap(find.text('Runs'));
+      await tester.pump();
+      await _pumpUntil(tester, find.byType(PopupMenuButton<String>));
+
+      // The row still reads as one phrase…
+      expect(find.bySemanticsLabel(RegExp(r'^Run .*Draft')), findsOneWidget);
+      // …and the trailing menu is its own node a screen reader can reach.
+      // Wrapping the whole ListTile in `excludeSemantics` dropped it.
+      expect(find.bySemanticsLabel(RegExp(r'^Run actions')), findsOneWidget);
+      await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
+      handle.dispose();
+    });
   });
 
   group('Record-as-paid dialog', () {
