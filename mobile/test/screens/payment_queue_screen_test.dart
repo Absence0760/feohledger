@@ -1024,7 +1024,7 @@ void main() {
         expect(itemFor(tester, label).enabled, isFalse, reason: label);
       }
       expect(
-        find.text("Couldn't check whether you can do this. Pull to refresh."),
+        find.text("Couldn't check what you can do here — pull to retry"),
         findsNWidgets(3),
       );
 

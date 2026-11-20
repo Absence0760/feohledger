@@ -1403,10 +1403,6 @@ class AppLocalizationsPt extends AppLocalizations {
   String get payRunActionApprove => 'Aprovar como CFO';
 
   @override
-  String get payRunVerdictUnchecked =>
-      'Não foi possível verificar se pode fazer isto. Puxe para atualizar.';
-
-  @override
   String get payRunApproveTitle => 'Aprovar o lote de pagamento?';
 
   @override
@@ -6441,10 +6437,6 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get payRunActionApprove => 'Aprovar como CFO';
-
-  @override
-  String get payRunVerdictUnchecked =>
-      'Não foi possível verificar se você pode fazer isso. Puxe para atualizar.';
 
   @override
   String get payRunApproveTitle => 'Aprovar o lote de pagamento?';

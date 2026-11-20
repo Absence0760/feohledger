@@ -1395,10 +1395,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get payRunActionApprove => 'Approve as CFO';
 
   @override
-  String get payRunVerdictUnchecked =>
-      'Couldn\'t check whether you can do this. Pull to refresh.';
-
-  @override
   String get payRunApproveTitle => 'Approve payment run?';
 
   @override
