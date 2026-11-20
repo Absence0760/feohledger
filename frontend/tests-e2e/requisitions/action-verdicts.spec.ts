@@ -120,7 +120,7 @@ test.describe('/requisitions — controls follow the server verdict', () => {
 		const id = 'a0000000-0000-4000-8000-000000000002';
 		await stubRequisitions(page, [
 			requisition(id, 'REQ-V-0002', {
-				actions: { ...ALLOW_ALL, approve: refused('approval_segregation') }
+				actions: { ...ALLOW_ALL, approve: refused('requisition_approval_segregation') }
 			})
 		]);
 		await page.goto('/requisitions');
@@ -134,6 +134,9 @@ test.describe('/requisitions — controls follow the server verdict', () => {
 		const note = r.locator(`#approve-refusal-${id}`);
 		await expect(note).toBeVisible();
 		await expect(note).toContainText('Segregation of duties');
+		// The requisition sentence, not the invoice one.
+		await expect(note).toContainText('requisition');
+		await expect(note).not.toContainText('invoice');
 		await expect(note).not.toContainText('Refused:');
 		await expect(approve).toHaveAttribute('aria-describedby', `approve-refusal-${id}`);
 		await expect(approve).toHaveAccessibleDescription(/Segregation of duties/);

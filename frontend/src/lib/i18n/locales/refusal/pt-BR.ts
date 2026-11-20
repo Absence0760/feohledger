@@ -88,6 +88,7 @@ export const messages = {
 	'refusal.cardTxnAlreadyIgnored': "Esta transação de cartão já está ignorada.",
 	'refusal.intakeStatusRefused': "Não é possível enquanto este recebimento estiver com status {status}.",
 	'refusal.requisitionStatusRefused': "Não é possível enquanto esta requisição estiver com status {status}.",
+	'refusal.requisitionApprovalSegregation': "Segregação de funções: um usuário que solicitou ou editou esta requisição não pode também aprová-la.",
 	'refusal.expenseReportLocked': "O total deste relatório está bloqueado enquanto seu status for {status}, então suas linhas não podem ser alteradas.",
 	'refusal.expenseFxSourceMissing': "Nenhuma fonte de câmbio está configurada, então esta linha não pode ser convertida para a moeda do relatório.",
 	'refusal.expenseFxRateUnavailable': "Nenhuma taxa de câmbio está disponível para converter {source} para a moeda do relatório {target}.",

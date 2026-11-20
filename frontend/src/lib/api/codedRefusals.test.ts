@@ -398,6 +398,15 @@ describe('codedRefusalText', () => {
 		expect(codedRefusalText('intake_status_refused', {}, enT)).toBeNull();
 	});
 
+	it('says a requisition, not an invoice, when its requester or editor would approve it', () => {
+		const text = codedRefusalText('requisition_approval_segregation', {}, enT);
+		expect(text).toBe(EN_ALL['refusal.requisitionApprovalSegregation']);
+		expect(text).toContain('requisition');
+		expect(text).not.toContain('invoice');
+		// The invoice code keeps its own sentence.
+		expect(codedRefusalText('approval_segregation', {}, enT)).toContain('invoice');
+	});
+
 	it('states the remaining balance with its currency, or bare without one', () => {
 		setActiveFormatLocale('en-US');
 		expect(

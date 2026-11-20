@@ -45,8 +45,10 @@ sees Approve disabled beside the segregation sentence. Parity:
 - **submit** (`draft → pending_approval`) — stamps `submitted_at`.
 - **approve** (`pending_approval → approved`) — stamps `approved_by` /
   `approved_at`. Enforces **segregation of duties**: the approver must be
-  neither `requester_user_id` nor anyone in `material_editor_ids` (reuses
-  `approval_chain.check_segregation` via an attribute shim → **403**). See
+  neither `requester_user_id` nor anyone in `material_editor_ids` (the shared
+  `approval_chain.violates_segregation` rule via an attribute shim → **403**
+  `requisition_approval_segregation`, its own code and sentence: the invoice
+  `approval_segregation` one says "this invoice"). See
   [Who an approval refuses](#who-an-approval-refuses) below.
 - **reject** (`pending_approval → rejected`) — records `rejection_reason`.
 - **cancel** (`draft` / `submitted` / `pending_approval` / `approved →
