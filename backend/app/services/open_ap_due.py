@@ -1,15 +1,17 @@
 """When the open AP falls due: the population, its effective due date, and
 what "overdue" means.
 
-Two surfaces count overdue AP, and they must count the same rows:
+Three surfaces count or list overdue AP, and they must agree on the rows:
 
 * the cash-flow forecast (`ap_commitments.commitment_rows`), and with it the
   /cfo "Overdue (owed now)" card (decisions §440, §449), the cash-position
   curve, the what-if, the copilot tools and the shortfall sweep;
 * `GET /api/dashboard`'s `overdue_count` / `overdue_total` and
-  `due_soon_count` / `due_soon_total`, which the mobile dashboard shows.
+  `due_soon_count` / `due_soon_total`, which the mobile dashboard shows;
+* `GET /api/invoices?overdue=true` (with `/counts` and `/ids`), the list the
+  mobile Overdue card opens (`overdue_invoice_ids`).
 
-Both read this module, so the predicate is stated once:
+All read this module, so the predicate is stated once:
 
 * **Population.** Committed AP (`OPEN_AP_STATUSES`, approved and still
   owed) plus the in-review pipeline (`IN_REVIEW_STATUSES`). The forecast's
@@ -27,7 +29,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import ColumnElement, Subquery, func, select
+from sqlalchemy import ColumnElement, Select, Subquery, func, select
 
 from app.models.invoice import Invoice
 from app.models.invoice_status import IN_REVIEW_STATUSES, OPEN_AP_STATUSES
@@ -77,3 +79,30 @@ def effective_due_date(latest_schedule: Subquery) -> ColumnElement:
 def is_overdue(effective_due: ColumnElement, today: date) -> ColumnElement:
     """Past due as of `today`: strictly before it. NULL (untimeable) is not."""
     return effective_due < today
+
+
+def overdue_invoice_ids(today: date) -> Select:
+    """The ids of every overdue invoice as of `today`, over the whole book.
+
+    The set `GET /api/dashboard`'s `overdue_count` counts and the /cfo card's
+    overdue figure counts: the outflow population (`OUTFLOW_STATUSES`, the
+    in-review pipeline included), timed on the effective due date, strictly
+    before `today`. `GET /api/invoices?overdue=true` filters on it, so the
+    mobile Overdue card opens a list with exactly the rows it counted.
+
+    Uncorrelated (`correlate(None)`): a caller composes it as
+    `Invoice.id.in_(...)` inside a query on `Invoice`, where SQLAlchemy would
+    otherwise correlate the inner `Invoice` to the outer one and drop it from
+    the subquery's FROM. The caller's own scope (entity, filters) narrows the
+    outer query; this set is deliberately unscoped.
+    """
+    latest = latest_schedule_subquery()
+    return (
+        select(Invoice.id)
+        .outerjoin(latest, latest.c.invoice_id == Invoice.id)
+        .where(
+            Invoice.status.in_(OUTFLOW_STATUSES),
+            is_overdue(effective_due_date(latest), today),
+        )
+        .correlate(None)
+    )
