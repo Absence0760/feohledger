@@ -530,7 +530,7 @@ test.describe('fixed list tables fit their longest locale', () => {
 				// region) has given way to data or a settled empty / error row.
 				await expect(table.locator('[data-testid="table-empty"] [role="status"]')).toHaveCount(0);
 				if (href === '/vendors/change-requests') {
-					await expect(table.locator('.sod-note')).toBeVisible();
+					await expect(table.locator('.refusal-note')).toBeVisible();
 				}
 				await nextFrames(page);
 

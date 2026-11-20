@@ -9,6 +9,7 @@
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RefusalNote from '#lib/components/ui/RefusalNote.svelte';
 	import BulkBar from '#lib/components/ui/BulkBar.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
@@ -258,6 +259,12 @@
 	}
 
 	let resolveTarget = $state<ExceptionItem | null>(null); // single-row resolve modal
+	/** The open exception's Resolve is refused for a reason the reader can act
+	 *  on (a colleague must clear it): explain it above the footer. */
+	const decisionRefused = $derived(
+		!!resolveTarget?.decision_refusals?.resolve &&
+			isOffered(resolveTarget.decision_refusals.resolve)
+	);
 	// `?id=` names an exception whose dialog the page opens once it has loaded
 	// that row — the payment queue's "Open exception" link lands here.
 	let pendingOpenId = $state<string | null>(pageStore.url.searchParams.get('id'));
@@ -1475,6 +1482,15 @@
 					autofocus
 				/>
 			</label>
+			{#if decisionRefused}
+				<!-- Why Resolve / Dismiss are disabled, in the server's words: a
+				     colleague must clear this one; escalating it is still open. -->
+				<RefusalNote
+					id="exception-decision-refusal"
+					testid="exception-decision-refusal"
+					reason={refusalText(resolveTarget.decision_refusals?.resolve ?? null, m)}
+				/>
+			{/if}
 			<div class="modal-footer">
 				<button type="button" class="btn-cancel" onclick={() => (resolveTarget = null)}>
 					{m('common.cancel')}
@@ -1483,6 +1499,10 @@
 					type="button"
 					class="btn-secondary"
 					disabled={saving || !isAllowed(resolveTarget.decision_refusals?.dismiss)}
+					aria-describedby={decisionRefused &&
+					!isAllowed(resolveTarget.decision_refusals?.dismiss)
+						? 'exception-decision-refusal'
+						: null}
 					onclick={() => commitResolve('dismiss')}
 				>
 					{m('exceptions.resolveModal.dismiss')}
@@ -1503,17 +1523,11 @@
 					disabled={saving ||
 						!resolutionText.trim() ||
 						!isAllowed(resolveTarget.decision_refusals?.resolve)}
+					aria-describedby={decisionRefused ? 'exception-decision-refusal' : null}
 				>
 					{saving ? m('common.saving') : m('exceptions.resolveModal.resolve')}
 				</button>
 			</div>
-			{#if resolveTarget.decision_refusals?.resolve && isOffered(resolveTarget.decision_refusals.resolve)}
-				<!-- Why Resolve / Dismiss are disabled, in the server's words: a
-				     colleague must clear this one; escalating it is still open. -->
-				<p class="modal-hint" data-testid="exception-decision-refusal">
-					{refusalText(resolveTarget.decision_refusals.resolve, m)}
-				</p>
-			{/if}
 		</form>
 	{/if}
 </Modal>

@@ -501,8 +501,12 @@
 						{#if isAllowed(r.actions?.approve)}
 							<RowAction variant="success" onclick={() => doApprove(r)} disabled={busyId === r.id}>{m('requisitions.row.approve')}</RowAction>
 						{:else if approveExplained(r)}
-							<span class="refusal-note" id={`approve-refusal-${r.id}`}>{refusalText(r.actions?.approve ?? null, m)}</span>
-							<RowAction variant="success" disabled describedby={`approve-refusal-${r.id}`}>{m('requisitions.row.approve')}</RowAction>
+							<RowAction
+								variant="success"
+								disabled
+								reason={refusalText(r.actions?.approve ?? null, m)}
+								reasonId={`approve-refusal-${r.id}`}
+							>{m('requisitions.row.approve')}</RowAction>
 						{/if}
 						{#if isAllowed(r.actions?.reject)}
 							<RowAction variant="danger" onclick={() => doReject(r)} disabled={busyId === r.id}>{m('requisitions.row.reject')}</RowAction>
@@ -593,14 +597,6 @@
 	   `<th>` from `columns`, so the selectors go through `:global` under a
 	   page-owned wrapper (the /gl-accounts pattern). */
 	.req-table { min-width: 0; }
-	/* Why a decider's Approve is disabled (segregation of duties), beside it. */
-	.refusal-note {
-		display: block;
-		font-size: 0.74rem;
-		color: var(--text-muted);
-		max-width: 28ch;
-		white-space: normal;
-	}
 	.req-table :global(table) { min-width: 1180px; }
 	.req-table :global(th.col-number) { width: 140px; }
 	.req-table :global(th.col-date) { width: 120px; }

@@ -883,7 +883,9 @@ An action the server would refuse for a reason the reader can act on is
 rendered `disabled`, not hidden, with the reason as its accessible
 description: pass `describedby` naming a `.visually-hidden` element that holds
 the localized reason (and `title` for pointer users). The payment queue's
-"Record as paid" is the worked example (decisions §319).
+"Record as paid" is the worked example (decisions §319). When the reason
+should be read on screen too, pass `reason` instead — see § Whether to offer
+an action → *Showing the reason*.
 
 The actions cell is **always the last column** (right side of the row),
 preceded by a header `<th class="actions-col"></th>`. The `<td>` uses
@@ -929,6 +931,23 @@ same gate function the endpoint raises from, so the two cannot disagree:
   `api/codedRefusals.ts` (falling back to the server's English). Render it
   beside a disabled control when the reader can act on it ("a colleague must
   approve this").
+
+**Showing the reason.** A visible reason beside a disabled control is always
+`RefusalNote` (`#lib/components/ui/RefusalNote.svelte`), never a page-local
+`<span class="…-note">` with its own CSS — four pages had grown one each
+(requisitions, bank-change queue, expense reports, the exception dialog). It
+renders the sentence on its own line **above** the button(s), wraps in any
+locale, and drops the `td.actions` inline gap on the button under it, so a long
+reason never pushes the row's other actions out of a fixed actions column.
+
+- A row action: `<RowAction disabled reason={refusalText(v, m)} reasonId?>` —
+  `RowAction` renders the note and adds its id to the button's
+  `aria-describedby` (beside any `describedby` you pass). Set `reasonId` only
+  when a test or another control needs the note (`approve-refusal-<id>` on
+  /requisitions).
+- Any other control (a header or dialog button): `<RefusalNote id reason testid?>`
+  placed before the button(s), with each refused button's `aria-describedby`
+  set to that id (/expenses report detail, the /exceptions resolve dialog).
 
 Never add a second check beside the verdict — that is the copy it replaces.
 Org-level configuration the server states elsewhere (the execution mode, read
@@ -1170,6 +1189,7 @@ the `ui/` primitive in the Source column.
 | Bulk delete | `.btn-danger.bulk-delete-btn` (+ `.armed`) | `ui/BulkDeleteButton.svelte` |
 | Bulk action | `.btn-secondary` (`.btn-primary` for the bar's lead action) | `src/app.css`, always inside a BulkBar |
 | Per-row action | `<RowAction>` (variant + armed) | `ui/RowAction.svelte` |
+| Why an action is refused (visible) | `<RowAction reason>` / `<RefusalNote>` | `ui/RefusalNote.svelte` |
 | Clickable-row open control | `<RowLink>` + `.clickable` row + `isRowOpenClick` | `ui/RowLink.svelte` / `utils/rowNav.ts` |
 | Filter pill | `.filter-chip` (+ `.active`, `.count`) | `ui/FilterChips.svelte` |
 | Tab bar | `.tab-row` / `.tab` (+ `.active`) | `ui/Tabs.svelte` |

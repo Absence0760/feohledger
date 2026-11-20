@@ -46,3 +46,36 @@ describe('RowAction busy', () => {
 		expect(tag).not.toMatch(/aria-busy/);
 	});
 });
+
+describe('RowAction reason', () => {
+	function html(props: Record<string, unknown>): string {
+		return render(RowAction, { props: { children: label, ...props } }).body;
+	}
+
+	it('renders the reason above the button and points aria-describedby at it', () => {
+		const out = html({ disabled: true, reason: 'A colleague must approve this.', reasonId: 'why-1' });
+		const note = out.indexOf('id="why-1"');
+		const btn = out.indexOf('<button');
+		expect(note).toBeGreaterThanOrEqual(0);
+		expect(note).toBeLessThan(btn);
+		expect(out).toContain('A colleague must approve this.');
+		expect(button({ disabled: true, reason: 'x', reasonId: 'why-1' })).toMatch(
+			/aria-describedby="why-1"/
+		);
+	});
+
+	it('generates a note id when none is given, and keeps an explicit describedby', () => {
+		const out = html({ disabled: true, reason: 'x', describedby: 'other' });
+		const id = out.match(/<span[^>]*\bid="([^"]+)"/)?.[1];
+		expect(id).toBeTruthy();
+		// Read from the same render: a second render may mint a different id.
+		const tag = out.match(/<button\b[^>]*>/)?.[0] ?? '';
+		expect(tag).toContain(`aria-describedby="${id} other"`);
+	});
+
+	it('renders no note and no describedby without a reason', () => {
+		const out = html({ disabled: true });
+		expect(out).not.toContain('refusal-note');
+		expect(button({ disabled: true })).not.toMatch(/aria-describedby/);
+	});
+});
