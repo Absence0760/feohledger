@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.models.invoice import InvoiceStatus
 from app.services.exception_agents.base import ACTION_AUTO_RESOLVED, AgentEvaluation
 from app.services.exception_agents.coordinator import run_agent
 
@@ -96,6 +97,10 @@ async def test_actor_roles_threaded_into_resolver_apply():
         # is payment-blocking, so the queue segregation check reads it.
         uploaded_by_id=None,
         segregation_actor_ids=None,
+        # The post-apply refusals (PO over-billing §469, contract cap §472)
+        # read the refreshed status and warnings, which a real row carries.
+        status=InvoiceStatus.ready_for_review,
+        warnings=[],
     )
     db = _mock_db(exc, invoice)
 
@@ -168,6 +173,10 @@ async def test_missing_actor_roles_fails_closed_to_escalation():
         # is payment-blocking, so the queue segregation check reads it.
         uploaded_by_id=None,
         segregation_actor_ids=None,
+        # The post-apply refusals (PO over-billing §469, contract cap §472)
+        # read the refreshed status and warnings, which a real row carries.
+        status=InvoiceStatus.ready_for_review,
+        warnings=[],
     )
     db = _mock_db(exc, invoice)
 

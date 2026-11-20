@@ -194,20 +194,50 @@ def test_token_response_schema_has_no_password_field():
 
 
 # ---------------------------------------------------------------------------
-# Request schema enforces server-side minimum even if client misbehaves
+# The length rule is the complexity validator's, not the schema's.
+#
+# A schema `min_length` answered a short password with pydantic's English
+# error list before the handler ran, so `password_too_short` — the coded
+# refusal the client localizes, with its `min_length` figure — was unreachable
+# on every employee route. The handler always calls the validator (pinned
+# below and by the realdb reset test), so the server still refuses it.
 # ---------------------------------------------------------------------------
 
 
-def test_change_password_request_rejects_short_new_password_at_schema_level():
-    """Pydantic catches a too-short new_password before the handler
-    runs — a defence-in-depth against a buggy client that calls the
-    endpoint with a 6-char value."""
-    import pydantic
+@pytest.mark.parametrize(
+    ("model", "field"),
+    [
+        ("ChangePasswordRequest", "new_password"),
+        ("ResetPasswordRequest", "new_password"),
+        ("UpdateProfileRequest", "password"),
+    ],
+)
+def test_password_schemas_leave_the_length_rule_to_the_coded_validator(model, field):
+    from app.schemas import auth as schemas
 
-    from app.schemas.auth import ChangePasswordRequest
+    meta = getattr(schemas, model).model_fields[field].metadata
+    assert not any(hasattr(m, "min_length") for m in meta), (
+        f"{model}.{field} declares a min_length, which pre-empts the coded "
+        "password_too_short refusal with pydantic's English list"
+    )
 
-    with pytest.raises(pydantic.ValidationError):
-        ChangePasswordRequest(current_password="anything", new_password="short1A")
+
+@pytest.mark.asyncio
+async def test_a_short_password_is_the_coded_too_short_refusal():
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.api.auth import _apply_new_password
+    from app.utils.passwords import MIN_LENGTH
+
+    user = SimpleNamespace(hashed_password="old", must_change_password=False)
+    with pytest.raises(HTTPException) as exc:
+        await _apply_new_password(user, "Short1A")
+    assert exc.value.status_code == 422
+    assert exc.value.detail["code"] == "password_too_short"
+    assert exc.value.detail["params"] == {"min_length": MIN_LENGTH}
+    assert user.hashed_password == "old"
 
 
 def test_change_password_request_accepts_complex_password_at_schema_level():
@@ -230,25 +260,13 @@ def test_change_password_request_accepts_complex_password_at_schema_level():
 # ---------------------------------------------------------------------------
 
 
-def test_update_profile_request_rejects_short_password_at_schema_level():
-    import pydantic
-
-    from app.schemas.auth import UpdateProfileRequest
-
-    with pytest.raises(pydantic.ValidationError):
-        UpdateProfileRequest(password="Short1A", current_password="whatever")
-
-
 def test_update_profile_request_bounds_match_change_password():
     """Pinned together on purpose — the two routes set the same credential."""
     from app.schemas.auth import ChangePasswordRequest, UpdateProfileRequest
 
     def _bounds(model, field):
         meta = model.model_fields[field].metadata
-        return (
-            next(getattr(m, "min_length") for m in meta if hasattr(m, "min_length")),
-            next(getattr(m, "max_length") for m in meta if hasattr(m, "max_length")),
-        )
+        return next(getattr(m, "max_length") for m in meta if hasattr(m, "max_length"))
 
     assert _bounds(UpdateProfileRequest, "password") == _bounds(
         ChangePasswordRequest, "new_password"

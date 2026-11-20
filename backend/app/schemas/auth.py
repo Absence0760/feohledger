@@ -21,7 +21,7 @@ class ForgotPasswordResponse(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str = Field(..., min_length=1)
-    new_password: str = Field(..., min_length=12, max_length=128)
+    new_password: str = Field(..., max_length=128)
 
 
 class ResetPasswordCheckRequest(BaseModel):
@@ -262,12 +262,12 @@ class MFAEmailChallengeRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
     # Same bounds as `ChangePasswordRequest.new_password` — this field sets the
-    # account password through the identical code path, and a laxer `min_length`
-    # here let a 6-character password past the schema before the complexity
-    # policy (min 12) was ever consulted. The route runs
-    # `validate_password_complexity` regardless; matching the bounds keeps the
-    # 422 shape consistent between the two self-service routes.
-    password: str | None = Field(default=None, min_length=12, max_length=128)
+    # account password through the identical code path. No `min_length`: the
+    # length rule belongs to `validate_password_complexity` (`MIN_LENGTH`),
+    # whose coded `password_too_short` refusal the client localizes. A schema
+    # `min_length` answered first, with pydantic's English list, so the page
+    # never saw the code.
+    password: str | None = Field(default=None, max_length=128)
     current_password: str | None = Field(default=None, min_length=1)
     # Email-language preference. Validated against the supported locale set at
     # the route (422 on an unknown value); empty string clears it (→ English).
@@ -276,7 +276,7 @@ class UpdateProfileRequest(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str = Field(..., min_length=1)
-    new_password: str = Field(..., min_length=12, max_length=128)
+    new_password: str = Field(..., max_length=128)
 
 
 class SessionResponse(BaseModel):
