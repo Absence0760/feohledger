@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/semantics.dart' show SemanticsAction;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1592,12 +1593,24 @@ void main() {
       await tester.tap(find.text('Runs'));
       await tester.pump();
       await _pumpUntil(tester, find.byType(PopupMenuButton<String>));
+      // Let the tab slide in: mid-transition the Runs pane is still off
+      // screen, its nodes are hidden and carry no actions.
+      await tester.pumpAndSettle();
 
-      // The row still reads as one phrase…
+      // The row still reads as one phrase, and only its own phrase: a
+      // non-boundary `Semantics(label:)` on the menu leaked "Run actions"
+      // into the row's node instead of labelling the button.
       expect(find.bySemanticsLabel(RegExp(r'^Run .*Draft')), findsOneWidget);
-      // …and the trailing menu is its own node a screen reader can reach.
-      // Wrapping the whole ListTile in `excludeSemantics` dropped it.
-      expect(find.bySemanticsLabel(RegExp(r'^Run actions')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp(r'Draft.*Run actions', dotAll: true)),
+          findsNothing);
+      // …and the trailing menu is its own node a screen reader can reach,
+      // carrying the tap that opens it. Wrapping the whole ListTile in
+      // `excludeSemantics` dropped it.
+      final menu = find.bySemanticsLabel(RegExp(r'^Run actions$'));
+      expect(menu, findsOneWidget);
+      final menuData = tester.getSemantics(menu).getSemanticsData();
+      expect(menuData.hasAction(SemanticsAction.tap), isTrue);
+      expect(menuData.flagsCollection.isButton, isTrue);
       await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));
       handle.dispose();
     });

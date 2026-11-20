@@ -764,12 +764,18 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
         PopupMenuItem(value: 'record', child: Text(l.payRunActionRecord)),
     ];
     if (items.isEmpty) return null;
-    return Semantics(
-      label: l.payRunActions,
-      button: true,
-      child: PopupMenuButton<String>(
-        onSelected: (v) => _runMenuAction(run, v),
-        itemBuilder: (_) => items,
+    // MergeSemantics makes the label and the menu button ONE node. A bare
+    // `Semantics(label:)` is not a semantics boundary, so its label bubbled
+    // up into the ListTile's own node (the row read "… Run actions") while
+    // the tappable button underneath was announced only as "Show menu".
+    return MergeSemantics(
+      child: Semantics(
+        label: l.payRunActions,
+        button: true,
+        child: PopupMenuButton<String>(
+          onSelected: (v) => _runMenuAction(run, v),
+          itemBuilder: (_) => items,
+        ),
       ),
     );
   }
