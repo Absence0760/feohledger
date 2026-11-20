@@ -326,6 +326,10 @@ CLOSURE_ALLOWED: dict[str, str] = {
     "sanctions_checks": (
         "Screening results; evidence that matters once a payment exists, which blocks."
     ),
+    "sanctions_adjudications": (
+        "Reviewers' false-positive judgements on those screening results; like them, "
+        "evidence that matters once a payment exists, which blocks."
+    ),
     "notifications": "In-app notifications.",
     "assistant_conversations": "Assistant chat history.",
     "assistant_messages": "Assistant chat history.",
