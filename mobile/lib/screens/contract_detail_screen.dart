@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import 'package:feohledger_mobile/api/endpoints.dart';
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/contract.dart';
@@ -217,7 +218,7 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
           // Details
           _detailRow(l.contractDetailFieldContractNumber, c.contractNumber),
           _detailRow(l.contractDetailFieldVendor, c.vendorName),
-          _detailRow(l.contractDetailFieldType, c.contractType.label),
+          _detailRow(l.contractDetailFieldType, contractTypeLabel(l, c.contractType)),
           _detailRow(l.contractDetailFieldCurrency, c.currency),
           _detailRow(
             l.contractDetailFieldSpendLimit,

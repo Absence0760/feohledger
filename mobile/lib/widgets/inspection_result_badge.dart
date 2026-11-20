@@ -21,7 +21,7 @@ String inspectionResultLabel(AppLocalizations l, InspectionResult result) =>
     };
 
 /// Outcome chip for a quality inspection: the localized outcome in a
-/// [StatusPill], announced as "Result: <outcome>".
+/// [StatusPill], announced as "Result: `<outcome>`".
 class InspectionResultBadge extends StatelessWidget {
   final InspectionResult result;
 

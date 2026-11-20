@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/load_error_messages.dart';
 import 'package:feohledger_mobile/models/payment.dart';
@@ -67,8 +68,8 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     return Semantics(
       label:
           '$amount, '
-          '${p.method.label}, $reference, '
-          '${_statusLabel(l, p.status)}',
+          '${paymentMethodLabel(l, p.method)}, $reference, '
+          '${paymentStatusLabel(l, p.status)}',
       excludeSemantics: true,
       child: ListTile(
         leading: _methodIcon(p.method),
@@ -76,7 +77,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
           amount,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
-        subtitle: Text('${p.method.label} • $reference'),
+        subtitle: Text('${paymentMethodLabel(l, p.method)} • $reference'),
         trailing: _statusChip(l, p.status),
       ),
     );
@@ -94,15 +95,6 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       child: Icon(icon, color: color, size: 20),
     );
   }
-
-  String _statusLabel(AppLocalizations l, PaymentStatus status) =>
-      switch (status) {
-        PaymentStatus.pending => l.paymentStatusPending,
-        PaymentStatus.processing => l.paymentStatusProcessing,
-        PaymentStatus.completed => l.paymentStatusCompleted,
-        PaymentStatus.failed => l.paymentStatusFailed,
-        PaymentStatus.cancelled => l.paymentStatusCancelled,
-      };
 
   Widget _statusChip(AppLocalizations l, PaymentStatus status) {
     // Tint drives the background/border; text uses a darkened variant so the
@@ -123,7 +115,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        _statusLabel(l, status),
+        paymentStatusLabel(l, status),
         style: TextStyle(
           color: textColor,
           fontSize: 12,
