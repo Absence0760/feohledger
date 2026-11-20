@@ -376,12 +376,36 @@ no normal pass/fail summary, matching the intended "diagnose, then die" shape.
 Most of the suite is mock-based. Tests that request the `realdb` fixture
 (`tests/conftest.py`) run against a live Postgres and a **pair of real tenant
 databases** — the only way to prove cross-tenant isolation, the SQL filters, and
-commit durability. Before each such test the harness truncates the tenant
+commit durability. Before each such test the harness empties the tenant
 business tables, restores the Default entity, resets the shared control-plane
 `Organization` row, and reaps every other backend on those databases.
 
+**The tenant reset DELETEs only the tables that hold a row; it does not
+TRUNCATE.** `_reset_tenant_tables` (`tests/conftest.py`) asks every tenant table
+`EXISTS (SELECT 1 …)` in one round trip and runs a plain `DELETE` on each
+non-empty one, inside a transaction-local `session_replication_role = replica`
+(FK triggers and the append-only `audit_log_no_delete` trigger off, so delete
+order doesn't matter and `audit_log` can be cleared; TRUNCATE never fired them
+either). It used to be one `TRUNCATE <all ~70 tenant tables> RESTART IDENTITY
+CASCADE`. That gives every table, index and TOAST table a new relfilenode, and
+Postgres fsyncs each freshly built empty index on the spot
+(`DataFileImmediateSync`), so the cost scaled with the schema, not with what the
+test wrote. The "before" profile (32 realdb tests, four files, dev laptop) showed the
+per-test reset dominating setup; the after-figures were not recorded before
+the round closed, so CI's shard times are the comparison. Rules that follow from it:
+
+- It needs the privilege to set `session_replication_role` (superuser, as the
+  Compose and CI `postgres` user is). Without it the reset falls back to the
+  old whole-schema TRUNCATE: slower, never wrong.
+- No tenant table may own a sequence: DELETE has no counterpart to RESTART
+  IDENTITY. If one is ever added, make the reset restart it;
+  `tests/test_realdb_reset.py` fails until then. The same file pins the
+  baseline (every tenant table empty but the one Default entity), that a write
+  to any table, `audit_log` included, is gone after a reset, and that every
+  physical table in a tenant DB is one the reset probes.
+
 **The tenant pair is exclusive to one pytest process.** Because the reset both
-TRUNCATEs and `pg_terminate_backend`s, two pytest runs sharing a pair delete each
+empties the tables and `pg_terminate_backend`s, two pytest runs sharing a pair delete each
 other's rows and kill each other's connections — which surfaces as
 `asyncpg.ConnectionDoesNotExistError` / `ConnectionResetError` in whatever
 unrelated file happened to be mid-query, i.e. as flakiness rather than as the
@@ -456,7 +480,7 @@ the orgs' sealed provider credentials and the seeded users' second factors
 leave every later test facing an account that had a factor), and — **on teardown, not setup** — the control-plane billing rows: every
 `Subscription` its own orgs hold, and every `Plan` that is not one of
 `DEFAULT_PLAN_CATALOG`'s tiers (`_reset_control_billing`). Those two tables live
-in the slot's control-plane database, which the per-test TRUNCATE never reaches
+in the slot's control-plane database, which the per-test tenant reset never reaches
 and `_rebuild_pytest_schema` clears only once per session, so a throwaway plan
 stayed visible to every later test in the run — and `GET /api/billing/plans` is
 a catalogue listing, so that is observable rather than inert. Six billing files
