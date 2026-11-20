@@ -382,6 +382,16 @@ class AppLocalizationsPt extends AppLocalizations {
   String get vendorRejected => 'Fornecedor rejeitado';
 
   @override
+  String vendorRejectConfirmTitle(String name) {
+    return 'Rejeitar $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name será marcado como rejeitado. Todos os cartões virtuais ativos emitidos para ele serão cancelados.';
+  }
+
+  @override
   String vendorCardsNotClosed(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -5416,6 +5426,16 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get vendorRejected => 'Fornecedor rejeitado';
+
+  @override
+  String vendorRejectConfirmTitle(String name) {
+    return 'Rejeitar $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name será marcado como rejeitado. Todos os cartões virtuais ativos emitidos para ele serão cancelados.';
+  }
 
   @override
   String vendorCardsNotClosed(int count) {

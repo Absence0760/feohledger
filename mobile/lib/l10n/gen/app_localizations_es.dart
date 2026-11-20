@@ -381,6 +381,16 @@ class AppLocalizationsEs extends AppLocalizations {
   String get vendorRejected => 'Proveedor rechazado';
 
   @override
+  String vendorRejectConfirmTitle(String name) {
+    return '¿Rechazar a $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name se marcará como rechazado. Se cancelarán todas las tarjetas virtuales activas emitidas a su nombre.';
+  }
+
+  @override
   String vendorCardsNotClosed(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

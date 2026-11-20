@@ -738,6 +738,18 @@ abstract class AppLocalizations {
   /// **'Vendor rejected'**
   String get vendorRejected;
 
+  /// No description provided for @vendorRejectConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reject {name}?'**
+  String vendorRejectConfirmTitle(String name);
+
+  /// Confirm dialog before rejecting a vendor. The server cancels the vendor's live virtual cards on reject.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} will be marked rejected. Any live virtual cards issued to it will be cancelled.'**
+  String vendorRejectConfirmBody(String name);
+
   /// No description provided for @vendorCardsNotClosed.
   ///
   /// In en, this message translates to:

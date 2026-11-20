@@ -381,6 +381,16 @@ class AppLocalizationsDe extends AppLocalizations {
   String get vendorRejected => 'Lieferant abgelehnt';
 
   @override
+  String vendorRejectConfirmTitle(String name) {
+    return '$name ablehnen?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name wird als abgelehnt markiert. Alle aktiven virtuellen Karten dieses Lieferanten werden storniert.';
+  }
+
+  @override
   String vendorCardsNotClosed(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

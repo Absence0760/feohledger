@@ -258,6 +258,101 @@ void main() {
     );
   });
 
+  // Reject is accepted on an ACTIVE vendor and the server cancels its live
+  // virtual cards, so neither a stray sideways swipe nor a sheet tap may
+  // reject without a confirm that names the vendor.
+  group('Reject confirms first', () {
+    Future<List<String>> pumpActive(WidgetTester tester) async {
+      final posted = <String>[];
+      await loginThen(
+        ['ap_manager'],
+        MockClient((req) async {
+          if (req.method == 'POST') {
+            posted.add(req.url.path);
+            return _json(_vendorJson('1', status: 'rejected'));
+          }
+          return _list(
+            posted.isEmpty
+                ? [_vendorJson('1', status: 'active')]
+                : [_vendorJson('1', status: 'rejected')],
+          );
+        }),
+      );
+      await tester.pumpWidget(_localized(const VendorsScreen()));
+      await _pumpUntil(tester, find.byType(VendorListTile));
+      return posted;
+    }
+
+    Future<void> swipeLeft(WidgetTester tester) async {
+      await tester.drag(find.byType(Dismissible), const Offset(-600, 0));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a swipe asks first, naming the vendor and its cards', (
+      tester,
+    ) async {
+      final posted = await pumpActive(tester);
+      await swipeLeft(tester);
+
+      expect(find.text('Reject Vendor 1?'), findsOneWidget);
+      expect(
+        find.text(
+          'Vendor 1 will be marked rejected. Any live virtual cards issued '
+          'to it will be cancelled.',
+        ),
+        findsOneWidget,
+      );
+      expect(posted, isEmpty, reason: 'nothing is sent before the confirm');
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Reject'));
+      await _pumpUntilTrue(tester, () => posted.isNotEmpty);
+      expect(posted, ['/api/vendors/1/reject']);
+    });
+
+    testWidgets('cancelling the swipe confirm sends nothing and keeps the row',
+        (tester) async {
+      final posted = await pumpActive(tester);
+      await swipeLeft(tester);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reject Vendor 1?'), findsNothing);
+      expect(posted, isEmpty);
+      expect(find.byType(VendorListTile), findsOneWidget);
+      expect(find.text('Vendor 1'), findsOneWidget);
+    });
+
+    testWidgets('the sheet Reject asks first too', (tester) async {
+      final posted = await pumpActive(tester);
+      await tester.tap(find.byType(VendorListTile));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, 'Reject'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Reject Vendor 1?'), findsOneWidget);
+      expect(posted, isEmpty);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Reject'));
+      await _pumpUntilTrue(tester, () => posted.isNotEmpty);
+      expect(posted, ['/api/vendors/1/reject']);
+    });
+
+    testWidgets('cancelling the sheet confirm sends nothing', (tester) async {
+      final posted = await pumpActive(tester);
+      await tester.tap(find.byType(VendorListTile));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, 'Reject'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pumpAndSettle();
+
+      expect(posted, isEmpty);
+      expect(find.byType(VendorListTile), findsOneWidget);
+    });
+  });
+
   // Verify / Reject are offered from the row's `status_actions`, never from
   // the reader's role or the vendor's status.
   group('Verify / Reject verdicts', () {

@@ -176,6 +176,23 @@
   "vendorRejectHint": "Mark as invalid / duplicate",
   "vendorVerified": "Vendor verified",
   "vendorRejected": "Vendor rejected",
+  "vendorRejectConfirmTitle": "Reject {name}?",
+  "@vendorRejectConfirmTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "vendorRejectConfirmBody": "{name} will be marked rejected. Any live virtual cards issued to it will be cancelled.",
+  "@vendorRejectConfirmBody": {
+    "description": "Confirm dialog before rejecting a vendor. The server cancels the vendor's live virtual cards on reject.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "vendorCardsNotClosed": "{count, plural, one {{count} virtual card could not be cancelled at the card provider and is still live. Retry from the web app.} other {{count} virtual cards could not be cancelled at the card provider and are still live. Retry from the web app.}}",
   "@vendorCardsNotClosed": {
     "placeholders": {

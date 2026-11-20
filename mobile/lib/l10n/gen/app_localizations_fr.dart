@@ -383,6 +383,16 @@ class AppLocalizationsFr extends AppLocalizations {
   String get vendorRejected => 'Fournisseur rejeté';
 
   @override
+  String vendorRejectConfirmTitle(String name) {
+    return 'Rejeter $name ?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name sera marqué comme rejeté. Toutes les cartes virtuelles actives émises à son nom seront annulées.';
+  }
+
+  @override
   String vendorCardsNotClosed(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
