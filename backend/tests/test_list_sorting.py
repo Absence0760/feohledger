@@ -38,6 +38,7 @@ async def test_invoices_sort_by_amount_ascending(realdb):
                     invoice_number=f"INV-SORT-{amt}",
                     vendor_name="Sort Co",
                     amount=Decimal(amt),
+                    currency="USD",
                     status=InvoiceStatus.new,
                 )
             )
@@ -71,6 +72,7 @@ async def test_invoices_sort_id_tiebreak_keeps_pagination_stable(realdb):
                 invoice_number=f"INV-TIE-{i}",
                 vendor_name="Tie Co",
                 amount=Decimal("50.00"),
+                currency="USD",
                 status=InvoiceStatus.new,
             )
             s.add(inv)
@@ -132,6 +134,7 @@ async def test_payments_sort_by_amount_ascending(realdb):
                 invoice_number=f"INV-PAY-{amt}",
                 vendor_name="Pay Co",
                 amount=Decimal(amt),
+                currency="USD",
                 status=InvoiceStatus.paid,
             )
             s.add(inv)

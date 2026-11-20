@@ -49,6 +49,7 @@ def _invoice(status: str) -> Invoice:
         invoice_number=f"INV-{status}",
         vendor_name="Vendor",
         status=status,
+        currency="USD",
     )
 
 

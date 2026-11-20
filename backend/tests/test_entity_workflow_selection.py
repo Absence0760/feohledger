@@ -84,6 +84,7 @@ def _invoice(org_id: uuid.UUID, entity_id: uuid.UUID | None, number: str) -> Inv
         invoice_number=number,
         vendor_name="Vendor",
         amount=Decimal("100.00"),
+        currency="USD",
         organization_id=org_id,
         entity_id=entity_id,
     )

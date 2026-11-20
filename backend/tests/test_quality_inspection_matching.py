@@ -77,6 +77,7 @@ async def _make_invoice(session, org_id, entity_id, *, amount="100.00"):
         invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
         vendor_name="Acme",
         amount=Decimal(amount),
+        currency="USD",
         po_number="PO-INSP-1",
         organization_id=org_id,
         entity_id=entity_id,

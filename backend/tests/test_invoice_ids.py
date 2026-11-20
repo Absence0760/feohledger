@@ -28,6 +28,7 @@ async def _add_invoices(mk, org_id, status: InvoiceStatus, n: int, *, vendor="Ac
                 invoice_number=f"INV-{status.value}-{vendor}-{i}",
                 vendor_name=vendor,
                 amount=Decimal("100.00"),
+                currency="USD",
                 status=status,
             )
             s.add(inv)

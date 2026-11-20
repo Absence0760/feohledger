@@ -226,12 +226,14 @@ async def test_find_semantic_duplicates_pgvector_discriminates_and_excludes_self
             invoice_number="INV-700",
             vendor_name="Acme",
             amount=Decimal("12480.00"),
+            currency="USD",
         )
         other_inv = Invoice(
             organization_id=org_id,
             invoice_number="INV-900",
             vendor_name="Globex",
             amount=Decimal("42.00"),
+            currency="USD",
         )
         s.add_all([dup_inv, other_inv])
         await s.flush()

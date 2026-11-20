@@ -31,6 +31,7 @@ async def _seed_invoice_with_trail(mk, org_id) -> tuple[uuid.UUID, uuid.UUID]:
                 invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
                 vendor_name="Acme",
                 amount=Decimal("100.00"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
         )

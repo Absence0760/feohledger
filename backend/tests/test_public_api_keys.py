@@ -97,6 +97,7 @@ async def _seed_invoice(mk, org_id, *, number: str) -> uuid.UUID:
                 invoice_number=number,
                 vendor_name="Acme",
                 amount=Decimal("123.45"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
         )

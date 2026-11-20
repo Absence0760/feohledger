@@ -84,6 +84,7 @@ async def _seed_invoice(
             invoice_number=number,
             vendor_name="x",
             amount=Decimal("100.00"),
+            currency="USD",
             vendor_id=vendor_id,
             status=status,
             approved_by="Original Approver" if approved else None,

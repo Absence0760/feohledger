@@ -63,6 +63,7 @@ async def _add_terminal_invoice(mk, org_id, *, created_at) -> uuid.UUID:
             invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
             vendor_name="Acme",
             amount=Decimal("10.00"),
+            currency="USD",
             status=InvoiceStatus.done,
         )
         s.add(inv)

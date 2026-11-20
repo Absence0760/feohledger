@@ -26,6 +26,7 @@ async def _add_invoice(mk, org_id, *, number="INV-SUM-1") -> tuple[str, uuid.UUI
             invoice_number=number,
             vendor_name="Acme Hosting",
             amount=Decimal("4200.00"),
+            currency="USD",
             status=InvoiceStatus.approved,
         )
         s.add(inv)

@@ -483,13 +483,12 @@ def test_the_round_trip_still_passes_the_whole_check():
 # ---------------------------------------------------------------------------
 
 
-def _orm_invoice(**overrides) -> Invoice:
+def _orm_invoice(*, currency: str = "EUR", **overrides) -> Invoice:
     kwargs = dict(
         invoice_number="INV-2026-0001",
         vendor_name="Lieferant GmbH",
         vendor_tax_id=_SELLER_VAT,
         amount=Decimal("119.00"),
-        currency="EUR",
         invoice_date=date(2026, 1, 15),
         due_date=date(2026, 2, 15),
         subtotal=Decimal("100.00"),
@@ -498,7 +497,7 @@ def _orm_invoice(**overrides) -> Invoice:
         payment_method="ach",
     )
     kwargs.update(overrides)
-    return Invoice(**kwargs)
+    return Invoice(currency=currency, **kwargs)
 
 
 _BUYER = BuyerIdentity(

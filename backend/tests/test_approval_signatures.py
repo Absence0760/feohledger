@@ -335,6 +335,7 @@ async def _seed_signed_approval(
                 invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
                 vendor_name="Acme",
                 amount=amount,
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
         )
@@ -484,6 +485,7 @@ async def test_real_approval_flow_signs_and_verifies(realdb, monkeypatch):
                 invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
                 vendor_name="Acme",
                 amount=Decimal("777.77"),
+                currency="USD",
                 status=InvoiceStatus.ready_for_review,
             )
         )
@@ -728,6 +730,7 @@ async def _seed_corrupt_approval(mk, org_id, *, actor_id: uuid.UUID, details) ->
                 invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
                 vendor_name="Acme",
                 amount=Decimal("8.00"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
         )

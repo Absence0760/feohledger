@@ -422,6 +422,7 @@ async def test_delete_vendor_with_business_history_is_refused(realdb, mk):
                 invoice_number="INV-DEL-1",
                 vendor_name="Has Invoices Co",
                 amount=Decimal("100.00"),
+                currency="USD",
                 status=InvoiceStatus.new,
                 organization_id=org_id,
                 entity_id=ent,

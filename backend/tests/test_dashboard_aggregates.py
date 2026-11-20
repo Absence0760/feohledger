@@ -57,12 +57,11 @@ async def _default_entity_id(s):
     return (await s.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
 
 
-def _inv(org_id, ent, **kw) -> Invoice:
+def _inv(org_id, ent, *, currency="USD", **kw) -> Invoice:
     kw.setdefault("invoice_number", f"DA-{uuid.uuid4().hex[:8]}")
     kw.setdefault("vendor_name", "Dashboard Aggregates Co")
     kw.setdefault("amount", _USD_FACE)
-    kw.setdefault("currency", "USD")
-    return Invoice(organization_id=org_id, entity_id=ent, **kw)
+    return Invoice(organization_id=org_id, entity_id=ent, currency=currency, **kw)
 
 
 # ---------------------------------------------------------------------------

@@ -515,6 +515,7 @@ async def test_results_not_enough_then_winner(realdb):
                 invoice_number=f"EXP-{i}",
                 vendor_name="V",
                 amount=Decimal("500"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
             s.add(inv)
@@ -590,6 +591,7 @@ async def test_assignment_at_invoice_creation_freezes_variant_snapshot(realdb):
             invoice_number="HOOK-1",
             vendor_name="V",
             amount=Decimal("500"),
+            currency="USD",
             status=InvoiceStatus.new,
         )
         s.add(inv)
@@ -700,6 +702,7 @@ async def test_concurrent_assignment_does_not_lose_an_entry(realdb):
                 invoice_number=f"RACE-{inv_id.hex[:8]}",
                 vendor_name="V",
                 amount=Decimal("500"),
+                currency="USD",
                 status=InvoiceStatus.new,
             )
             s.add(inv)
@@ -800,6 +803,7 @@ async def _experiment_with_one_assignment(realdb, mk, org_id) -> str:
             invoice_number=f"EXPFREEZE-{uuid.uuid4().hex[:6]}",
             vendor_name="V",
             amount=Decimal("500"),
+            currency="USD",
             status=InvoiceStatus.new,
         )
         s.add(inv)
