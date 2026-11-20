@@ -254,6 +254,7 @@ Migrations may target either the control plane or tenant DBs — never both. Eac
 | 0134     | Tenant  | `expenses` | Adds `created_by_user_id` uuid (nullable, no FK: a control-plane id in a tenant table, like `invoices.uploaded_by_id`): who created the expense line, so a line on no report has an owner and only its creator may edit it or put it on a report. Stamped by every path that creates an expense for a signed-in employee (`tests/test_expense_creator_stamping.py`). No backfill: existing rows stay NULL, read as "no recorded creator" under the legacy rules (decisions §141, §434). `ADD COLUMN IF NOT EXISTS`; gated on `expenses` existing, so a no-op on the control plane. |
 | 0135     | Control | `organizations` / `provider_credentials` | Data only. Moves the two credentials 0110 left as plain JSONB — a bring-your-own-key extraction org's `settings.extraction.api_key` / `aws_secret_access_key` and the OIDC `settings.sso.client_secret` — into sealed `provider_credentials` rows (blocks `extraction`, `sso`) and strips them from the JSONB; for `sso` it writes the `client_secret_configured: true` marker the sign-in completeness check reads. A value already sealed for the same path wins. Gated on `organizations` like 0110, so a no-op on every tenant DB; a KMS error raises and rolls back, leaving every secret where it was; idempotent. Downgrade opens the rows back into the JSONB (plaintext again) and deletes them. `tests/test_provider_credentials.py` |
 | 0136     | Tenant  | `invoices` | `currency` drops NOT NULL: NULL is the one spelling of "currency unknown", which the upload and the supplier-portal submit now create rows with until extraction reads a code. Every value blank after trimming whitespace (the pre-round-17 PATCH sentinel) becomes NULL. No code is backfilled or removed: a row the old upload stamped USD cannot be told from a real USD (decisions §141, §473). Gated on `invoices` existing, so a no-op on the control plane; idempotent. Downgrade writes `""` into every NULL and restores NOT NULL. `tests/test_migration_0136_invoice_currency_null.py` |
+| 0137     | Tenant  | `invoices` | Adds the non-unique index `ix_invoices_po_number` (also `index=True` on the model, so `create_all` builds it under the same name). The budget PO-relief join (`budget_service._invoice_po_attribution`, on `GET /budgets/check`) narrows invoices by `po_number IN (...)`; the PO detail's invoice list, the portal flip guard and "already invoiced" check, `invoice_warnings.invoices_citing_pos` and the enrichment on-time proxy filter or join on it too. Plain `CREATE INDEX IF NOT EXISTS` in the migration transaction, as 0092/0132 do. Shape pinned by `tests/test_invoice_po_number_index.py`; no latency was measured. |
 
 > Migration 0022 may need renumbering or a merge revision at integration time — sibling features built on parallel branches may also claim `0022` (all branch off `0021_scim_bearer_hash`).
 
@@ -278,7 +279,14 @@ it deliberately does *not* improve) is in
 [`procurement-budgets.md`](procurement-budgets.md) § Index coverage on the four
 dimensions.
 
-Both revisions gate on the `invoices` table existing, so they no-op on the
+`po_number` is indexed for a related budget read: the PO-relief leg of
+`committed` joins invoices to the budgets' converted POs on it
+(`_invoice_po_attribution`). Migration `0073` indexed only
+`purchase_orders.po_number`; `0137_invoice_po_number_index` adds
+`ix_invoices_po_number`. Its plan test shows the relief predicate is an
+`Index Cond` on it; the real-volume latency was not measured.
+
+All these revisions gate on the `invoices` table existing, so they no-op on the
 control plane and fan out to every tenant DB via
 `scripts/migrate_all_tenants.py`.
 
