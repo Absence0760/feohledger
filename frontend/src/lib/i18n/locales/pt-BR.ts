@@ -1373,6 +1373,8 @@ export const messages = {
 	'vendors.screening.queue.adjudication.cleared': 'Julgado como falso positivo em {date}',
 	'vendors.screening.queue.adjudication.adjudicated': 'Resultado da verificação julgado como falso positivo.',
 	'vendors.screening.queue.adjudication.revoked': 'Julgamento revogado. O resultado da verificação volta a reter o fornecedor.',
+	'vendors.screening.queue.adjudication.reasonHint': 'Pelo menos 3 caracteres.',
+	'vendors.screening.queue.adjudication.badge': 'Julgado',
 	'vendors.screening.queue.adjudication.failed': 'Não foi possível salvar o julgamento.',
 	'vendors.screening.queue.action.confirmUnblock': 'Confirmar desbloqueio',
 	'vendors.screening.queue.action.working': 'Processando…',

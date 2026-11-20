@@ -1369,6 +1369,8 @@ export const messages = {
 	'vendors.screening.queue.adjudication.cleared': 'Dictaminado como falso positivo el {date}',
 	'vendors.screening.queue.adjudication.adjudicated': 'Resultado de la evaluación dictaminado como falso positivo.',
 	'vendors.screening.queue.adjudication.revoked': 'Dictamen revocado. El resultado de la evaluación vuelve a retener al proveedor.',
+	'vendors.screening.queue.adjudication.reasonHint': 'Al menos 3 caracteres.',
+	'vendors.screening.queue.adjudication.badge': 'Dictaminado',
 	'vendors.screening.queue.adjudication.failed': 'No se pudo guardar el dictamen.',
 	'vendors.screening.queue.action.confirmUnblock': 'Confirmar desbloqueo',
 	'vendors.screening.queue.action.working': 'Procesando…',

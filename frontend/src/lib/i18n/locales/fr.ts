@@ -1372,6 +1372,8 @@ export const messages = {
 	'vendors.screening.queue.adjudication.cleared': 'Jugé faux positif le {date}',
 	'vendors.screening.queue.adjudication.adjudicated': 'Résultat de contrôle jugé faux positif.',
 	'vendors.screening.queue.adjudication.revoked': 'Décision révoquée. Le résultat de contrôle bloque à nouveau le fournisseur.',
+	'vendors.screening.queue.adjudication.reasonHint': 'Au moins 3 caractères.',
+	'vendors.screening.queue.adjudication.badge': 'Statué',
 	'vendors.screening.queue.adjudication.failed': 'Impossible d’enregistrer la décision.',
 	'vendors.screening.queue.action.confirmUnblock': 'Confirmer le déblocage',
 	'vendors.screening.queue.action.working': 'En cours…',
