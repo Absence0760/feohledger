@@ -1,7 +1,8 @@
 """Requisition approval refuses the requester AND every material editor.
 
 ``approve_requisition`` used to pass only ``requester_user_id`` to
-``check_segregation`` (``segregation_actor_ids=None``). ``PATCH
+``check_segregation`` (``segregation_actor_ids=None``); the check now lives in
+``procurement_controls.requisition_approve_refusal``. ``PATCH
 /api/requisitions/{id}`` lets any admin / ap_manager / ap_clerk rewrite another
 user's ``draft`` — lines, vendor, currency, budget — so the editor could then
 submit and approve the spend they had just written. That includes the
@@ -88,23 +89,53 @@ def _function(tree: ast.Module, name: str) -> ast.AsyncFunctionDef | ast.Functio
     raise AssertionError(f"{name} not found")
 
 
+def _calls(fn: ast.AST, name: str) -> list[ast.Call]:
+    return [
+        call
+        for call in ast.walk(fn)
+        if isinstance(call, ast.Call)
+        and (
+            (isinstance(call.func, ast.Name) and call.func.id == name)
+            or (isinstance(call.func, ast.Attribute) and call.func.attr == name)
+        )
+    ]
+
+
 def test_approve_shim_passes_the_editor_set():
     """Drop the kwarg or hardcode ``None`` and nothing fails loudly: the
     predicate reads "nobody beyond the requester" and the editor can approve
-    again — exactly the regression this column exists to close."""
-    tree = ast.parse((APP_ROOT / "api" / "requisitions.py").read_text())
-    approve = _function(tree, "approve_requisition")
-    shims = [
-        call.args[0]
-        for call in ast.walk(approve)
-        if isinstance(call, ast.Call)
-        and isinstance(call.func, ast.Name)
-        and call.func.id == "check_segregation"
-    ]
-    assert len(shims) == 1, "approve_requisition must call check_segregation exactly once"
-    shim = shims[0]
-    assert isinstance(shim, ast.Call)
-    kw = {k.arg: k.value for k in shim.keywords}
+    again — exactly the regression this column exists to close.
+
+    The approve endpoint asks the shared gate
+    (``procurement_controls.requisition_approve_refusal``) once, and that gate
+    hands ``violates_segregation`` exactly one shim, built with a real
+    ``segregation_actor_ids``. Both hops are pinned, so routing approve around
+    the gate fails here as surely as nulling the set inside it."""
+    api = ast.parse((APP_ROOT / "api" / "requisitions.py").read_text())
+    approve = _function(api, "approve_requisition")
+    gate_calls = _calls(approve, "requisition_approve_refusal")
+    assert len(gate_calls) == 1, "approve_requisition must ask requisition_approve_refusal once"
+    assert not _calls(approve, "check_segregation") and not _calls(
+        approve, "violates_segregation"
+    ), "approve_requisition must take segregation from the gate, not a second check"
+
+    controls = ast.parse((APP_ROOT / "services" / "procurement_controls.py").read_text())
+    gate = _function(controls, "requisition_approve_refusal")
+    checks = _calls(gate, "violates_segregation") + _calls(gate, "check_segregation")
+    assert len(checks) == 1, "requisition_approve_refusal must check segregation exactly once"
+    subject = checks[0].args[0]
+    if isinstance(subject, ast.Name):
+        # The shim is built into a local first; resolve that assignment.
+        assigned = [
+            node.value
+            for node in ast.walk(gate)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == subject.id for t in node.targets)
+        ]
+        assert len(assigned) == 1, f"the segregation subject {subject.id!r} must be assigned once"
+        subject = assigned[0]
+    assert isinstance(subject, ast.Call), "the segregation subject must be a constructed shim"
+    kw = {k.arg: k.value for k in subject.keywords}
     assert "segregation_actor_ids" in kw, "the shim must pass segregation_actor_ids"
     value = kw["segregation_actor_ids"]
     assert not (isinstance(value, ast.Constant) and value.value is None), (

@@ -604,18 +604,23 @@ async def replace_user(
 
     if not body.active:
         await _refuse_if_last_admin(db, org, user, operation="put")
-    user.email = email
     user.full_name = _extract_full_name(body.name, email)
     if body.externalId is not None:
         user.sso_provider_id = body.externalId
     user.is_active = body.active
     # Savepoint: a concurrent writer taking `email` after the check above trips
     # `uq_users_email_lower` (§475); answer the same 409 `uniqueness`, not a 500.
+    # The rename is assigned INSIDE it: `begin_nested()` first flushes whatever
+    # is already pending in the outer transaction, so a rename made before it
+    # would fail there and poison the session rather than the savepoint.
     try:
         async with db.begin_nested():
+            user.email = email
             await db.flush()
     except IntegrityError:
-        await _refuse_taken_username(db, org, email, exclude_user_id=user.id)
+        # `user_id`, not `user.id`: the savepoint's rollback expired `user`,
+        # and reading it would lazy-load outside the async context.
+        await _refuse_taken_username(db, org, email, exclude_user_id=user_id)
         raise
     # `_commit_user_change` reloads the row before we serialize — the same
     # `updated_at` onupdate-expiry guard as patch_user.
@@ -700,8 +705,6 @@ async def patch_user(
     if new_active is False:
         await _refuse_if_last_admin(db, org, user, operation="patch")
 
-    if new_email is not None:
-        user.email = new_email
     if new_active is not None:
         user.is_active = new_active
     if new_external_id is not None:
@@ -710,13 +713,16 @@ async def patch_user(
         user.full_name = new_full_name
 
     # Savepoint, as PUT: a rename that loses the race to `uq_users_email_lower`
-    # (§475) is the 409 `uniqueness`, not a 500.
+    # (§475) is the 409 `uniqueness`, not a 500. The rename is assigned inside
+    # it, as PUT, since `begin_nested()` flushes pending changes outside it.
     try:
         async with db.begin_nested():
+            if new_email is not None:
+                user.email = new_email
             await db.flush()
     except IntegrityError:
         if new_email is not None:
-            await _refuse_taken_username(db, org, new_email, exclude_user_id=user.id)
+            await _refuse_taken_username(db, org, new_email, exclude_user_id=user_id)
         raise
     # The UPDATE fires `updated_at`'s server-side `onupdate=func.now()`, which
     # SQLAlchemy then marks expired. `_commit_user_change` reloads it inside the

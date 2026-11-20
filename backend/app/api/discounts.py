@@ -200,13 +200,19 @@ DISCOUNT_OFFER_DECLINE_WINDOW_CLOSED = "discount_offer_decline_window_closed"
 def _accept_tier(offer: DiscountOffer, *, today: date, tier_days: int | None) -> dict | None:
     """The tier an accept would record: the named one while its window is
     open, else the best one still capturable today."""
-    reference = offers_svc.offer_reference_date(offer)
     if tier_days is not None:
         return offers_svc.select_tier_for_date(
-            offer.tiers or [], tier_days, today, offer.valid_until, reference_date=reference
+            offer.tiers or [],
+            tier_days,
+            today,
+            offer.valid_until,
+            reference_date=offers_svc.offer_reference_date(offer),
         )
     return offers_svc.best_tier_for_date(
-        offer.tiers or [], today, offer.valid_until, reference_date=reference
+        offer.tiers or [],
+        today,
+        offer.valid_until,
+        reference_date=offers_svc.offer_reference_date(offer),
     )
 
 
