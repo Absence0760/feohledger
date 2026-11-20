@@ -24131,7 +24131,9 @@ match stays cleared and a new or different hit (another entry, another list, a
   as clear, adverse-media hold included.
 - **The sticky `payments_blocked` flag is not lifted.** It may carry a manual
   reason and it is `vendor.block`'s to lift, so clearing a `match` takes two
-  signatures by default (adjudicator, then unblocker).
+  signatures (adjudicator, then unblocker). `admin` holds both permissions, so
+  `/unblock` refuses (403 `vendor_unblock_adjudicator`) the adjudicator of the
+  adjudication covering a stored `match`: the two signatures are two people.
 - **Permission `vendor.sanctions.adjudicate`, default admin + cfo.** Not
   `ap_manager`: that role onboards vendors, approves their bank details and
   executes runs, so clearing the sanctions hold too would put the whole payee
@@ -24149,12 +24151,40 @@ match stays cleared and a new or different hit (another entry, another list, a
   duplicate's adjudications on the duplicate: a judgement of one record's
   screen is not transferred.
 
+**Review fixes (same round).**
+
+- *The stamp covers the screen the reviewer saw.* The request carries
+  `sanctions_check_id` (the queue row's `latest_check_id`); under the vendor
+  row lock a different latest stored screen answers 409
+  `sanctions_adjudication_stale_screen`. The queue and `latest_stored_screen`
+  agree: both read the newest non-`pre_payment` check, since the dispatch
+  gate's rows do not update the vendor.
+- *Changed inputs owe a fresh judgement (bound by hash, chosen over "treat a
+  bank-change re-screen as uncovered").* Every screen stores
+  `raw_response.screened_inputs`, a sha256 over the name, tax id, bank country,
+  beneficial owners and the id of the latest applied bank change (never the
+  account number), and the fingerprint (scheme v2) includes it. A later
+  identity edit or bank change, by anyone including the adjudicator, makes the
+  same hit a new result, so segregation holds in both orders. The hash was
+  chosen because it also covers the live pre-payment screen and edits that
+  arrive by paths with no re-screen check type of their own (enrichment, ERP
+  sync); a check-type rule would have missed those and been undone by the next
+  periodic re-screen of unchanged-looking inputs.
+- *Revoking a `match` re-applies the match.* When the revoked row covered a
+  stored `match`, revoke sets the sticky block and closes the vendor's live
+  cards (`vendor_screening.apply_sanctions_match`) in the same transaction, so
+  a card issued while the stamp stood does not outlive it.
+- *No hidden adjudication.* Revoke ends every active row of the vendor, the
+  queue lists them all (`active_adjudications`), and the live screen honours
+  only the vendor's pointer row (`vendors.screening_adjudication_id`).
+
 **Rejected.** Rewriting `screening_status` to `clear` (the stored status would
 stop saying what the provider said); clearing by vendor rather than by result
 (a new hit would ride an old judgement); lifting the block in the same click.
 
-**Tests.** `test_sanctions_adjudication.py`, `test_permissions.py`,
-`test_sod_endpoint_wiring.py`, `test_vendor_merge.py`.
+**Tests.** `test_sanctions_adjudication.py`,
+`test_sanctions_adjudication_verdicts.py` (queue verdict ↔ endpoint parity),
+`test_permissions.py`, `test_sod_endpoint_wiring.py`, `test_vendor_merge.py`.
 
 ## 478. A white-label accent is derived per theme, not set per theme (closes the §289 accent-as-text followup; round 33, 2026-11-20)
 
