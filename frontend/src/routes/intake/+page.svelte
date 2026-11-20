@@ -53,6 +53,10 @@
 	// refusal those gates give is about the row's status or the reader's role,
 	// so a refused control is hidden rather than explained
 	// (`frontend/docs/ui-patterns.md` § Whether to offer an action).
+	// Creating a request and deleting a draft are not verdict-driven yet
+	// (docs/followups.md § Other pages still restate server predicates), so
+	// they keep the create roles `POST /api/intake` is gated on.
+	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk', 'cfo'));
 
 	let items = $state<IntakeRequest[]>([]);
 	let total = $state(0);
