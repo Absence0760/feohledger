@@ -155,7 +155,10 @@ test.describe('/vendors/screening false-positive adjudication', () => {
 	});
 
 	test('hidden: role_not_permitted offers no adjudication', async ({ page }) => {
-		const notPermitted = { code: 'role_not_permitted', message: 'Your role does not permit this action.' };
+		const notPermitted = {
+			code: 'role_not_permitted',
+			message: 'Your role does not permit this action.'
+		};
 		await mockQueue(page, () => [
 			item({ adjudicate_refusal: notPermitted, revoke_adjudication_refusal: notPermitted })
 		]);
@@ -171,7 +174,9 @@ test.describe('/vendors/screening false-positive adjudication', () => {
 		let queueReads = 0;
 		await page.route('**/api/vendors/screening/review-queue**', (route: Route) => {
 			queueReads += 1;
-			return route.fulfill({ json: { items: rows, total: rows.length, page: 1, page_size: 50 } });
+			return route.fulfill({
+				json: { items: rows, total: rows.length, page: 1, page_size: 50 }
+			});
 		});
 		await page.route(`**/api/vendors/${VENDOR_ID}/screening-history`, (route: Route) =>
 			route.fulfill({ json: [] })
