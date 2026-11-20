@@ -752,7 +752,6 @@ export const enSettings = {
 	'admin.entities.title': 'Entities',
 	'admin.entities.createEntity': '+ Create entity',
 	'admin.entities.hint': 'Entities are the legal entities or subsidiaries inside this workspace. Every invoice, vendor and payment belongs to exactly one; workflows and GL accounts can belong to one or be shared by all. The sidebar entity switcher appears once there are two or more.',
-	'admin.entities.loading': 'Loading entities…',
 	'admin.entities.loadFailed': 'Failed to load entities.',
 	'admin.entities.col.name': 'Name',
 	'admin.entities.col.slug': 'Slug',
@@ -820,7 +819,6 @@ export const enSettings = {
 	'admin.apiKeys.hintPre': 'Programmatic keys authenticate the public Developer API (',
 	'admin.apiKeys.hintPost':
 		'). Each key is scoped to this workspace and carries read access. The full key is shown only once at creation — store it somewhere safe.',
-	'admin.apiKeys.loading': 'Loading API keys…',
 	'admin.apiKeys.loadFailed': 'Failed to load API keys.',
 	'admin.apiKeys.col.name': 'Name',
 	'admin.apiKeys.col.keyPrefix': 'Key prefix',

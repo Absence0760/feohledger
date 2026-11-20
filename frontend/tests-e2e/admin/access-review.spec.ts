@@ -22,7 +22,8 @@ test.describe('/admin/access-review (admin)', () => {
 	test('lists elevated users and acknowledges the review', async ({ page }) => {
 		await page.goto('/admin/access-review');
 		await expect(page.getByRole('heading', { name: 'Access Review' })).toBeVisible();
-		await expect(page.getByTestId('access-review-loading')).toHaveCount(0, { timeout: 10_000 });
+		// The table's own "Loading…" row (DataTable's live status) is gone.
+		await expect(page.locator('table [role="status"]')).toHaveCount(0, { timeout: 10_000 });
 
 		// KPI row — the seeded tenant has at least the admin who is signed in.
 		await expect(page.getByText('Elevated users')).toBeVisible();
@@ -53,7 +54,8 @@ test.describe('/admin/access-review (cfo)', () => {
 
 		await page.goto('/admin/access-review');
 		await expect(page.getByRole('heading', { name: 'Access Review' })).toBeVisible();
-		await expect(page.getByTestId('access-review-loading')).toHaveCount(0, { timeout: 10_000 });
+		// The table's own "Loading…" row (DataTable's live status) is gone.
+		await expect(page.locator('table [role="status"]')).toHaveCount(0, { timeout: 10_000 });
 		await expect(page.getByRole('button', { name: 'Acknowledge review' })).toBeEnabled();
 	});
 });

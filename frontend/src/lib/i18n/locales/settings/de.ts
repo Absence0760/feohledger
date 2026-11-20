@@ -735,7 +735,6 @@ export const messages = {
 	'admin.entities.title': 'Gesellschaften',
 	'admin.entities.createEntity': '+ Gesellschaft anlegen',
 	'admin.entities.hint': 'Gesellschaften sind die juristischen Personen oder Tochtergesellschaften in diesem Workspace. Jede Rechnung, jeder Lieferant und jede Zahlung gehört zu genau einer; Workflows und Sachkonten können zu einer gehören oder für alle gelten. Die Gesellschaftsauswahl in der Seitenleiste erscheint ab zwei Gesellschaften.',
-	'admin.entities.loading': 'Gesellschaften werden geladen…',
 	'admin.entities.loadFailed': 'Gesellschaften konnten nicht geladen werden.',
 	'admin.entities.col.name': 'Name',
 	'admin.entities.col.slug': 'Kürzel',
@@ -803,7 +802,6 @@ export const messages = {
 	'admin.apiKeys.hintPre': 'Programmatische Schlüssel authentifizieren die öffentliche Developer-API (',
 	'admin.apiKeys.hintPost':
 		'). Jeder Schlüssel ist auf diesen Arbeitsbereich beschränkt und gewährt Lesezugriff. Der vollständige Schlüssel wird nur einmal bei der Erstellung angezeigt — bewahren Sie ihn sicher auf.',
-	'admin.apiKeys.loading': 'API-Schlüssel werden geladen…',
 	'admin.apiKeys.loadFailed': 'API-Schlüssel konnten nicht geladen werden.',
 	'admin.apiKeys.col.name': 'Name',
 	'admin.apiKeys.col.keyPrefix': 'Schlüssel-Präfix',

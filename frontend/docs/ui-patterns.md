@@ -204,8 +204,12 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
   rows, so every column slides sideways as the data lands. /invoices,
   /payments, /exceptions, /vendors, /purchase-orders, /gl-accounts, the
   screening queue, bank changes, /requisitions, /intake, /catalogs, /budgets,
-  /recurring, /vendor-statements, /positive-pay and /experiments are
-  converted; `tests-e2e/reactivity/layout-stability.spec.ts` holds each to a
+  /recurring, /vendor-statements, /positive-pay, /experiments, /workflows,
+  the users directory, /admin/entities, /admin/api-keys and
+  /admin/access-review are converted, the last three by mounting the table
+  from first paint with DataTable's own loading row rather than swapping a
+  separate loading block for it. Size each fixed column to the widest string
+  in any of the six locales, not the English one; `tests-e2e/reactivity/layout-stability.spec.ts` holds each to a
   cumulative layout shift under 0.1 with production-like API latency and
   checks a `fixed` table's header x positions. A new sidebar page fails that
   spec until it is in its `LIST_PAGES` or `NOT_LIST_PAGES`.

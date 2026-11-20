@@ -49,7 +49,7 @@ test.describe('/admin/entities (admin)', () => {
 
 		await page.goto('/admin/entities');
 		await expect(page.getByRole('heading', { name: 'Entities' })).toBeVisible();
-		await expect(page.getByTestId('entities-loading')).toHaveCount(0, { timeout: 10_000 });
+		await expect(page.locator('table [role="status"]')).toHaveCount(0, { timeout: 10_000 });
 
 		// The seeded tenant ships with exactly one (Default) entity, so the
 		// switcher starts hidden — that is precisely why the page is needed.
@@ -99,7 +99,7 @@ test.describe('/admin/entities (admin)', () => {
 		expect(seed.status()).toBe(201);
 
 		await page.goto('/admin/entities');
-		await expect(page.getByTestId('entities-loading')).toHaveCount(0, { timeout: 10_000 });
+		await expect(page.locator('table [role="status"]')).toHaveCount(0, { timeout: 10_000 });
 
 		await page.getByRole('button', { name: '+ Create entity' }).click();
 		const createModal = page.getByRole('dialog', { name: 'Create entity' });
@@ -124,7 +124,7 @@ test.describe('/admin/entities (admin)', () => {
 		expect(defaultEntity, 'the tenant must have a default entity').toBeTruthy();
 
 		await page.goto('/admin/entities');
-		await expect(page.getByTestId('entities-loading')).toHaveCount(0, { timeout: 10_000 });
+		await expect(page.locator('table [role="status"]')).toHaveCount(0, { timeout: 10_000 });
 
 		const row = page.locator(`[data-testid="entity-row"][data-slug="${defaultEntity!.slug}"]`);
 		await expect(row).toContainText('Default');
@@ -168,7 +168,7 @@ test.describe('/admin/entities (admin)', () => {
 
 		try {
 			await page.goto('/admin/entities');
-			await expect(page.getByTestId('entities-loading')).toHaveCount(0, { timeout: 10_000 });
+			await expect(page.locator('table [role="status"]')).toHaveCount(0, { timeout: 10_000 });
 
 			// Rename through the edit modal.
 			const row = page.locator(`[data-testid="entity-row"][data-slug="${slug}"]`);
@@ -216,7 +216,7 @@ test.describe('/admin/entities (admin)', () => {
 		await page.goto('/admin/entities');
 		await expect(page.locator('aside.sidebar').first()).toBeVisible();
 		await expect(page.getByRole('heading', { name: 'Entities', exact: true })).toBeVisible();
-		await expect(page.getByTestId('entities-loading')).toHaveCount(0, { timeout: 10_000 });
+		await expect(page.locator('table [role="status"]')).toHaveCount(0, { timeout: 10_000 });
 		await expectNoA11yViolations(page);
 
 		await page.getByRole('button', { name: '+ Create entity' }).click();

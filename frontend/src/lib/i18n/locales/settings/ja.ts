@@ -725,7 +725,6 @@ export const messages = {
 	'admin.entities.title': 'エンティティ',
 	'admin.entities.createEntity': '+ エンティティを作成',
 	'admin.entities.hint': 'エンティティは、このワークスペース内の法人または子会社です。請求書・取引先・支払いはいずれか 1 つに属し、ワークフローと勘定科目は 1 つに属することも全体で共有することもできます。サイドバーのエンティティ切替は 2 件以上になると表示されます。',
-	'admin.entities.loading': 'エンティティを読み込み中…',
 	'admin.entities.loadFailed': 'エンティティを読み込めませんでした。',
 	'admin.entities.col.name': '名称',
 	'admin.entities.col.slug': 'スラッグ',
@@ -793,7 +792,6 @@ export const messages = {
 	'admin.apiKeys.hintPre': 'プログラム用のキーは公開デベロッパー API（',
 	'admin.apiKeys.hintPost':
 		'）を認証します。各キーはこのワークスペースに限定され、読み取りアクセスを持ちます。完全なキーは作成時に一度だけ表示されます — 安全な場所に保管してください。',
-	'admin.apiKeys.loading': 'API キーを読み込み中…',
 	'admin.apiKeys.loadFailed': 'API キーを読み込めませんでした。',
 	'admin.apiKeys.col.name': '名前',
 	'admin.apiKeys.col.keyPrefix': 'キーのプレフィックス',
