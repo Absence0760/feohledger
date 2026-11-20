@@ -24013,3 +24013,60 @@ production dependency chain. `tests/test_portal_cross_vendor.py` covers every
 by-id portal route, so one supplier gets the same 404 for another's id as for
 an unknown one. `tests/test_tenant_isolation.py` pins the refusal and the MFA
 exemption.
+
+## 475. An email address is unique without regard to case in the database, and the migration refuses rather than picks a winner (closes a followup; round 32, 2026-11-20)
+
+The app already stored `utils/emails.normalize_email(...)` and matched every
+identity lookup on `lower(email)` (`docs/authentication.md` § An email address
+is matched without regard to case). The database still held a plain,
+case-sensitive `UNIQUE(email)` on `users` (control plane) and `vendor_users`
+(each tenant). So rows written before normalization kept their mixed case, a
+pair differing only in case could exist, a create that passed the app's check
+and lost a race could still land a case variant, and the `lower(email)` lookups
+on login, forgot-password, SSO JIT and SCIM could not use the btree.
+
+**Decision:** migration 0138 replaces the plain constraint on both tables with
+a unique index on `lower(email)` (`uq_users_email_lower`,
+`uq_vendor_users_email_lower`), after lower-casing and trimming every stored
+address. The models declare the same index, so `create_all` builds it for a
+fresh control plane or tenant. `email_matches` already compares exactly that
+expression, so every identity lookup becomes an index probe with no code
+change. One revision serves both databases, the precedent 0059 set: the `users`
+half is gated on `plans` (the control-plane probe 0117 uses), the
+`vendor_users` half on that table existing.
+
+**When two rows share a normalized address, the migration refuses**
+(`EmailCaseCollision`) before changing anything on any table. The message
+names the table, the database and the counts. It never names an address,
+because migration output lands in CI and deploy logs and an address is PII. It
+points at an id-only query (`backend/docs/database.md` § Email case
+collisions). Which account keeps the address is an operator's call: one of the
+pair may hold the roles, the password or the SSO link, and a migration cannot
+know which is real.
+
+Admin create, SCIM create and the supplier-portal invite now flush inside a
+savepoint. A create that loses the race to the index gets the same 409 its
+pre-check gives (coded `email_in_this_workspace` / `email_in_other_workspace`,
+SCIM `uniqueness`, the portal's "already exists"), never a 500. SSO JIT already
+did this.
+
+Rejected:
+
+- **Merging or renaming the losing row in the migration** (oldest wins, or most
+  roles wins). Every heuristic picks wrong for some tenant, and it does so
+  silently, on the login table.
+- **A `citext` column.** It needs the extension in every tenant DB and changes
+  the column type every query and schema reads. The expression index gives the
+  same guarantee on the existing `varchar`.
+- **Building the index `CONCURRENTLY`.** Both tables are small, and a
+  concurrent build cannot run inside the migration's transaction. Then a
+  refusal could no longer roll the normalization back with it.
+- **Dropping `exact_email_first`.** After 0138 it decides nothing. It stays on
+  the single-row lookups only so a second match can never 500 a login.
+
+Tests: `tests/test_migration_0138_email_lower_unique.py` (the refusal names no
+address and changes nothing; normalization; constraint swap; idempotence; each
+half only where its table lives; model parity).
+`tests/test_email_identity_case.py` covers the index refusing a case-variant
+insert, and admin create, SCIM create and the portal invite each losing the
+race and getting their 409.

@@ -268,6 +268,17 @@ the revision fans out to **every tenant DB** (not just the control plane). A
 non-zero exit fails the job and the service is never rolled. This needs the
 task's network placement — `ECS_SUBNETS` + `ECS_SECURITY_GROUPS` below.
 
+A revision can refuse on data only an operator can resolve, and then the
+deploy stops before rolling anything. **0138** (email addresses unique without
+regard to case, decisions §475) is one: it stops with `EmailCaseCollision` when
+two `users` rows (control plane), or two `vendor_users` rows in one tenant,
+hold the same address apart from case. The message names the table, database
+and counts, never an address. Before deploying a release that carries 0138, run
+the two id-only queries in `backend/docs/database.md` § Email case collisions;
+if either returns a row, resolve each pair with the workspace's administrator
+first. The same applies to the VM path (`deploy/deploy.sh` migrates before
+rolling too).
+
 ### Lambda workers (extraction / ERP / audit)
 
 The three async workers — `app.services.extraction_lambda.handler`,

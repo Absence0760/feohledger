@@ -128,7 +128,8 @@ def looks_like_email(value: str) -> bool:
 # password, active — and she could not sign in typing her address in lower case.
 #
 # Every write stores `normalize_email(...)`; every identity lookup goes through
-# `email_matches`, which also finds rows written before writes were normalized.
+# `email_matches`; and since migration 0138 the database itself holds one row
+# per `lower(email)` (decisions §475).
 
 
 def normalize_email(value: str) -> str:
@@ -145,8 +146,10 @@ def normalize_email(value: str) -> str:
 def email_matches(column, address: str) -> ColumnElement[bool]:
     """SQL predicate: ``column`` holds ``address``, ignoring case and padding.
 
-    Compares ``lower(column)`` rather than the column itself so a row stored
-    before writes were normalized (mixed case) still matches.
+    Compares ``lower(column)`` rather than the column itself: that is the
+    expression ``uq_users_email_lower`` / ``uq_vendor_users_email_lower`` index
+    (migration 0138, decisions §475), so the lookup is an index probe, and it
+    stays correct for any writer that ever skips normalization.
     """
     return func.lower(column) == normalize_email(address)
 
@@ -154,10 +157,11 @@ def email_matches(column, address: str) -> ColumnElement[bool]:
 def exact_email_first(column, address: str) -> ColumnElement[bool]:
     """ORDER BY key for a single-row lookup under `email_matches`.
 
-    Rows stored before normalization can include two that differ only in case.
-    A login must not 500 on that (an unbounded ``scalar_one_or_none`` would), and
-    must not pick between them arbitrarily: the row whose stored address is
-    exactly what was submitted sorts first. Use as
+    Since migration 0138 the database refuses two rows that differ only in
+    case, so at most one row matches and this ordering decides nothing. It is
+    kept on the single-row lookups as cheap insurance: a login must never 500
+    on a second match (an unbounded ``scalar_one_or_none`` would) nor pick
+    between two arbitrarily. Use as
     ``.order_by(exact_email_first(...).desc()).limit(1)``.
     """
     return column == address.strip()
