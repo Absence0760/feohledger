@@ -936,6 +936,7 @@ Where each verdict lives (backend gate → field):
 | Vendors | `status_actions.{verify,reject}` | `api/vendors.vendor_status_refusal` |
 | Vendor modal (Find this vendor in the ERP) | `GET /api/vendors/{id}/erp-links` → `search_refusal` (also on the link / unlink responses) | `services/vendor_erp_manual_link.search_refusal`. `vendor_erp_link_exists` replaces the search with its sentence; any other refusal hides it (decisions §415) |
 | Bank-change queue | `approve_refusal` | `api/vendors.change_request_approve_refusal` |
+| Screening review queue | `adjudicate_refusal`, `revoke_adjudication_refusal` | `services/sanctions_adjudication.adjudicate_refusal`, `.revoke_refusal` (decisions §477). `role_not_permitted` hides the control; `sanctions_adjudication_segregation` disables Adjudicate beside its sentence; `already_cleared` / `not_active` pick which of the two is shown |
 | Expense reports (list + detail) | `actions.{submit,approve,reject,compose}` | `services/expense_controls.report_{submit,approve,reject,compose}_refusal` |
 | Expense card transactions | `actions.{match,create_expense,unmatch,ignore}` | `services/expense_controls.card_txn_{link,unmatch,ignore}_refusal` |
 

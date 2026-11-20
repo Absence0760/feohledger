@@ -543,6 +543,8 @@ that it changed plus a last-4 — never the number.
 | `POST` | `/api/vendors/{id}/erp-links/search` | Search the connected ERP's whole contact list for this vendor's record, by name and its tax number (`vendor.manage`) — § Linking a vendor to an ERP record by hand |
 | `POST` | `/api/vendors/{id}/erp-links/link` | Link the vendor to one ERP record in the connected company, re-read first (`vendor.manage`) — § Linking a vendor to an ERP record by hand |
 | `POST` | `/api/vendors/sync-erp` | Pull vendors from connected ERP |
+| `POST` | `/api/vendors/{id}/screening/adjudicate` | Record the stored `match` / `review` screen as a false positive, `{reason}` required (`vendor.sanctions.adjudicate`) — § Adjudicating a sanctions false positive |
+| `POST` | `/api/vendors/{id}/screening/adjudication/revoke` | End the active adjudication, `{reason}` required (`vendor.sanctions.adjudicate`) |
 
 ### The paginated lists issue a fixed number of queries
 
@@ -604,6 +606,46 @@ also pins the specific statement that regressed.
 
 Unverified rows highlighted yellow. Rejected rows dimmed.
 
+## Adjudicating a sanctions false positive
+
+A vendor the screening provider keeps flagging wrongly would otherwise be
+neither payable (dispatch and `/compliance/release` re-screen live) nor
+bookable (the ERP push reads the stored screen, decisions §333). A reviewer
+holding `vendor.sanctions.adjudicate` records, from the screening review queue
+(`/vendors/screening`), that the vendor's stored `match` / `review` result is
+not this vendor (decisions §477):
+
+- **One result, not the vendor.** The row (`sanctions_adjudications`, migration
+  0139) keeps who, when, the required reason, the screen it judged, and the
+  result's identity: provider, verdict, list name and a sha256 fingerprint of
+  the matched entry (`services/sanctions_adjudication.screen_fingerprint`; an
+  adapter's own `raw_response.match_fingerprint` — entry id + list version —
+  when it sets one). Only the hash is stored, never match details.
+- **What respects it.** A later stored screen with the same provider and
+  fingerprint keeps `vendors.screening_adjudication_id` set and, on a `match`,
+  neither re-blocks nor revokes cards; the run gate and the ERP push
+  (`payment_runs.VendorPayability`) lift the `match` / `review` hold while it is
+  set; the live pre-payment screen reads the covered result as clear. A new or
+  different hit (another entry, another list, `review` → `match`, a republished
+  list version) is not covered and holds again.
+- **The sticky block stays.** A `match` set `payments_blocked`; lifting it is
+  still `POST /{id}/unblock` (`vendor.block`), so clearing a match takes two
+  steps.
+- **Segregation.** Refused (403 `sanctions_adjudication_segregation`) for the
+  vendor's onboarder (`vendors.onboarded_by_user_id`, stamped by create and the
+  CSV imports since 0139) and for the latest applied bank change's requester,
+  the AP user who provisioned the portal login that requested it, and its
+  approver. Other refusals: `sanctions_adjudication_not_flagged`,
+  `sanctions_adjudication_already_cleared`, `sanctions_adjudication_no_screen`
+  (adjudicate), `sanctions_adjudication_not_active` (revoke).
+- **Audit.** `vendor.sanctions_adjudicated` / `vendor.sanctions_adjudication_revoked`
+  (adjudication id, check id, provider, verdict, list, fingerprint, reason) and
+  a status-change row `vendor.screening_clearance_changed` (`from` / `to`) for
+  each. Revoking re-arms both gates at once and needs no segregation.
+- **Queue verdicts.** Each review-queue row carries `adjudication`,
+  `adjudicate_refusal` and `revoke_adjudication_refusal`, from the gates the two
+  endpoints raise.
+
 ## Role Access
 
 | Action | Admin | AP Manager | AP Clerk | CFO |
@@ -618,13 +660,16 @@ Unverified rows highlighted yellow. Rejected rows dimmed.
 | Block / unblock payments | Yes | Yes | No | No |
 | Unlink from an ERP company | Yes | Yes | No | No |
 | Approve a bank-detail change | Yes | Yes | No | No |
+| Adjudicate / revoke a sanctions false positive | Yes | No | No | Yes |
 
 Create / edit / verify / reject / sync / import / delete / ERP unlink are all
 `require_permission(vendor.manage)`; block / unblock is `vendor.block`; a
 bank-change approval is `vendor.bank_change.approve` and refuses the proposer.
 `admin` and `ap_manager` hold all three by default, CFO and clerk none
 (`backend/app/api/permissions.py::ROLE_DEFAULT_PERMISSIONS`); a custom role can
-be granted any of them.
+be granted any of them. Adjudicating a sanctions false positive is
+`vendor.sanctions.adjudicate`, held by `admin` and `cfo` by default, not
+`ap_manager` (§ Adjudicating a sanctions false positive).
 
 ## Integration with Invoice Processing
 

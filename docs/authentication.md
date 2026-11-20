@@ -1307,7 +1307,8 @@ exactly as before.
 - **Catalog** — a small, deliberately-scoped set of *splittable* permission
   constants (dotted strings): `invoice.approve`, `payment_run.approve`,
   `payment.execute`, `payment.void`, `payment.record_external`,
-  `vendor.bank_change.approve`, `vendor.block`, `vendor.manage`, `user.manage`.
+  `vendor.bank_change.approve`, `vendor.block`, `vendor.manage`,
+  `vendor.sanctions.adjudicate`, `user.manage`.
   `GET /api/admin/permissions`
   returns the catalog (key + label) for the role editor — gated `user.manage`
   (see below), same as its sibling reads. Everything not in the catalog stays
@@ -1323,6 +1324,12 @@ exactly as before.
   page's reads beside execute/void. Its own permission rather than
   `payment.execute` because recording moves no money: an org can keep sending
   payments with a few people and let others book what they paid.
+  `vendor.sanctions.adjudicate` (record a sanctions screen result as a false
+  positive, decisions §477) is also new: `admin` and `cfo` hold it, `ap_manager`
+  does not — that role already onboards vendors, approves their bank details and
+  executes runs, so clearing the sanctions hold too would put the whole payee
+  path in one role — and `ap_clerk` never does. The endpoint also refuses the
+  vendor's onboarder and the people behind its current bank details.
 - **Custom-role permissions** — a control-plane JSONB column `roles.permissions`
   (migration `0062_role_permissions`, control-plane-only — `roles` is
   control-plane). System roles leave it NULL (they resolve via the default map);
