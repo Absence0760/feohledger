@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import Response
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -2246,8 +2247,23 @@ async def invite_vendor_portal_user(
         # anything it submits.
         provisioned_by_user_id=user.id,
     )
-    db.add(vu)
-    await db.flush()
+    # A concurrent invite of the same address (any case) that passed the check
+    # above trips `uq_vendor_users_email_lower` (§475): the same 409, not a 500.
+    try:
+        async with db.begin_nested():
+            db.add(vu)
+            await db.flush()
+    except IntegrityError:
+        taken = (
+            await db.execute(
+                select(VendorUser.id).where(email_matches(VendorUser.email, email)).limit(1)
+            )
+        ).scalar_one_or_none()
+        if taken is None:
+            raise
+        raise HTTPException(
+            status_code=409, detail="A portal user with this email already exists."
+        ) from None
     await db.refresh(vu)
 
     # Provisioning a supplier credential is an access-control change, and it is

@@ -121,7 +121,7 @@ decimal comparison rather than binary drift.
 ### Control-Plane Tables
 
 - `organizations` — tenant registry (name, slug, db_name, settings, plan). `settings.erp.oauth` holds an ERP OAuth connection's metadata only; its tokens are sealed in `provider_credentials` with the block's other secrets (`erp-integration.md` § Where the credentials live).
-- `users` — all users across all tenants. Columns: `email`, `full_name`, `hashed_password` (nullable for SSO-only), `organization_id`, `is_active`, `must_change_password`, `sso_provider` + `sso_provider_id` (OIDC linkage), `mfa_secret` + `mfa_enabled` + `mfa_enrolled_at` (TOTP MFA)
+- `users` — all users across all tenants. Columns: `email` (stored normalized; unique without regard to case via `uq_users_email_lower` on `lower(email)`, migration 0138 — see § Email case collisions), `full_name`, `hashed_password` (nullable for SSO-only), `organization_id`, `is_active`, `must_change_password`, `sso_provider` + `sso_provider_id` (OIDC linkage), `mfa_secret` + `mfa_enabled` + `mfa_enrolled_at` (TOTP MFA)
 - `roles` — role definitions (admin, ap_manager, ap_clerk, cfo)
 - `user_roles` — many-to-many join table
 - `email_verifications` — pending self-service signups (token, email, slug, admin_name, expires_at, consumed_at). Created by `POST /api/signup/start`, consumed by `POST /api/signup/complete`.
@@ -255,6 +255,7 @@ Migrations may target either the control plane or tenant DBs — never both. Eac
 | 0135     | Control | `organizations` / `provider_credentials` | Data only. Moves the two credentials 0110 left as plain JSONB — a bring-your-own-key extraction org's `settings.extraction.api_key` / `aws_secret_access_key` and the OIDC `settings.sso.client_secret` — into sealed `provider_credentials` rows (blocks `extraction`, `sso`) and strips them from the JSONB; for `sso` it writes the `client_secret_configured: true` marker the sign-in completeness check reads. A value already sealed for the same path wins. Gated on `organizations` like 0110, so a no-op on every tenant DB; a KMS error raises and rolls back, leaving every secret where it was; idempotent. Downgrade opens the rows back into the JSONB (plaintext again) and deletes them. `tests/test_provider_credentials.py` |
 | 0136     | Tenant  | `invoices` | `currency` drops NOT NULL: NULL is the one spelling of "currency unknown", which the upload and the supplier-portal submit now create rows with until extraction reads a code. Every value blank after trimming whitespace (the pre-round-17 PATCH sentinel) becomes NULL. No code is backfilled or removed: a row the old upload stamped USD cannot be told from a real USD (decisions §141, §473). Gated on `invoices` existing, so a no-op on the control plane; idempotent. Downgrade writes `""` into every NULL and restores NOT NULL. `tests/test_migration_0136_invoice_currency_null.py` |
 | 0137     | Tenant  | `invoices` | Adds the non-unique index `ix_invoices_po_number` (also `index=True` on the model, so `create_all` builds it under the same name). The budget PO-relief join (`budget_service._invoice_po_attribution`, on `GET /budgets/check`) narrows invoices by `po_number IN (...)`; the PO detail's invoice list, the portal flip guard and "already invoiced" check, `invoice_warnings.invoices_citing_pos` and the enrichment on-time proxy filter or join on it too. Plain `CREATE INDEX IF NOT EXISTS` in the migration transaction, as 0092/0132 do. Shape pinned by `tests/test_invoice_po_number_index.py`; no latency was measured. |
+| 0138     | Both    | `users` (control) / `vendor_users` (tenant) | Replaces the plain, case-sensitive `UNIQUE(email)` with a unique index on `lower(email)` — `uq_users_email_lower` / `uq_vendor_users_email_lower`, declared on the models so `create_all` builds the same — after lower-casing and trimming every stored address. **Refuses** (`EmailCaseCollision`, nothing changed) while two rows share one normalized address, reporting the table, database and counts but never an address; which account keeps it is the operator's call (§ Email case collisions, decisions §475). The `users` half is gated on `plans` (control plane only), the `vendor_users` half on that table existing. Idempotent; the index builds inside the transaction, blocking writes to the table briefly. Downgrade drops the index and restores `<table>_email_key`; addresses stay lower-cased. `tests/test_migration_0138_email_lower_unique.py` |
 
 > Migration 0022 may need renumbering or a merge revision at integration time — sibling features built on parallel branches may also claim `0022` (all branch off `0021_scim_bearer_hash`).
 
@@ -550,6 +551,48 @@ So, for a new revision:
   name `create_all` would give it as well as your own — an unstamped tenant
   replays the revision over the ORM's spelling.
 - **ON DELETE, NOT NULL, a length, a UNIQUE** — say it the same way in both.
+
+### Email case collisions
+
+Migration 0138 makes `users.email` (control plane) and `vendor_users.email`
+(each tenant) unique without regard to case. A database holding two rows whose
+addresses differ only in case or surrounding whitespace — rows written before
+the app normalized addresses (`docs/authentication.md` § An email address is
+matched without regard to case) — makes it stop with `EmailCaseCollision`,
+naming the table, the database and how many addresses and rows collide, and
+change nothing. It does not pick a winner: one of the pair may hold the roles,
+the password or the SSO link, and only someone who knows the people can say
+which account is real.
+
+List the colliding rows **by id** (the addresses stay out of the terminal and
+any log the session keeps) on the database the error named:
+
+```sql
+-- control plane (feohledger)
+SELECT array_agg(id ORDER BY created_at) AS user_ids,
+       array_agg(organization_id ORDER BY created_at) AS org_ids,
+       count(*) AS n
+FROM users
+GROUP BY lower(btrim(email, E' \t\n\r\f\x0B'))
+HAVING count(*) > 1;
+
+-- a tenant (feoh_<slug>)
+SELECT array_agg(id ORDER BY created_at) AS vendor_user_ids,
+       array_agg(vendor_id ORDER BY created_at) AS vendor_ids,
+       count(*) AS n
+FROM vendor_users
+GROUP BY lower(btrim(email, E' \t\n\r\f\x0B'))
+HAVING count(*) > 1;
+```
+
+For each group, decide with the workspace's administrator which account keeps
+the address, then move the other one off it through the app, so the change is
+audited: give it a different address (`PATCH /api/admin/users/{id}`) or delete
+it (`DELETE /api/admin/users/{id}`); a supplier-portal user is deleted from its
+vendor's portal users. The app's own lookups already treat the pair as one
+address, so this works before the migration has run. Re-run the migration
+(`alembic upgrade head`, or `scripts/migrate_all_tenants.py` for tenants);
+it re-checks before touching anything.
 
 ## Seeding
 
