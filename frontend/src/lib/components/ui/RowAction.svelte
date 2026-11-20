@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import RefusalNote from './RefusalNote.svelte';
 
 	type Variant = 'default' | 'accent' | 'success' | 'danger';
 
@@ -24,6 +25,15 @@
 		/** Id of an element describing the action — e.g. why a disabled action
 		 *  is disabled, so a screen reader hears the reason, not just "dimmed". */
 		describedby?: string;
+		/** Why the action is refused, when the reader can act on it (a
+		 *  verdict's `refusalText`). Non-empty renders a `RefusalNote` on its
+		 *  own line above the button and adds it to `aria-describedby`; pair it
+		 *  with `disabled` (frontend/docs/ui-patterns.md § Whether to offer an
+		 *  action). Ignored for the `href` form. */
+		reason?: string;
+		/** Id for the reason note (defaults to a generated one) — set it when a
+		 *  test or another control needs to find the note. */
+		reasonId?: string;
 		/** When set, renders as an `<a>` for client-side navigation. */
 		href?: string;
 		/** Click handler. */
@@ -42,11 +52,19 @@
 		title,
 		ariaLabel,
 		describedby,
+		reason,
+		reasonId,
 		href,
 		onclick,
 		type = 'button',
 		children,
 	}: Props = $props();
+
+	const uid = $props.id();
+	const noteId = $derived(reasonId ?? `${uid}-reason`);
+	const describedbyIds = $derived(
+		[reason ? noteId : null, describedby ?? null].filter(Boolean).join(' ') || null
+	);
 
 	function handleClick(e: MouseEvent) {
 		if (busy) {
@@ -75,6 +93,7 @@
 		{@render children()}
 	</a>
 {:else}
+	{#if reason}<RefusalNote id={noteId} {reason} />{/if}
 	<button
 		class="row-action"
 		class:variant-accent={variant === 'accent'}
@@ -88,7 +107,7 @@
 		onclick={handleClick}
 		title={title ?? null}
 		aria-label={ariaLabel ?? null}
-		aria-describedby={describedby ?? null}
+		aria-describedby={describedbyIds}
 		aria-disabled={busy || null}
 		aria-busy={busy || null}
 	>

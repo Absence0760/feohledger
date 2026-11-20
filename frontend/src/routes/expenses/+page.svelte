@@ -83,6 +83,7 @@
 	import CsvImportErrors from '#lib/components/ui/CsvImportErrors.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RefusalNote from '#lib/components/ui/RefusalNote.svelte';
 	import BulkBar from '#lib/components/ui/BulkBar.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import { DEFAULT_CURRENCY, formatMoney } from '#lib/utils/money.ts';
@@ -1430,7 +1431,7 @@
 						{#if isAllowed(activeReport.actions?.approve)}
 							<button class="btn-primary" disabled={reportBusy} onclick={approveActiveReport}>{m('expenses.reports.approve')}</button>
 						{:else if approveExplained(activeReport.actions?.approve)}
-							<span class="refusal-note" id="approve-refusal">{refusalText(activeReport.actions.approve, m)}</span>
+							<RefusalNote id="approve-refusal" reason={refusalText(activeReport.actions.approve, m)} />
 							<button class="btn-primary" disabled aria-describedby="approve-refusal">{m('expenses.reports.approve')}</button>
 						{/if}
 						{#if isAllowed(activeReport.actions?.reject)}
@@ -2103,11 +2104,6 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: 8px;
-	}
-	.refusal-note {
-		font-size: 0.74rem;
-		color: var(--text-muted);
-		max-width: 32ch;
 	}
 	.attach-hint {
 		margin: 6px 0 12px;

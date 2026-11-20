@@ -512,10 +512,8 @@
 					</td>
 					<td class="actions">
 						{#if r.status === 'pending'}
-							{#if approveBlockedForMe(r)}
-								<span class="sod-note">{refusalText(r.approve_refusal ?? null, m)}</span>
-							{/if}
 							<RowAction
+								reason={approveBlockedForMe(r) ? refusalText(r.approve_refusal ?? null, m) : undefined}
 								variant={approveArmedId === r.id ? 'danger' : 'success'}
 								armed={approveArmedId === r.id}
 								disabled={busyId === r.id || !isAllowed(r.approve_refusal)}
@@ -748,21 +746,6 @@
 
 	.vendor-name {
 		font-weight: 500;
-	}
-
-	/* The separation-of-duties refusal sits on its own line above the row's
-	   buttons. Inline and `nowrap`, it was wider than the fixed actions column
-	   and pushed Reject off the table's edge, in English too. */
-	.sod-note {
-		display: block;
-		font-size: 0.74rem;
-		color: var(--text-muted);
-		white-space: normal;
-	}
-	/* The button under the note starts its own line, so it drops the global
-	   `td.actions > * + *` gap that spaces inline siblings. */
-	:global(.grid-container td.actions) > .sod-note + :global(*) {
-		margin-left: 0;
 	}
 
 	/* --- Detail modal --- */
