@@ -206,6 +206,10 @@ class _VendorsScreenState extends State<VendorsScreen> {
       ),
       confirmDismiss: (direction) async {
         final verify = direction == DismissDirection.startToEnd;
+        // A sideways swipe is easy to make by accident, and Reject is
+        // accepted on an active vendor and cancels its virtual cards, so it
+        // confirms first; cancelling leaves the row where it was.
+        if (!verify && !await _confirmReject(vendor)) return false;
         final ok = verify
             ? await VendorStore.instance.verify(vendor.id)
             : await VendorStore.instance.reject(vendor.id);
@@ -335,6 +339,8 @@ class _VendorsScreenState extends State<VendorsScreen> {
     required bool verify,
   }) async {
     Navigator.of(sheetContext).pop();
+    if (!verify && !await _confirmReject(vendor)) return;
+    if (!mounted) return;
     final l = AppLocalizations.of(context);
     final store = VendorStore.instance;
     final ok = verify
@@ -348,6 +354,32 @@ class _VendorsScreenState extends State<VendorsScreen> {
           : l.vendorActionFailed,
     );
     if (ok && !verify) _warnLiveCards();
+  }
+
+  /// Asks before rejecting [vendor], naming it and the virtual cards the
+  /// server cancels on reject (`revoke_vendor_cards`). True only on an
+  /// explicit confirm; dismissing the dialog is a no.
+  Future<bool> _confirmReject(Vendor vendor) async {
+    final l = AppLocalizations.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(l.vendorRejectConfirmTitle(vendor.name)),
+        content: Text(l.vendorRejectConfirmBody(vendor.name)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(l.commonCancel),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(l.vendorActionReject),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
   }
 
   /// Rejecting a vendor cancels its live virtual cards server-side. A card

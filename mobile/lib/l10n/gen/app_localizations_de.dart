@@ -381,6 +381,16 @@ class AppLocalizationsDe extends AppLocalizations {
   String get vendorRejected => 'Lieferant abgelehnt';
 
   @override
+  String vendorRejectConfirmTitle(String name) {
+    return '$name ablehnen?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name wird als abgelehnt markiert. Alle aktiven virtuellen Karten dieses Lieferanten werden storniert.';
+  }
+
+  @override
   String vendorCardsNotClosed(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1395,10 +1405,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get payRunActionApprove => 'Als CFO freigeben';
-
-  @override
-  String get payRunVerdictUnchecked =>
-      'Konnte nicht prüfen, ob Sie dies tun dürfen. Zum Aktualisieren nach unten ziehen.';
 
   @override
   String get payRunApproveTitle => 'Zahlungslauf freigeben?';

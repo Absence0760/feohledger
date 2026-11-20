@@ -377,6 +377,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get vendorRejected => 'Vendor rejected';
 
   @override
+  String vendorRejectConfirmTitle(String name) {
+    return 'Reject $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name will be marked rejected. Any live virtual cards issued to it will be cancelled.';
+  }
+
+  @override
   String vendorCardsNotClosed(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1393,10 +1403,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get payRunActionApprove => 'Approve as CFO';
-
-  @override
-  String get payRunVerdictUnchecked =>
-      'Couldn\'t check whether you can do this. Pull to refresh.';
 
   @override
   String get payRunApproveTitle => 'Approve payment run?';

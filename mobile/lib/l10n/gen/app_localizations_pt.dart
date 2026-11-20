@@ -382,6 +382,16 @@ class AppLocalizationsPt extends AppLocalizations {
   String get vendorRejected => 'Fornecedor rejeitado';
 
   @override
+  String vendorRejectConfirmTitle(String name) {
+    return 'Rejeitar $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name será marcado como rejeitado. Todos os cartões virtuais ativos emitidos para ele serão cancelados.';
+  }
+
+  @override
   String vendorCardsNotClosed(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -1401,10 +1411,6 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get payRunActionApprove => 'Aprovar como CFO';
-
-  @override
-  String get payRunVerdictUnchecked =>
-      'Não foi possível verificar se pode fazer isto. Puxe para atualizar.';
 
   @override
   String get payRunApproveTitle => 'Aprovar o lote de pagamento?';
@@ -5422,6 +5428,16 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get vendorRejected => 'Fornecedor rejeitado';
 
   @override
+  String vendorRejectConfirmTitle(String name) {
+    return 'Rejeitar $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name será marcado como rejeitado. Todos os cartões virtuais ativos emitidos para ele serão cancelados.';
+  }
+
+  @override
   String vendorCardsNotClosed(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,
@@ -6441,10 +6457,6 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get payRunActionApprove => 'Aprovar como CFO';
-
-  @override
-  String get payRunVerdictUnchecked =>
-      'Não foi possível verificar se você pode fazer isso. Puxe para atualizar.';
 
   @override
   String get payRunApproveTitle => 'Aprovar o lote de pagamento?';

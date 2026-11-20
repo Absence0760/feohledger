@@ -687,15 +687,18 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     final subtitle =
         l.payRunSubtitle(run.paymentCount, formatDate(run.createdAt)) +
         (run.awaitsCfoApproval ? l.payRunCfoRequiredSuffix : '');
-    return Semantics(
-      label: l.payRunAnnounce(
-        _runTotal(run),
-        _runStatusLabel(l, run),
-        subtitle,
-      ),
-      excludeSemantics: true,
-      child: ListTile(
-        title: Row(
+    // One merged announcement for the title + subtitle only: wrapping the
+    // whole ListTile in `excludeSemantics` also swallowed `trailing`, so a
+    // screen-reader user could never reach the "Run actions" menu.
+    return ListTile(
+      title: Semantics(
+        label: l.payRunAnnounce(
+          _runTotal(run),
+          _runStatusLabel(l, run),
+          subtitle,
+        ),
+        excludeSemantics: true,
+        child: Row(
           children: [
             Expanded(
               child: Text(
@@ -706,15 +709,20 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
             _runStatusChip(run),
           ],
         ),
-        subtitle: Padding(
+      ),
+      subtitle: ExcludeSemantics(
+        child: Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Text(
             subtitle,
-            style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
           ),
         ),
-        trailing: _runMenu(run),
       ),
+      trailing: _runMenu(run),
     );
   }
 
@@ -804,7 +812,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     final l = AppLocalizations.of(context);
     final String reason;
     if (PaymentQueueStore.instance.runVerdictsFailed(runId)) {
-      reason = l.payRunVerdictUnchecked;
+      reason = l.reviewVerdictsUnavailable;
     } else {
       if (!verdict.isOffered(hiddenCodes: const {'payment_run_not_draft'})) {
         return null;
@@ -828,7 +836,10 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
               padding: const EdgeInsets.only(top: 2),
               child: Text(
                 reason,
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
         ],

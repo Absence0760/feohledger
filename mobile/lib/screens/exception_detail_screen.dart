@@ -403,7 +403,10 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 reason,
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
         ],
