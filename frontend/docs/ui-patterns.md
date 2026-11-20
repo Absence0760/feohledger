@@ -933,6 +933,9 @@ Where each verdict lives (backend gate → field):
 | Invoice modal (Recall Approval) | same read → `recall_approval` | `services/review.recall_refusal`. `invoice_not_recallable` hides the control (about the status); any other refusal (a bill the ERP may hold, a live payment or card) disables it with its sentence (`recall-refusal`). The reason dialog (`modals/RecallApprovalModal.svelte`) states a refusal the door raises in between (decisions §374) |
 | Exception queue | `decision_refusals.{resolve,dismiss,escalate}` | `api/exceptions.actionable_refusal` + `exception_lifecycle.segregation_refusal` |
 | Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |
+| Discount offers | `actions.{accept,decline}`, `capturable_tier_days` (the accept dialog's tiers) | `api/discounts.accept_refusal` / `.decline_refusal` |
+| Experiments | `actions.start` | `api/workflow_experiments.start_refusal` |
+| Adaptive suggestions | `actions.dismiss` | `api/adaptive_workflows.dismiss_refusal` |
 | Vendors | `status_actions.{verify,reject}` | `api/vendors.vendor_status_refusal` |
 | Vendor modal (Find this vendor in the ERP) | `GET /api/vendors/{id}/erp-links` → `search_refusal` (also on the link / unlink responses) | `services/vendor_erp_manual_link.search_refusal`. `vendor_erp_link_exists` replaces the search with its sentence; any other refusal hides it (decisions §415) |
 | Bank-change queue | `approve_refusal` | `api/vendors.change_request_approve_refusal` |
@@ -944,6 +947,7 @@ state, asks both sides — the verdict and the real POST — and fails unless th
 agree (`tests/test_payment_action_verdicts.py`,
 `tests/test_queue_action_verdicts.py`, `tests/test_review_actions_parity.py`,
 `tests/test_payment_queue_blocked.py`, `tests/test_expense_action_verdicts.py`,
+`tests/test_offer_experiment_suggestion_verdicts.py`,
 `tests/test_vendor_erp_manual_link.py`).
 A new verdict ships with one.
 

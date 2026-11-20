@@ -247,8 +247,21 @@ down, and must report an unavailable probe.
 | `GET /offers` | all four | list (filters: `status` — `missed` = declined+expired — `scope`, `vendor_id`; paginated, entity-scoped). Both the filter and the reported `status` use the **effective** status (`effective_status_sql`), so a lapsed `offered` row is filtered and rendered as `expired` |
 | `POST /offers` | admin, ap_manager | create an offer (invoice base_amount defaults from the invoice). `422` for a malformed `invoice_id`/`vendor_id` **or an unknown key** — `DiscountOfferCreate` is `extra="forbid"` (§ Both create surfaces refuse what they cannot read). An invoice-scoped offer's `vendor_id`, if sent, must be the invoice's own (`422` otherwise): it was stored as sent, which put the offer in front of the wrong supplier in the portal |
 | `GET /offers/{id}` | all four | detail (entity-scoped) |
-| `POST /offers/{id}/accept` | admin, ap_manager, **cfo** | accept at a tier (`tier_days` or best tier today). `409` when the offer's invoice is already `paid` / `done` (§ No discount on a settled invoice) |
-| `POST /offers/{id}/decline` | admin, ap_manager, **cfo** | decline |
+| `POST /offers/{id}/accept` | admin, ap_manager, **cfo** | accept at a tier (`tier_days` or best tier today). `409` when the offer's invoice is already `paid` / `done` (§ No discount on a settled invoice), `409` when no tier is capturable today or the offer is no longer `offered`, `422` for a named tier that is missing or closed. Every refusal comes from one gate, `api/discounts.accept_refusal` |
+| `POST /offers/{id}/decline` | admin, ap_manager, **cfo** | decline. `409` past the decline grace or once decided (`decline_refusal`) |
+
+**Whether the page offers Accept / Decline is the server's answer.** Every
+offer row (list, detail, and the accept / decline responses) carries
+`actions.{accept,decline}` — `null` or the coded refusal the endpoint would
+give this reader (`discount_offer_invoice_settled`,
+`discount_offer_no_capturable_tier`, `discount_offer_tier_unavailable`,
+`discount_offer_not_open`, `discount_offer_decline_window_closed`,
+`role_not_permitted`) — built by running the same `accept_refusal` /
+`decline_refusal` the endpoints raise from, with one batched settled-invoice
+read per page (`discount_auto_trigger.settled_invoice_statuses`). The row also
+carries `capturable_tier_days`, the tiers `POST /accept` takes by name today;
+the accept dialog lists only those. Parity:
+`tests/test_offer_experiment_suggestion_verdicts.py`.
 | `GET /invoices/{id}/roi` | all four | annualized ROI of paying the invoice early (open offer's best tier, else the static `PaymentSchedule` term) |
 | `POST /optimize` | all four | rank open offers by ROI and select within an optional `{cash_budget}`. Offers with no resolvable net due date come back on `unrankable[]` with a `null` APR and `roi.horizon_known: false` — never a fabricated `0.00` (§ An unknown horizon is `null`, not `0`) |
 | `POST /bulk-negotiate` | admin, ap_manager | one vendor-scoped offer across the vendor's open invoices. **Not a multi-vendor batch** — "bulk" is the BASE, and there is no per-row skip-and-report result. `409` when the vendor has nothing open to discount, `404` for an unknown **or out-of-entity** vendor, `422` for a malformed `vendor_id` or an unknown key (§ Proposing a vendor-wide offer) |

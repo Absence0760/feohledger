@@ -1369,11 +1369,12 @@ scope (§260) — do not fold them into any of these.
       sync, and the run dialog's record-run-as-paid / NACHA download /
       regenerate / bank-rejected (§344); `InvoiceModal`'s Submit / Complete and
       Retry ERP (§347); expense reports' submit / approve / reject / attach and
-      card-transaction match / create-expense / unmatch / ignore (§348). Still
-      restating (each a status list and/or role / permission / self check):
-      intake approve / reject / convert; requisition
-      submit / convert / cancel; discount-offer accept / decline; experiment
-      start; adaptive-suggestion dismiss. **Mobile** reads the verdicts for the
+      card-transaction match / create-expense / unmatch / ignore (§348);
+      discount-offer accept / decline (and the accept dialog's tiers), experiment
+      start, adaptive-suggestion dismiss. Still restating (each a status list
+      and/or role / permission / self check): intake approve / reject / convert;
+      requisition submit / convert / cancel; experiment stop / conclude /
+      delete. **Mobile** reads the verdicts for the
       invoice detail's approve / reject / recall and the approvals swipe
       (`GET /api/invoices/{id}/review-actions`), the payment queue's record
       outside, and the Runs tab's "Approve as CFO" (the run detail's
@@ -1384,7 +1385,8 @@ scope (§260) — do not fold them into any of these.
       `actions.execute` / `.cancel` on the same detail read), vendor verify /
       reject (`canManageVendors` + `isUnverified` — the list's
       `status_actions.{verify,reject}`), and exception resolve (status + role
-      — the list's `decision_refusals`).
+      — the list's `decision_refusals`), and adaptive-suggestion dismiss
+      (`canDismissSuggestion` + status — the row's `actions.dismiss`).
       **Durable fix:** the same shape as the
       converted ones — a gate function the endpoint raises from, a `*_refusal`
       verdict on the row built from it, a parity test per role × row state, and
