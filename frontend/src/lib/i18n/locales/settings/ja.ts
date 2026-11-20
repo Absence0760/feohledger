@@ -789,7 +789,6 @@ export const messages = {
 	'admin.apiKeys.hintPre': 'プログラム用のキーは公開デベロッパー API（',
 	'admin.apiKeys.hintPost':
 		'）を認証します。各キーはこのワークスペースに限定され、読み取りアクセスを持ちます。完全なキーは作成時に一度だけ表示されます — 安全な場所に保管してください。',
-	'admin.apiKeys.loading': 'API キーを読み込み中…',
 	'admin.apiKeys.loadFailed': 'API キーを読み込めませんでした。',
 	'admin.apiKeys.col.name': '名前',
 	'admin.apiKeys.col.keyPrefix': 'キーのプレフィックス',

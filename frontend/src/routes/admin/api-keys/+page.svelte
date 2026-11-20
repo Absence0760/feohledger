@@ -47,11 +47,11 @@
 	// $derived so the column headers re-render when the locale changes.
 	let COLUMNS = $derived([
 		{ label: m('admin.apiKeys.col.name') },
-		{ label: m('admin.apiKeys.col.keyPrefix') },
+		{ label: m('admin.apiKeys.col.keyPrefix'), class: 'col-prefix' },
 		{ label: m('admin.apiKeys.col.scopes') },
-		{ label: m('admin.apiKeys.col.created') },
-		{ label: m('admin.apiKeys.col.lastUsed') },
-		{ label: m('admin.apiKeys.col.status') },
+		{ label: m('admin.apiKeys.col.created'), class: 'col-date' },
+		{ label: m('admin.apiKeys.col.lastUsed'), class: 'col-date' },
+		{ label: m('admin.apiKeys.col.status'), class: 'col-status' },
 		{ class: 'actions-col' }
 	]);
 
@@ -202,13 +202,19 @@
 		<PlanUpgradeNotice feature={FEATURE_PUBLIC_API} testId="api-keys-plan-upgrade" />
 	{/if}
 
-	{#if loading}
-		<LoadingState label={m('admin.apiKeys.loading')} testId="api-keys-loading" />
-	{:else if error}
+	<!-- The table is mounted from first paint with its own "Loading…" row: a
+	     separate loading block swapped for the table moved the page when the
+	     keys landed, and `fixed` plus the header widths below keep the columns
+	     from re-sizing against the real rows (frontend/docs/ui-patterns.md §
+	     Data tables; tests-e2e/reactivity/layout-stability.spec.ts). -->
+	{#if error}
 		<LoadError message={error} onretry={load} testId="api-keys-error" />
 	{:else}
+		<div class="keys-table">
 		<DataTable
 			columns={COLUMNS}
+			fixed
+			loading={loading}
 			isEmpty={keys.length === 0}
 			empty={m('admin.apiKeys.empty')}
 		>
@@ -268,6 +274,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		</div>
 	{/if}
 </PageHeader>
 
@@ -392,6 +399,21 @@
 </Modal>
 
 <style>
+	/* Column widths for the `fixed` key table: the prefix, dates, status and
+	   the Revoke action are sized to their widest content; Name and Scopes
+	   share the rest, and the `min-width` keeps them readable (past it the
+	   table scrolls inside its region). DataTable renders these `<th>` from
+	   `columns`, so the selectors go through `:global` under this page-owned
+	   wrapper (the /gl-accounts pattern). */
+	.keys-table {
+		min-width: 0;
+	}
+	.keys-table :global(table) { min-width: 980px; }
+	.keys-table :global(th.col-prefix) { width: 130px; }
+	.keys-table :global(th.col-date) { width: 130px; }
+	.keys-table :global(th.col-status) { width: 110px; }
+	.keys-table :global(th.actions-col) { width: 150px; }
+
 	.page-hint {
 		margin: 0;
 		color: var(--text-muted);

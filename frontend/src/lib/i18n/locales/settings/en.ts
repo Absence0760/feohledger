@@ -816,7 +816,6 @@ export const enSettings = {
 	'admin.apiKeys.hintPre': 'Programmatic keys authenticate the public Developer API (',
 	'admin.apiKeys.hintPost':
 		'). Each key is scoped to this workspace and carries read access. The full key is shown only once at creation — store it somewhere safe.',
-	'admin.apiKeys.loading': 'Loading API keys…',
 	'admin.apiKeys.loadFailed': 'Failed to load API keys.',
 	'admin.apiKeys.col.name': 'Name',
 	'admin.apiKeys.col.keyPrefix': 'Key prefix',

@@ -799,7 +799,6 @@ export const messages = {
 	'admin.apiKeys.hintPre': 'Programmatische Schlüssel authentifizieren die öffentliche Developer-API (',
 	'admin.apiKeys.hintPost':
 		'). Jeder Schlüssel ist auf diesen Arbeitsbereich beschränkt und gewährt Lesezugriff. Der vollständige Schlüssel wird nur einmal bei der Erstellung angezeigt — bewahren Sie ihn sicher auf.',
-	'admin.apiKeys.loading': 'API-Schlüssel werden geladen…',
 	'admin.apiKeys.loadFailed': 'API-Schlüssel konnten nicht geladen werden.',
 	'admin.apiKeys.col.name': 'Name',
 	'admin.apiKeys.col.keyPrefix': 'Schlüssel-Präfix',

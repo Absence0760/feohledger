@@ -13,7 +13,6 @@
 	import type { AccessReviewResponse } from '#lib/types/accessReview.ts';
 	import { roleLabelKey } from '#lib/types/admin.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import LoadingState from '#lib/components/ui/LoadingState.svelte';
 
 	// RBAC: the backend gates both /api/access-reviews routes to admin | cfo
 	// (`require_roles(ROLE_ADMIN, ROLE_CFO)`) — the reviewer privilege. Wait for
@@ -29,8 +28,8 @@
 	const COLUMNS = $derived([
 		{ label: m('admin.accessReview.col.user') },
 		{ label: m('admin.accessReview.col.roles') },
-		{ label: m('admin.accessReview.col.lastAction') },
-		{ label: m('admin.accessReview.col.status') }
+		{ label: m('admin.accessReview.col.lastAction'), class: 'col-last' },
+		{ label: m('admin.accessReview.col.status'), class: 'col-status' }
 	]);
 
 	/** A system role in the reader's language; a custom role's stored name
@@ -145,12 +144,23 @@
 		/>
 	</div>
 
-	{#if loading}
-		<LoadingState testId="access-review-loading" />
-	{:else if error}
+	<!-- The table is mounted from first paint, its own "Loading…" row standing
+	     in for the rows: a separate loading block swapped for the table moved
+	     everything when the review landed, and under `table-layout: auto` the
+	     columns re-sized against the real rows. `fixed` plus the header widths
+	     below hold the columns still (frontend/docs/ui-patterns.md § Data
+	     tables; tests-e2e/reactivity/layout-stability.spec.ts). -->
+	{#if error}
 		<LoadError message={error} onretry={load} testId="access-review-error" />
-	{:else if review}
-		<DataTable columns={COLUMNS} isEmpty={reviewUsers.length === 0} empty={m('admin.accessReview.empty')}>
+	{:else}
+		<div class="review-table">
+		<DataTable
+			columns={COLUMNS}
+			fixed
+			loading={loading}
+			isEmpty={reviewUsers.length === 0}
+			empty={m('admin.accessReview.empty')}
+		>
 			{#snippet body()}
 				{#each reviewUsers as u (u.user_id)}
 					<tr class:dormant-row={u.dormant}>
@@ -182,6 +192,7 @@
 				{/each}
 			{/snippet}
 		</DataTable>
+		</div>
 	{/if}
 </PageHeader>
 
@@ -230,6 +241,19 @@
 		color: var(--text-muted);
 		font-style: italic;
 	}
+
+	/* Column widths for the `fixed` table: the date and status columns are
+	   sized to their widest content, User and Roles share the rest, and the
+	   `min-width` keeps them readable (past it the table scrolls inside its
+	   region). DataTable renders these `<th>` from `columns`, so the selectors
+	   go through `:global` under this page-owned wrapper (the /gl-accounts
+	   pattern). */
+	.review-table {
+		min-width: 0;
+	}
+	.review-table :global(table) { min-width: 760px; }
+	.review-table :global(th.col-last) { width: 230px; }
+	.review-table :global(th.col-status) { width: 130px; }
 
 	tr.dormant-row td {
 		background: color-mix(in srgb, var(--danger) 4%, transparent);

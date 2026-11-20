@@ -799,7 +799,6 @@ export const messages = {
 	'admin.apiKeys.hintPre': 'Chaves programáticas autenticam a API pública para desenvolvedores (',
 	'admin.apiKeys.hintPost':
 		'). Cada chave é limitada a este espaço de trabalho e concede acesso de leitura. A chave completa é exibida apenas uma vez na criação — guarde-a em local seguro.',
-	'admin.apiKeys.loading': 'Carregando chaves de API…',
 	'admin.apiKeys.loadFailed': 'Falha ao carregar as chaves de API.',
 	'admin.apiKeys.col.name': 'Nome',
 	'admin.apiKeys.col.keyPrefix': 'Prefixo da chave',

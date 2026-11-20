@@ -799,7 +799,6 @@ export const messages = {
 	'admin.apiKeys.hintPre': 'Les clés programmatiques authentifient l\'API publique pour développeurs (',
 	'admin.apiKeys.hintPost':
 		'). Chaque clé est limitée à cet espace de travail et accorde un accès en lecture. La clé complète n\'est affichée qu\'une seule fois à la création — conservez-la en lieu sûr.',
-	'admin.apiKeys.loading': 'Chargement des clés API…',
 	'admin.apiKeys.loadFailed': 'Échec du chargement des clés API.',
 	'admin.apiKeys.col.name': 'Nom',
 	'admin.apiKeys.col.keyPrefix': 'Préfixe de clé',
