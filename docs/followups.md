@@ -1369,11 +1369,14 @@ scope (§260) — do not fold them into any of these.
       sync, and the run dialog's record-run-as-paid / NACHA download /
       regenerate / bank-rejected (§344); `InvoiceModal`'s Submit / Complete and
       Retry ERP (§347); expense reports' submit / approve / reject / attach and
-      card-transaction match / create-expense / unmatch / ignore (§348). Still
-      restating (each a status list and/or role / permission / self check):
-      intake approve / reject / convert; requisition
-      submit / convert / cancel; discount-offer accept / decline; experiment
-      start; adaptive-suggestion dismiss. **Mobile** reads the verdicts for the
+      card-transaction match / create-expense / unmatch / ignore (§348);
+      intake submit / approve / reject / convert / cancel / reopen and
+      requisition submit / approve / reject / convert / cancel / reopen
+      (`actions`, `services/procurement_controls.py`). Still restating (each a
+      status list and/or role / permission / self check): intake and
+      requisition Delete (`canCreate` + status, the routes' 409 delete
+      guards); discount-offer accept / decline; experiment start;
+      adaptive-suggestion dismiss. **Mobile** reads the verdicts for the
       invoice detail's approve / reject / recall and the approvals swipe
       (`GET /api/invoices/{id}/review-actions`), the payment queue's record
       outside, and the Runs tab's "Approve as CFO" (the run detail's
