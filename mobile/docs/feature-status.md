@@ -31,10 +31,14 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   money line one compact figure per currency in the invoices' own code
   (`€1K · $2.1K`, `DueRollup`), summed on the server and converting nothing. A
   payload (or offline cache) predating those fields shows no Overdue card and
-  the legacy Upcoming figure, never a `0` nobody reported. The Overdue card does
-  not tap through: `GET /api/payments/queue` has no overdue filter and holds
-  approved invoices only, while the count includes the in-review pipeline
-- Invoice list with search + status filter chips
+  the legacy Upcoming figure, never a `0` nobody reported. **Tapping the Overdue
+  card opens the Invoices tab on its Overdue quick view** (`HomeScreen` passes
+  `DashboardScreen.onShowOverdue` → `InvoiceStore.showOverdue`), which reads
+  `GET /api/invoices?overdue=true`, the same `services/open_ap_due` set the
+  count reads, with every other filter cleared so the list holds exactly the
+  invoices counted. The card is a button to a screen reader, with a hint
+  (`dashboardOverdueOpen`); the other KPI cards stay plain figures
+- Invoice list with search + status filter chips, plus an **Overdue** quick-view chip (`InvoiceStore.setOverdueOnly`, `overdue=true`): owed and past due across statuses, so it and a status chip are mutually exclusive; search and advanced filters still narrow it, and it caches under its own offline key
 - Advanced search — `AdvancedSearchSheet` (app-bar `tune` action; a dot badge marks an active advanced filter) filters the list by vendor, PO number, amount range and due-date range via `InvoiceStore.setFilters` → `GET /api/invoices` (`vendor` / `po_number` / `amount_min` / `amount_max` / `due_date_from` / `due_date_to`). Seeded from the live filters; validates min ≤ max + plain-decimal amounts; Apply / Clear / dismiss. The advanced filters compose with the quick status chips + search box (all carried into the same request + offline cache key)
 - Invoice detail with approve/reject
 - Invoice warnings / fraud flags + PO match — `InvoiceWarningsPanel` on the detail screen renders `Invoice.warnings` (`{type, severity, message, code, params}`, localized off `code` with `message` as the fallback, severity-coloured to WCAG AA) and the `po_match` panel (match type, localized status, variance %, issues — `po_match.issue.*` findings localized the same way, a pre-catalogue bare-string issue rendered as written; `mobile/docs/i18n.md` § Invoice warnings). The variance reads `amount_variance_pct` — the key `MatchResult` writes; it read a top-level `variance_pct` that the backend never sends, so it never rendered — and is absent when the invoice and the PO are in different currencies, where the matcher compares nothing (`docs/decisions.md` §197). No mobile screen shows a PO's own money, so there is no PO figure to label. Parity with the web invoice modal; nothing renders when there are no warnings and no PO
