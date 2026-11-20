@@ -2148,7 +2148,8 @@ async def seed_tenant_lean(db_name: str, org_id: uuid.UUID, tenant_label: str):
                 # row stamped below can be retrieved.
                 corr_id = uuid.uuid4()
                 number = f"LEAN-{i:03d}"
-                header: dict = {"amount": Decimal(f"{100 + i}.00"), "currency": "USD"}
+                header: dict = {"amount": Decimal(f"{100 + i}.00")}
+                currency = "USD"
                 if i == LEAN_LONG_NUMBER_INDEX:
                     # An ERP-shaped invoice number with no natural break point,
                     # on the first `approved` row — the payment queue's.
@@ -2157,6 +2158,7 @@ async def seed_tenant_lean(db_name: str, org_id: uuid.UUID, tenant_label: str):
                     # Tax-exclusive: net lines summing to `subtotal`, the tax
                     # once on the header (the #572 shape).
                     header = realistic.tax_exclusive_header(tax_spec)
+                    currency = tax_spec["currency"]
                 inv = Invoice(
                     organization_id=org_id,
                     vendor_name=owner.name,
@@ -2165,6 +2167,7 @@ async def seed_tenant_lean(db_name: str, org_id: uuid.UUID, tenant_label: str):
                     status=status,
                     invoice_date=date(2026, 1, i % 28 + 1),
                     correlation_id=corr_id,
+                    currency=currency,
                     **header,
                 )
                 invoices.append(inv)

@@ -52,6 +52,13 @@ from app.services.sanctions_adapters import (
     UnknownSanctionsProviderError,
     get_sanctions_adapter,
 )
+from app.services.sanctions_adjudication import (
+    SCREENED_INPUTS_KEY,
+    check_fingerprint,
+    covering_adjudication,
+    screened_inputs_hash,
+    uncover_for_material_edit,
+)
 from app.services.sanctions_categories import (
     has_adverse_media,
     merge_categories_into_raw_response,
@@ -83,6 +90,9 @@ class ScreenOutcome:
     # (`vendor_card_revocation.revoke_vendor_cards`). `None` when the screen
     # did not block the vendor.
     card_revocation: VendorCardRevocation | None = None
+    # The active false-positive adjudication covering this exact result
+    # (decisions §477), or None. A covered result holds nothing.
+    adjudication_id: uuid.UUID | None = None
 
     @property
     def adverse_media(self) -> bool:
@@ -93,6 +103,49 @@ class ScreenOutcome:
 def _adapter_for(org_settings: dict | None) -> SanctionsAdapter:
     cfg = ((org_settings or {}).get("compliance") or {}).get("sanctions") or {}
     return get_sanctions_adapter(cfg)
+
+
+def set_sanctions_match_block(
+    vendor: Vendor, *, matched_list: str | None, provider: str, now: datetime
+) -> bool:
+    """Set the sticky payment block an uncovered sanctions ``match`` owes.
+    True when the vendor was not already blocked."""
+    newly_blocked = not vendor.payments_blocked
+    vendor.payments_blocked = True
+    # No PII: the list NAME only, never match details.
+    vendor.payments_blocked_reason = (
+        f"sanctions match ({matched_list or 'unspecified list'}) via {provider}"
+    )
+    vendor.payments_blocked_at = now
+    return newly_blocked
+
+
+async def apply_sanctions_match(
+    db: AsyncSession,
+    *,
+    vendor: Vendor,
+    organization_id: uuid.UUID,
+    org_settings: dict | None,
+    actor_id: uuid.UUID | None,
+    matched_list: str | None,
+    provider: str,
+    trigger: str = "vendor.sanctions_match",
+) -> VendorCardRevocation | None:
+    """Everything an uncovered ``match`` does to the vendor: the sticky block,
+    then the closing of its live cards. Revoking a ``match`` adjudication
+    (``sanctions_adjudication.revoke``) calls this, so the end of a clearance
+    re-applies exactly what the screen would have."""
+    set_sanctions_match_block(
+        vendor, matched_list=matched_list, provider=provider, now=datetime.now(UTC)
+    )
+    return await revoke_vendor_cards(
+        db,
+        vendor=vendor,
+        organization_id=organization_id,
+        org_settings=org_settings,
+        actor_id=actor_id,
+        trigger=trigger,
+    )
 
 
 def _beneficial_owners(vendor: Vendor) -> list[dict] | None:
@@ -169,9 +222,15 @@ async def screen_vendor_record(
         # is compute-on-read off the latest `sanctions_checks` row and never
         # calls an adapter, so this is the only way an adverse-media hit can
         # reach the vendor's `risk_factors`.
-        raw_response=merge_categories_into_raw_response(
-            screening.raw_response, screening.categories
-        ),
+        raw_response={
+            **(
+                merge_categories_into_raw_response(screening.raw_response, screening.categories)
+                or {}
+            ),
+            # What was screened (decisions §477): an adjudication covers this
+            # result only for these inputs.
+            SCREENED_INPUTS_KEY: await screened_inputs_hash(db, vendor),
+        },
         correlation_id=corr,
     )
     db.add(row)
@@ -181,17 +240,24 @@ async def screen_vendor_record(
     vendor.screening_status = _STATUS_MAP.get(screening.result, "review")
     vendor.last_screened_at = now
 
+    # An adjudicated false positive (decisions §477) covers this screen only
+    # when it is the SAME result: same provider, verdict, list and entry. A new
+    # or different hit finds nothing and the vendor holds again.
+    covering = await covering_adjudication(
+        db,
+        vendor_id=vendor.id,
+        provider=row.provider,
+        result=row.result,
+        fingerprint=check_fingerprint(row),
+    )
+    vendor.screening_adjudication_id = covering.id if covering is not None else None
+    adjudicated = covering is not None
+
     newly_blocked = False
-    if screening.result == "match":
-        if not vendor.payments_blocked:
-            newly_blocked = True
-        vendor.payments_blocked = True
-        # No PII: the list NAME only, never match details.
-        vendor.payments_blocked_reason = (
-            f"sanctions match ({screening.matched_list or 'unspecified list'}) "
-            f"via {screening.provider}"
+    if screening.result == "match" and not adjudicated:
+        newly_blocked = set_sanctions_match_block(
+            vendor, matched_list=screening.matched_list, provider=screening.provider, now=now
         )
-        vendor.payments_blocked_at = now
 
     # PII-free audit row: result + list NAME + provider only. Raw match
     # details live solely in the sanctions_checks JSONB (invariant #7).
@@ -213,6 +279,7 @@ async def screen_vendor_record(
             "categories": list(screening.categories),
             "check_type": check_type,
             "newly_blocked": newly_blocked,
+            "adjudication_id": str(covering.id) if covering is not None else None,
         },
     )
 
@@ -221,7 +288,7 @@ async def screen_vendor_record(
     # not only a new block, so a re-screen of an already-blocked vendor also
     # retries any card a previous attempt could not close.
     card_revocation: VendorCardRevocation | None = None
-    if screening.result == "match":
+    if screening.result == "match" and not adjudicated:
         card_revocation = await revoke_vendor_cards(
             db,
             vendor=vendor,
@@ -250,6 +317,7 @@ async def screen_vendor_record(
         sanctions_check=row,
         categories=screening.categories,
         card_revocation=card_revocation,
+        adjudication_id=covering.id if covering is not None else None,
     )
 
 
@@ -271,6 +339,11 @@ async def screen_best_effort(
     only the screen's partial mutations, leaving the vendor row intact, and the
     exception is logged + swallowed.
 
+    It is also the material-edit door: it first clears the vendor's
+    false-positive adjudication pointer
+    (``sanctions_adjudication.uncover_for_material_edit``), so every caller
+    must be a write that changed a screened input.
+
     Lives here rather than in ``api/vendors.py`` because it has two callers:
     the vendor router's create/update/bank-change paths, and the enrichment
     apply path (``POST /api/enrichment/vendors/{id}/apply``), which writes
@@ -279,6 +352,11 @@ async def screen_best_effort(
     """
     from app.config import settings
 
+    # Every caller runs this because a write changed a screened input. The old
+    # adjudication stops covering first, outside the savepoint, so a screen
+    # that fails below leaves the vendor held rather than cleared by a stamp
+    # made on other inputs (decisions §477).
+    await uncover_for_material_edit(db, vendor=vendor, organization_id=org_id, actor_id=actor_id)
     if not settings.vendor_screening_enabled:
         return
     try:

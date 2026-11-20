@@ -6,6 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -479,13 +480,31 @@ async def _refuse_taken_email(
             detail=EMAIL_CHECK_THROTTLED_DETAIL,
             headers=exc.headers,
         ) from exc
+    await _refuse_held_email(db, org_id, email, exclude_user_id=exclude_user_id)
+
+
+async def _refuse_held_email(
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    email: str,
+    *,
+    exclude_user_id: uuid.UUID | None = None,
+) -> None:
+    """The lookup half of :func:`_refuse_taken_email`, without the budget gate.
+
+    Also what a create that lost the race to the database answers with: a
+    concurrent writer took the address between the pre-check and the flush,
+    and `uq_users_email_lower` refused the insert (§475) — the same coded 409
+    the pre-check would have given a moment later, never a 500."""
     holder = await email_holder_org_id(db, email, exclude_user_id=exclude_user_id)
     if holder is None:
         return
     if holder == org_id:
         raise HTTPException(status_code=409, detail=EMAIL_IN_THIS_WORKSPACE_DETAIL)
     await record_auth_failure(
-        EMAIL_COLLISION_SCOPE, budget_key, window_seconds=EMAIL_COLLISION_WINDOW_SECONDS
+        EMAIL_COLLISION_SCOPE,
+        auth_identity_key(str(org_id)),
+        window_seconds=EMAIL_COLLISION_WINDOW_SECONDS,
     )
     raise HTTPException(status_code=409, detail=EMAIL_IN_OTHER_WORKSPACE_DETAIL)
 
@@ -622,8 +641,16 @@ async def create_user(
         organization_id=org_id,
         must_change_password=False,
     )
-    db.add(new_user)
-    await db.flush()
+    # A savepoint, so losing the race to a concurrent create of the same
+    # address (any case: the index is on `lower(email)`) is the coded 409, and
+    # the session stays usable to say so.
+    try:
+        async with db.begin_nested():
+            db.add(new_user)
+            await db.flush()
+    except IntegrityError:
+        await _refuse_held_email(db, org_id, email)
+        raise
 
     # Assign roles. Restrict the lookup to system roles + this org's
     # custom roles so an admin from acme can't accidentally (or
@@ -758,11 +785,17 @@ async def update_user(
     if body.full_name is not None and body.full_name != target.full_name:
         target.full_name = body.full_name
         changed_fields.append("full_name")
+    target_email_new: str | None = None
     if body.email is not None:
         new_email = normalize_email(body.email)
         if new_email != normalize_email(target.email):
+            target_email_new = new_email
             await _refuse_taken_email(db, org_id, new_email, exclude_user_id=user_id)
-            target.email = new_email
+            # Assigned inside the savepoint below, not here: any query in
+            # between autoflushes, and `begin_nested()` itself flushes pending
+            # changes in the OUTER transaction before issuing SAVEPOINT — so a
+            # rename assigned now would hit `uq_users_email_lower` outside the
+            # savepoint, poisoning the session instead of yielding the 409.
             changed_fields.append("email")
     if body.is_active is not None and body.is_active != target.is_active:
         target.is_active = body.is_active
@@ -786,7 +819,21 @@ async def update_user(
     if roles_changed:
         changed_fields.append("role_names")
 
-    await db.flush()
+    # A savepoint, as on create: a concurrent writer that takes the new address
+    # between the pre-check and this flush trips `uq_users_email_lower` (§475),
+    # and the rename answers with the same coded 409 rather than a 500. The
+    # rename is applied INSIDE it — `begin_nested()` flushes everything already
+    # pending in the outer transaction first, so only a change made after it
+    # opens is one the savepoint can roll back.
+    try:
+        async with db.begin_nested():
+            if target_email_new is not None:
+                target.email = target_email_new
+            await db.flush()
+    except IntegrityError:
+        if "email" in changed_fields:
+            await _refuse_held_email(db, org_id, target_email_new, exclude_user_id=user_id)
+        raise
 
     # `populate_existing()`: the role change above deletes `UserRole` rows via
     # a raw Core-level `.delete()`, which bypasses the ORM unit-of-work and

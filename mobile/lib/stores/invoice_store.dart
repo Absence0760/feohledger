@@ -100,6 +100,17 @@ class InvoiceStore extends ChangeNotifier
   String? _statusFilter;
   String? _searchQuery;
   InvoiceSearchFilters _filters = InvoiceSearchFilters.empty;
+
+  /// The Overdue quick view: owed and past due, the set the dashboard's
+  /// Overdue figure counts (`GET /api/invoices?overdue=true`). It spans
+  /// statuses (approved AND in review), so it and a status chip are mutually
+  /// exclusive.
+  bool _overdueOnly = false;
+
+  /// Bumped when something outside the Invoices screen clears the search
+  /// ([showOverdue]), so the screen clears its search box once, and only
+  /// then: never mid-typing while a debounced query has not landed yet.
+  int _searchClearedExternally = 0;
   bool _fromCache = false;
 
   // ----- Bulk-operation selection -----
@@ -116,6 +127,9 @@ class InvoiceStore extends ChangeNotifier
   Object? get updateErrorDetail => _updateErrorDetail;
   Object? get approveErrorDetail => _approveErrorDetail;
   String? get statusFilter => _statusFilter;
+  String? get searchQuery => _searchQuery;
+  bool get overdueOnly => _overdueOnly;
+  int get searchClearedExternally => _searchClearedExternally;
   InvoiceSearchFilters get filters => _filters;
   bool get fromCache => _fromCache;
 
@@ -123,6 +137,7 @@ class InvoiceStore extends ChangeNotifier
   /// an empty result then means "nothing matches", not "no invoices".
   bool get isFiltered =>
       _statusFilter != null ||
+      _overdueOnly ||
       (_searchQuery != null && _searchQuery!.isNotEmpty) ||
       !_filters.isEmpty;
 
@@ -178,6 +193,7 @@ class InvoiceStore extends ChangeNotifier
     _statusFilter = null;
     _searchQuery = null;
     _filters = InvoiceSearchFilters.empty;
+    _overdueOnly = false;
     _fromCache = false;
     _selectionMode = false;
     _selectedIds.clear();
@@ -219,8 +235,29 @@ class InvoiceStore extends ChangeNotifier
     notifyListeners();
   }
 
+  /// A status chip, "All" included, leaves the Overdue quick view.
   void setStatusFilter(String? status) {
     _statusFilter = status;
+    _overdueOnly = false;
+    fetch();
+  }
+
+  /// The Overdue chip: the past-due set across statuses, so the status chip
+  /// clears. Search and advanced filters still narrow it.
+  void setOverdueOnly() {
+    _statusFilter = null;
+    _overdueOnly = true;
+    fetch();
+  }
+
+  /// The dashboard Overdue card's tap-through: the list must hold exactly
+  /// the rows the card counted, so every other filter clears with it.
+  void showOverdue() {
+    _statusFilter = null;
+    _searchQuery = null;
+    _searchClearedExternally++;
+    _filters = InvoiceSearchFilters.empty;
+    _overdueOnly = true;
     fetch();
   }
 
@@ -242,6 +279,7 @@ class InvoiceStore extends ChangeNotifier
     _statusFilter = null;
     _searchQuery = null;
     _filters = InvoiceSearchFilters.empty;
+    _overdueOnly = false;
     fetch();
   }
 
@@ -259,6 +297,7 @@ class InvoiceStore extends ChangeNotifier
       amountMax: f.amountMax,
       dueDateFrom: f.dueDateFrom,
       dueDateTo: f.dueDateTo,
+      overdue: _overdueOnly,
       page: page,
     );
   }
@@ -285,7 +324,8 @@ class InvoiceStore extends ChangeNotifier
     notifyListeners();
 
     final f = _filters;
-    final cacheKey = 'invoices_${_statusFilter ?? 'all'}_${_searchQuery ?? ''}'
+    final view = _overdueOnly ? 'overdue' : (_statusFilter ?? 'all');
+    final cacheKey = 'invoices_${view}_${_searchQuery ?? ''}'
         '_${f.vendor ?? ''}_${f.poNumber ?? ''}_${f.amountMin ?? ''}'
         '_${f.amountMax ?? ''}_${f.dueDateFrom?.toIso8601String() ?? ''}'
         '_${f.dueDateTo?.toIso8601String() ?? ''}';

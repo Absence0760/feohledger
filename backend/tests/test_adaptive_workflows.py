@@ -620,6 +620,7 @@ async def _seed_approved_vendor(
                 vendor_name=vendor_name,
                 vendor_id=vendor.id,
                 amount=amt,
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
             s.add(inv)
@@ -665,6 +666,7 @@ async def _seed_in_review_invoice(mk, org_id, *, vendor_id, vendor_name, amount,
             vendor_name=vendor_name,
             vendor_id=vendor_id,
             amount=Decimal(amount),
+            currency="USD",
             status=InvoiceStatus.ready_for_review,
         )
         s.add(inv)
@@ -785,6 +787,7 @@ async def test_suggestion_goes_stale(realdb):
                 vendor_name="Acme Cleaning",
                 vendor_id=vid,
                 amount=Decimal("100"),
+                currency="USD",
                 status=InvoiceStatus.rejected,
             )
             s.add(inv)
@@ -1007,6 +1010,7 @@ async def _seed_decisions_for_vendor(mk, org_id, actor_id, *, vendor_id, n, pref
                 vendor_name=vname,
                 vendor_id=vendor_id,
                 amount=Decimal("4800"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
             s.add(inv)
@@ -1057,6 +1061,7 @@ async def _seed_overturns_for_approver(mk, org_id, actor_id, *, n_decided, n_ove
                 invoice_number=f"OT-{actor_id.hex[:6]}-{i}",
                 vendor_name="Overturn Co",
                 amount=Decimal("1000"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
             s.add(inv)
@@ -1202,6 +1207,7 @@ async def test_routing_endpoint_self_correction_not_an_overturn(realdb):
                 invoice_number=f"CORR-{i}",
                 vendor_name="Corr Co",
                 amount=Decimal("1000"),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
             s.add(inv)
@@ -1469,6 +1475,7 @@ async def test_routing_apply_409_when_not_ready_for_review(realdb):
             vendor_name="Acme Cleaning",
             vendor_id=vid,
             amount=Decimal("5000"),
+            currency="USD",
             status=InvoiceStatus.approved,  # NOT ready_for_review
         )
         s.add(inv)
@@ -1612,6 +1619,7 @@ async def _seed_clean_vendors(mk, org_id, actor_id, specs):
                     vendor_name=name,
                     vendor_id=vendor.id,
                     amount=Decimal(str(amount)),
+                    currency="USD",
                     status=InvoiceStatus.approved,
                 )
                 s.add(inv)
@@ -2080,6 +2088,7 @@ async def _seed_auto_approved(
                 invoice_number=f"AUTO-{i}",
                 vendor_name="Auto Vendor",
                 amount=Decimal(str(base_amount)),
+                currency="USD",
                 status=InvoiceStatus.approved,
             )
             s.add(inv)

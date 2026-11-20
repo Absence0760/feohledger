@@ -93,7 +93,6 @@ def tax_exclusive_header(spec: dict[str, Any]) -> dict[str, Any]:
         "subtotal": Decimal(spec["subtotal"]),
         "tax_amount": Decimal(spec["tax_amount"]),
         "tax_rate": Decimal(spec["tax_rate"]),
-        "currency": spec["currency"],
     }
 
 
@@ -155,7 +154,9 @@ async def add_realistic_rows(session, org_id: uuid.UUID, *, today: date) -> list
     numbers = rows["invoice_numbers"]
     amounts = rows["amounts"]
 
-    def _invoice(vendor: Vendor, number: str, status: str, **extra) -> Invoice:
+    def _invoice(
+        vendor: Vendor, number: str, status: str, *, currency: str = "USD", **extra
+    ) -> Invoice:
         return Invoice(
             organization_id=org_id,
             vendor_id=vendor.id,
@@ -166,7 +167,8 @@ async def add_realistic_rows(session, org_id: uuid.UUID, *, today: date) -> list
             due_date=today + timedelta(days=18),
             payment_terms="Net 30",
             status=status,
-            **({"amount": Decimal(amounts[1]), "currency": "USD"} | extra),
+            currency=currency,
+            **({"amount": Decimal(amounts[1])} | extra),
         )
 
     # The payment-queue row is the UNVERIFIED vendor's: #573 hid "Record as
@@ -182,6 +184,7 @@ async def add_realistic_rows(session, org_id: uuid.UUID, *, today: date) -> list
         "ready_for_review",
         po_number=tax["po_number"],
         assigned_to=rows["assignee_name"],
+        currency=tax["currency"],
         **tax_exclusive_header(tax),
     )
     invoices = [inv_queue, inv_long_new, inv_non_ascii, inv_tax]

@@ -199,11 +199,40 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
   nowrap` plus a `title` with the full value. Reference: `/vendors`, whose
   widths are scoped under a page wrapper because `SortableHeader` renders the
   `<th>` from another component.
+- **Size fixed widths to the longest locale; fixed headers wrap.** A fixed
+  column cannot grow, so a width measured against English overprints the next
+  column in es/fr/de/pt-BR ("FECHA DEL ESTADO DE CUENTA" ran ≈200px in a 130px
+  column; the badge "En attente d’approbation" ≈190px in 150px). In a `fixed`
+  table DataTable lets each `<th>` wrap, so a header column needs only its
+  longest single *word* in any of the six catalogues
+  (`src/lib/i18n/locales/*.ts`). That holds for a fluid column too: the
+  columns without a width share what the `min-width` leaves, so give a
+  second fluid column a width of its own when that share is narrower than its
+  longest header word (/requisitions' "Departamento", 127px in a 120px
+  share). A `<Badge>` never wraps, so a status column
+  is sized to its longest badge label in any locale, plus the cell padding.
+  **Action columns wrap too:** in a `fixed` table `td.actions` is
+  `white-space: normal`, so when a row's buttons don't fit — another locale, or
+  the widest status's button set — they flow onto a second line rather than
+  out of the table. Size the actions column for the common case in English
+  and let the rest wrap; never widen it to the worst locale's full button row.
+  A note in an actions cell (the bank-change queue's separation-of-duties
+  refusal) is `display: block; white-space: normal`, above the buttons.
+  Guard: `tests-e2e/reactivity/layout-stability.spec.ts` opens each page in
+  its `LOCALE_SIZED` set under `de` and `es` and fails if a header, a
+  badge's cell or an action cell has `scrollWidth > clientWidth`; a new
+  fixed table joins that set.
 - **A list page's table is `fixed`.** Under `table-layout: auto` the columns
   are sized against the "Loading…" row and then re-sized against the real
   rows, so every column slides sideways as the data lands. /invoices,
-  /payments, /exceptions, /vendors, /purchase-orders and /gl-accounts are
-  converted; `tests-e2e/reactivity/layout-stability.spec.ts` holds each to a
+  /payments, /exceptions, /vendors, /purchase-orders, /gl-accounts, the
+  screening queue, bank changes, /requisitions, /intake, /catalogs, /budgets,
+  /recurring, /vendor-statements, /positive-pay, /experiments, /workflows,
+  the users directory, /admin/entities, /admin/api-keys and
+  /admin/access-review are converted, the last three by mounting the table
+  from first paint with DataTable's own loading row rather than swapping a
+  separate loading block for it. Size each fixed column to the widest string
+  in any of the six locales, not the English one; `tests-e2e/reactivity/layout-stability.spec.ts` holds each to a
   cumulative layout shift under 0.1 with production-like API latency and
   checks a `fixed` table's header x positions. A new sidebar page fails that
   spec until it is in its `LIST_PAGES` or `NOT_LIST_PAGES`.
@@ -858,7 +887,9 @@ An action the server would refuse for a reason the reader can act on is
 rendered `disabled`, not hidden, with the reason as its accessible
 description: pass `describedby` naming a `.visually-hidden` element that holds
 the localized reason (and `title` for pointer users). The payment queue's
-"Record as paid" is the worked example (decisions §319).
+"Record as paid" is the worked example (decisions §319). When the reason
+should be read on screen too, pass `reason` instead — see § Whether to offer
+an action → *Showing the reason*.
 
 The actions cell is **always the last column** (right side of the row),
 preceded by a header `<th class="actions-col"></th>`. The `<td>` uses
@@ -905,6 +936,23 @@ same gate function the endpoint raises from, so the two cannot disagree:
   beside a disabled control when the reader can act on it ("a colleague must
   approve this").
 
+**Showing the reason.** A visible reason beside a disabled control is always
+`RefusalNote` (`#lib/components/ui/RefusalNote.svelte`), never a page-local
+`<span class="…-note">` with its own CSS — four pages had grown one each
+(requisitions, bank-change queue, expense reports, the exception dialog). It
+renders the sentence on its own line **above** the button(s), wraps in any
+locale, and drops the `td.actions` inline gap on the button under it, so a long
+reason never pushes the row's other actions out of a fixed actions column.
+
+- A row action: `<RowAction disabled reason={refusalText(v, m)} reasonId?>` —
+  `RowAction` renders the note and adds its id to the button's
+  `aria-describedby` (beside any `describedby` you pass). Set `reasonId` only
+  when a test or another control needs the note (`approve-refusal-<id>` on
+  /requisitions).
+- Any other control (a header or dialog button): `<RefusalNote id reason testid?>`
+  placed before the button(s), with each refused button's `aria-describedby`
+  set to that id (/expenses report detail, the /exceptions resolve dialog).
+
 Never add a second check beside the verdict — that is the copy it replaces.
 Org-level configuration the server states elsewhere (the execution mode, read
 once from `GET /api/payments/execution-mode`) is not a row property and stays a
@@ -931,17 +979,25 @@ Where each verdict lives (backend gate → field):
 | Invoice modal (Recall Approval) | same read → `recall_approval` | `services/review.recall_refusal`. `invoice_not_recallable` hides the control (about the status); any other refusal (a bill the ERP may hold, a live payment or card) disables it with its sentence (`recall-refusal`). The reason dialog (`modals/RecallApprovalModal.svelte`) states a refusal the door raises in between (decisions §374) |
 | Exception queue | `decision_refusals.{resolve,dismiss,escalate}` | `api/exceptions.actionable_refusal` + `exception_lifecycle.segregation_refusal` |
 | Credit memos | `actions.{apply,edit,void}` | `_assert_applicable` / `_assert_editable` / `_assert_voidable` |
+| Discount offers | `actions.{accept,decline}`, `capturable_tier_days` (the accept dialog's tiers) | `api/discounts.accept_refusal` / `.decline_refusal` |
+| Experiments | `actions.start` | `api/workflow_experiments.start_refusal` |
+| Adaptive suggestions | `actions.dismiss` | `api/adaptive_workflows.dismiss_refusal` |
 | Vendors | `status_actions.{verify,reject}` | `api/vendors.vendor_status_refusal` |
 | Vendor modal (Find this vendor in the ERP) | `GET /api/vendors/{id}/erp-links` → `search_refusal` (also on the link / unlink responses) | `services/vendor_erp_manual_link.search_refusal`. `vendor_erp_link_exists` replaces the search with its sentence; any other refusal hides it (decisions §415) |
 | Bank-change queue | `approve_refusal` | `api/vendors.change_request_approve_refusal` |
+| Screening review queue | `adjudicate_refusal`, `revoke_adjudication_refusal` | `services/sanctions_adjudication.adjudicate_refusal`, `.revoke_refusal` (decisions §477). `role_not_permitted` hides the control; `sanctions_adjudication_segregation` disables Adjudicate beside its sentence; `already_cleared` / `not_active` pick which of the two is shown |
 | Expense reports (list + detail) | `actions.{submit,approve,reject,compose}` | `services/expense_controls.report_{submit,approve,reject,compose}_refusal` |
 | Expense card transactions | `actions.{match,create_expense,unmatch,ignore}` | `services/expense_controls.card_txn_{link,unmatch,ignore}_refusal` |
+| Intake | `actions.{submit,approve,reject,convert,cancel,reopen}` | `services/procurement_controls.intake_transition_refusal` / `.intake_convert_refusal`. Every refusal hides the control; a row that already names its requisition shows the link instead of Convert (which would only replay it) |
+| Requisitions | `actions.{submit,approve,reject,convert,cancel,reopen}` | `services/procurement_controls.requisition_{transition,approve,convert}_refusal`. `requisition_approval_segregation` shows Approve disabled with its reason above it (`RowAction reason`, `approve-refusal-<id>`); every other refusal hides the control; a converted row with its PO hides Convert |
 
 Each is pinned by a backend parity test that, for every seeded role and row
 state, asks both sides — the verdict and the real POST — and fails unless they
 agree (`tests/test_payment_action_verdicts.py`,
 `tests/test_queue_action_verdicts.py`, `tests/test_review_actions_parity.py`,
 `tests/test_payment_queue_blocked.py`, `tests/test_expense_action_verdicts.py`,
+`tests/test_offer_experiment_suggestion_verdicts.py`,
+`tests/test_procurement_action_verdicts.py`, `tests/test_sanctions_adjudication_verdicts.py`,
 `tests/test_vendor_erp_manual_link.py`).
 A new verdict ships with one.
 
@@ -1137,6 +1193,7 @@ the `ui/` primitive in the Source column.
 | Bulk delete | `.btn-danger.bulk-delete-btn` (+ `.armed`) | `ui/BulkDeleteButton.svelte` |
 | Bulk action | `.btn-secondary` (`.btn-primary` for the bar's lead action) | `src/app.css`, always inside a BulkBar |
 | Per-row action | `<RowAction>` (variant + armed) | `ui/RowAction.svelte` |
+| Why an action is refused (visible) | `<RowAction reason>` / `<RefusalNote>` | `ui/RefusalNote.svelte` |
 | Clickable-row open control | `<RowLink>` + `.clickable` row + `isRowOpenClick` | `ui/RowLink.svelte` / `utils/rowNav.ts` |
 | Filter pill | `.filter-chip` (+ `.active`, `.count`) | `ui/FilterChips.svelte` |
 | Tab bar | `.tab-row` / `.tab` (+ `.active`) | `ui/Tabs.svelte` |
@@ -1675,10 +1732,13 @@ script only decides which one the page asks for.
   base tokens are deliberately darker than the bare-surface bar needs: ~40
   rules set a base token as text on a 10–20% tint of its own hue, and each base
   token clears its own 20% tint.
-- **The one runtime hole is the white-label accent.** A tenant's brand
-  `--accent` is written inline on `<html>`, so it applies in both themes, and a
-  blue picked for navy is ~3:1 as text on white. Tracked in
-  `docs/followups.md`.
+- **A white-label accent is derived per theme.** No colour clears 4.5:1 as
+  text on both palettes, so the brand store never writes `--accent` inline: it
+  writes `--brand-accent-dark` / `--brand-accent-light`, each the tenant's
+  colour or the least darker / lighter shade of it that reads as text there
+  (`stores/brandTheme.ts` `themeAccent`), and each palette's `--accent` reads
+  its own (`docs/decisions.md` §478). A new palette block that redeclares
+  `--accent` must keep that `var(--brand-accent-*, …)` shape.
 
 ### Colour tokens and contrast (WCAG 1.4.3)
 
@@ -1795,5 +1855,8 @@ always exists. Rationale + what was rejected: `docs/decisions.md` §28.
 `accentStrongMeetsAA` (same file, same WCAG primitive) drive a `FieldWarning`
 advisory on both surfaces that edit it — `/organization` Branding and the
 `/admin/partner` child-branding modal. Advisory, not a block: the backend
-accepts any valid hex and the brand is the tenant's call.
+accepts any valid hex and the brand is the tenant's call. `--accent` as text
+is not left to the tenant: it is derived per theme (§ Themes, decisions §478),
+and `accentTextContrast` reports the result for both themes on `/organization`
+Branding.
 

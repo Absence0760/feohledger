@@ -377,6 +377,7 @@ async def _seed_agent_po_mismatch(mk, org_id, *, invoice_amount, po_total, numbe
             invoice_number=number,
             vendor_name="Acme Hosting",
             amount=invoice_amount,
+            currency="USD",
             status=InvoiceStatus.ready_for_review,
             po_number=po_number,
             po_match={"status": "matched", "po_total": str(po_total)},

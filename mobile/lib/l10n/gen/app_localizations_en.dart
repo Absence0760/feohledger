@@ -122,6 +122,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get dashboardOverdue => 'Overdue';
 
   @override
+  String get dashboardOverdueOpen => 'Shows the overdue invoices';
+
+  @override
   String get dashboardApproved => 'Approved';
 
   @override
@@ -271,6 +274,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invoicesFilterPaid => 'Paid';
 
   @override
+  String get invoicesFilterOverdue => 'Overdue';
+
+  @override
   String get invoicesColInvoiceNumber => 'Invoice #';
 
   @override
@@ -369,6 +375,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get vendorRejected => 'Vendor rejected';
+
+  @override
+  String vendorRejectConfirmTitle(String name) {
+    return 'Reject $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name will be marked rejected. Any live virtual cards issued to it will be cancelled.';
+  }
 
   @override
   String vendorCardsNotClosed(int count) {

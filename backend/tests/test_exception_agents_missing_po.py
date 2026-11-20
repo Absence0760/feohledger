@@ -102,6 +102,7 @@ async def _seed_missing_po(
             approved_by="Original Approver" if approved_once else None,
             approval_date=date(2026, 11, 1) if approved_once else None,
             amount=invoice_amount,
+            currency="USD",
             invoice_date=date.today() if with_invoice_date else None,
             status=InvoiceStatus.ready_for_review,
             # References a PO number that does NOT exist → live match == no_po.

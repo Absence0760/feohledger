@@ -13,6 +13,8 @@
 #   - monitoring.tf : alarms, the alerts (email) and pager (SMS) topics
 #   - uptime.tf   : external Route 53 HTTPS checks on the apex, a tenant host
 #                   and the API, their paging alarms, and certificate expiry
+#   - canary.tf   : hourly Synthetics canary validating the certificate Caddy
+#                   serves on api.<domain>, paging under 14 days to expiry
 #   - deploy.tf   : release deploys — the SSM document that runs deploy.sh on
 #                   the VM, and the deploy role's grant to run only that
 #   - frontend.tf : the SPA on S3 + CloudFront, and the deploy role's grant to
@@ -31,6 +33,11 @@ terraform {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.44"
+    }
+    # Zips the certificate canary's script (canary.tf).
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.8"
     }
   }
 

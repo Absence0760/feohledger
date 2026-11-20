@@ -746,10 +746,7 @@ void main() {
       // Each card in the row is its own announcement (KpiCard is a semantics
       // container; the two used to merge into one node).
       final soonMoney = formatMoneyCompact(2000, currency: 'USD');
-      expect(
-        find.bySemanticsLabel('Upcoming: 2, $soonMoney'),
-        findsOneWidget,
-      );
+      expect(find.bySemanticsLabel('Upcoming: 2, $soonMoney'), findsOneWidget);
       expect(find.bySemanticsLabel('For Review: 3'), findsOneWidget);
       expect(find.text('10'), findsNothing);
       semantics.dispose();
@@ -793,6 +790,60 @@ void main() {
       // Absent, never a `0` nobody reported.
       expect(find.text('Overdue'), findsNothing);
       expect(find.byType(KpiCard), findsNWidgets(4));
+    });
+
+    testWidgets('tapping Overdue opens the overdue invoices, and says so to '
+        'a screen reader', (tester) async {
+      final semantics = tester.ensureSemantics();
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => _json(_dashboardJson(due: due))),
+      );
+      var opened = 0;
+
+      await tester.pumpWidget(
+        _localized(DashboardScreen(onShowOverdue: () => opened++)),
+      );
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      final card = find.widgetWithText(KpiCard, 'Overdue');
+      expect(card, findsOneWidget);
+      expect(
+        tester.getSemantics(card),
+        isSemantics(
+          isButton: true,
+          hasTapAction: true,
+          hint: 'Shows the overdue invoices',
+        ),
+      );
+
+      await tester.tap(card);
+      await tester.pump();
+      expect(opened, 1);
+
+      // The other cards are figures, not buttons.
+      expect(
+        tester.getSemantics(find.widgetWithText(KpiCard, 'For Review')),
+        isSemantics(isButton: false, hasTapAction: false),
+      );
+      semantics.dispose();
+    });
+
+    testWidgets('without a tap-through the Overdue card is not a button', (
+      tester,
+    ) async {
+      final semantics = tester.ensureSemantics();
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => _json(_dashboardJson(due: due))),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      expect(
+        tester.getSemantics(find.widgetWithText(KpiCard, 'Overdue')),
+        isSemantics(isButton: false, hasTapAction: false, hint: ''),
+      );
+      semantics.dispose();
     });
 
     testWidgets('the offline cache keeps the counts', (tester) async {

@@ -36,6 +36,7 @@ from app.api.permissions import (
     PERM_VENDOR_BANK_CHANGE_APPROVE,
     PERM_VENDOR_BLOCK,
     PERM_VENDOR_MANAGE,
+    PERM_VENDOR_SANCTIONS_ADJUDICATE,
     ROLE_DEFAULT_PERMISSIONS,
     effective_permissions,
     permissions_for_role,
@@ -89,6 +90,7 @@ def test_cfo_default_matches_prior_role_matrix():
             PERM_PAYMENT_EXECUTE,
             PERM_PAYMENT_VOID,
             PERM_PAYMENT_RECORD_EXTERNAL,
+            PERM_VENDOR_SANCTIONS_ADJUDICATE,
         }
     )
     assert PERM_VENDOR_BANK_CHANGE_APPROVE not in ROLE_DEFAULT_PERMISSIONS[ROLE_CFO]
@@ -103,6 +105,17 @@ def test_ap_clerk_default_is_empty():
 def test_user_manage_default_is_admin_only():
     holders = {r for r, perms in ROLE_DEFAULT_PERMISSIONS.items() if PERM_USER_MANAGE in perms}
     assert holders == {ROLE_ADMIN}
+
+
+def test_sanctions_adjudicate_default_is_admin_and_cfo_only():
+    """Not ap_manager — who onboards vendors, approves their bank details and
+    executes runs — and never the clerk (decisions §477)."""
+    holders = {
+        r
+        for r, perms in ROLE_DEFAULT_PERMISSIONS.items()
+        if PERM_VENDOR_SANCTIONS_ADJUDICATE in perms
+    }
+    assert holders == {ROLE_ADMIN, ROLE_CFO}
 
 
 def test_payment_void_default_is_admin_and_cfo_only():

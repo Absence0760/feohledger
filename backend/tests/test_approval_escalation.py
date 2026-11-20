@@ -403,10 +403,18 @@ async def test_escalate_tenant_escalates_only_active_overdue_instances(realdb):
 
     async with mk() as s:
         inv_a = Invoice(
-            organization_id=org_id, invoice_number="INV-A", vendor_name="Acme", amount=Decimal("10")
+            organization_id=org_id,
+            invoice_number="INV-A",
+            vendor_name="Acme",
+            amount=Decimal("10"),
+            currency="USD",
         )
         inv_b = Invoice(
-            organization_id=org_id, invoice_number="INV-B", vendor_name="Acme", amount=Decimal("10")
+            organization_id=org_id,
+            invoice_number="INV-B",
+            vendor_name="Acme",
+            amount=Decimal("10"),
+            currency="USD",
         )
         defn = WorkflowDefinition(organization_id=org_id, name="def", steps_config={"steps": []})
         s.add_all([inv_a, inv_b, defn])
@@ -664,6 +672,7 @@ async def test_escalate_tenant_pages_until_the_tenant_is_exhausted(realdb):
                 invoice_number=f"INV-PAGE-{i}",
                 vendor_name="Acme",
                 amount=Decimal("10"),
+                currency="USD",
             )
             s.add(inv)
             await s.flush()
@@ -681,6 +690,7 @@ async def test_escalate_tenant_pages_until_the_tenant_is_exhausted(realdb):
             invoice_number="INV-PAGE-BARE",
             vendor_name="Acme",
             amount=Decimal("10"),
+            currency="USD",
         )
         s.add(inv_bare)
         await s.flush()
@@ -855,6 +865,7 @@ async def test_escalation_never_targets_the_invoices_uploader(realdb):
             invoice_number="INV-ESC-SOD",
             vendor_name="Acme",
             amount=Decimal("100.00"),
+            currency="USD",
             status=InvoiceStatus.ready_for_review,
             uploaded_by_id=uploader,
         )

@@ -280,13 +280,28 @@ The rule now lives in `app/utils/emails.py`: every write stores
 password login, forgot-password, the admin and SCIM uniqueness checks, SCIM's
 `userName eq` / `emails eq` filter, the SSO JIT email-link branch, and the
 portal login and invite — matches with `email_matches`, which compares
-`lower(email)` so rows written before normalization still match. A single-row
-lookup orders an exact match first (`exact_email_first`), so a pre-existing
-pair of case variants resolves deterministically instead of 500ing. The
-database constraint is still the case-sensitive `UNIQUE(email)`; replacing it
-with a unique index on `lower(email)` needs a data migration with an operator
-decision in it and is tracked in `docs/followups.md`.
-`tests/test_email_identity_case.py` pins each path against a mixed-case row.
+`lower(email)`.
+
+**The database enforces it too** (migration 0138, `docs/decisions.md` §475):
+the plain `UNIQUE(email)` on both tables is gone, replaced by unique indexes on
+`lower(email)` — `uq_users_email_lower` on the control plane,
+`uq_vendor_users_email_lower` in every tenant, declared on the models so
+`create_all` builds them for a fresh database. That index is exactly the
+expression `email_matches` compares, so login, forgot-password, SSO JIT and
+SCIM look an address up by index probe rather than a table scan. The migration
+lower-cased every stored address, and it refuses to run while two rows share
+one normalized address (it reports counts, never the addresses, and leaves the
+choice of which account keeps it to the operator —
+`backend/docs/database.md` § Email case collisions). A create that passes the
+app's pre-check and then loses the race to a concurrent one hits the index, and
+admin create, SCIM create and the portal invite each answer with the same 409
+the pre-check gives, never a 500. So does a rename onto a taken address that
+loses the same race: admin `PATCH /api/admin/users/{id}` and SCIM `PUT` /
+`PATCH /Users/{id}` flush the change inside a savepoint too. A single-row lookup still orders an exact
+match first (`exact_email_first`); with the index in place that decides
+nothing, and is kept only so a second match can never 500 a login.
+`tests/test_email_identity_case.py` pins each path against a mixed-case row and
+the lost race; `tests/test_migration_0138_email_lower_unique.py` the migration.
 
 ### Logout endpoint
 
@@ -1294,7 +1309,8 @@ exactly as before.
 - **Catalog** — a small, deliberately-scoped set of *splittable* permission
   constants (dotted strings): `invoice.approve`, `payment_run.approve`,
   `payment.execute`, `payment.void`, `payment.record_external`,
-  `vendor.bank_change.approve`, `vendor.block`, `vendor.manage`, `user.manage`.
+  `vendor.bank_change.approve`, `vendor.block`, `vendor.manage`,
+  `vendor.sanctions.adjudicate`, `user.manage`.
   `GET /api/admin/permissions`
   returns the catalog (key + label) for the role editor — gated `user.manage`
   (see below), same as its sibling reads. Everything not in the catalog stays
@@ -1310,6 +1326,12 @@ exactly as before.
   page's reads beside execute/void. Its own permission rather than
   `payment.execute` because recording moves no money: an org can keep sending
   payments with a few people and let others book what they paid.
+  `vendor.sanctions.adjudicate` (record a sanctions screen result as a false
+  positive, decisions §477) is also new: `admin` and `cfo` hold it, `ap_manager`
+  does not — that role already onboards vendors, approves their bank details and
+  executes runs, so clearing the sanctions hold too would put the whole payee
+  path in one role — and `ap_clerk` never does. The endpoint also refuses the
+  vendor's onboarder and the people behind its current bank details.
 - **Custom-role permissions** — a control-plane JSONB column `roles.permissions`
   (migration `0062_role_permissions`, control-plane-only — `roles` is
   control-plane). System roles leave it NULL (they resolve via the default map);

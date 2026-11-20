@@ -123,6 +123,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get dashboardOverdue => 'Überfällig';
 
   @override
+  String get dashboardOverdueOpen => 'Zeigt die überfälligen Rechnungen';
+
+  @override
   String get dashboardApproved => 'Freigegeben';
 
   @override
@@ -272,6 +275,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoicesFilterPaid => 'Bezahlt';
 
   @override
+  String get invoicesFilterOverdue => 'Überfällig';
+
+  @override
   String get invoicesColInvoiceNumber => 'Rechnungs-Nr.';
 
   @override
@@ -373,6 +379,16 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get vendorRejected => 'Lieferant abgelehnt';
+
+  @override
+  String vendorRejectConfirmTitle(String name) {
+    return '$name ablehnen?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name wird als abgelehnt markiert. Alle aktiven virtuellen Karten dieses Lieferanten werden storniert.';
+  }
 
   @override
   String vendorCardsNotClosed(int count) {

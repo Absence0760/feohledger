@@ -54,6 +54,7 @@ async def _add_decided_invoice(
         vendor_name=vendor_name,
         vendor_id=vendor_id,
         amount=Decimal(str(amount)),
+        currency="USD",
         status=status,
     )
     s.add(inv)
@@ -254,6 +255,7 @@ async def test_out_of_range_invoice_flagged_with_deviated_baseline(realdb):
             vendor_name="Steady Vendor",
             vendor_id=vid,
             amount=Decimal("48000"),
+            currency="USD",
             status=InvoiceStatus.ready_for_review,
         )
         s.add(outlier)
@@ -311,6 +313,7 @@ async def test_in_band_invoice_not_flagged(realdb):
             vendor_name="Steady Vendor",
             vendor_id=vid,
             amount=Decimal("4900"),
+            currency="USD",
             status=InvoiceStatus.ready_for_review,
         )
         s.add(normal)

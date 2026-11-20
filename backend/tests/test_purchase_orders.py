@@ -386,6 +386,7 @@ async def test_get_purchase_order_detail_with_invoices(realdb):
                 invoice_number="INV-1",
                 vendor_name="Cloud Services Inc",
                 amount=Decimal("12000.00"),
+                currency="USD",
                 po_number="PO-2024-201",
                 status=InvoiceStatus.approved,
                 organization_id=org_id,

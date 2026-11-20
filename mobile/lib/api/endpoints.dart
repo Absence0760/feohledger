@@ -94,6 +94,7 @@ class InvoiceApi {
     double? amountMax,
     DateTime? dueDateFrom,
     DateTime? dueDateTo,
+    bool overdue = false,
     bool includeReviewActions = false,
     int page = 1,
     int pageSize = 20,
@@ -120,6 +121,9 @@ class InvoiceApi {
       params['due_date_from'] = _isoDate(dueDateFrom);
     }
     if (dueDateTo != null) params['due_date_to'] = _isoDate(dueDateTo);
+    // Owed and past due, by the predicate the dashboard's `overdue_count`
+    // counts (`services/open_ap_due`): the list the Overdue card opens.
+    if (overdue) params['overdue'] = 'true';
     // Each row's `approve` / `reject` verdict, in this one response
     // ([Invoice.reviewActions]) — the approvals queue's, instead of one
     // `review-actions` read per row. Opt-in: the server runs the approval

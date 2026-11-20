@@ -59,7 +59,7 @@ async def _add_invoice(
     due_date,
     discount_date=None,
     discount_percent=None,
-    currency=None,
+    currency="USD",
 ) -> uuid.UUID:
     """Insert one Invoice (+ optional PaymentSchedule) into the tenant DB.
 
@@ -75,7 +75,7 @@ async def _add_invoice(
             status=status,
             invoice_date=_TODAY - timedelta(days=5),
             due_date=due_date,
-            **({"currency": currency} if currency else {}),
+            currency=currency,
         )
         s.add(inv)
         await s.flush()

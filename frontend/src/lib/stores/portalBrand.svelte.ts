@@ -4,6 +4,7 @@ import {
 	DEFAULT_PRODUCT_NAME,
 	brandThemeVars,
 	brandMark,
+	BRAND_ACCENT_PROPS,
 	type Brand,
 	type BrandMarkChoice
 } from '#lib/stores/brandTheme.ts';
@@ -81,13 +82,14 @@ class PortalBrandStore {
 	/**
 	 * Apply the configured accent colors to `document.documentElement` (and clear
 	 * any previously-applied override that's no longer set). No-op on the server.
-	 * Only touches the two accent tokens — never re-declares the rest of the theme.
+	 * Only touches the brand accent props (one accent per theme plus the strong
+	 * accent, `BRAND_ACCENT_PROPS`, decisions §478) — never the rest of the theme.
 	 */
 	applyTheme(): void {
 		if (typeof document === 'undefined') return;
 		const root = document.documentElement;
 		const vars = brandThemeVars(this.brand);
-		for (const prop of ['--accent', '--accent-strong']) {
+		for (const prop of BRAND_ACCENT_PROPS) {
 			if (vars[prop]) root.style.setProperty(prop, vars[prop]);
 			else root.style.removeProperty(prop);
 		}
@@ -104,8 +106,7 @@ class PortalBrandStore {
 		this.#loaded = false;
 		this.#inflight = null;
 		if (typeof document !== 'undefined') {
-			document.documentElement.style.removeProperty('--accent');
-			document.documentElement.style.removeProperty('--accent-strong');
+			for (const prop of BRAND_ACCENT_PROPS) document.documentElement.style.removeProperty(prop);
 		}
 	}
 }

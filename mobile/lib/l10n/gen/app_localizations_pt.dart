@@ -123,6 +123,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get dashboardOverdue => 'Vencidas';
 
   @override
+  String get dashboardOverdueOpen => 'Mostra as faturas vencidas';
+
+  @override
   String get dashboardApproved => 'Aprovadas';
 
   @override
@@ -273,6 +276,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get invoicesFilterPaid => 'Pagas';
 
   @override
+  String get invoicesFilterOverdue => 'Vencidas';
+
+  @override
   String get invoicesColInvoiceNumber => 'N.º da fatura';
 
   @override
@@ -374,6 +380,16 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get vendorRejected => 'Fornecedor rejeitado';
+
+  @override
+  String vendorRejectConfirmTitle(String name) {
+    return 'Rejeitar $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name será marcado como rejeitado. Todos os cartões virtuais ativos emitidos para ele serão cancelados.';
+  }
 
   @override
   String vendorCardsNotClosed(int count) {
@@ -5153,6 +5169,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get dashboardOverdue => 'Vencidas';
 
   @override
+  String get dashboardOverdueOpen => 'Mostra as faturas vencidas';
+
+  @override
   String get dashboardApproved => 'Aprovadas';
 
   @override
@@ -5303,6 +5322,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get invoicesFilterPaid => 'Pagas';
 
   @override
+  String get invoicesFilterOverdue => 'Vencidas';
+
+  @override
   String get invoicesColInvoiceNumber => 'N.º da fatura';
 
   @override
@@ -5404,6 +5426,16 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get vendorRejected => 'Fornecedor rejeitado';
+
+  @override
+  String vendorRejectConfirmTitle(String name) {
+    return 'Rejeitar $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name será marcado como rejeitado. Todos os cartões virtuais ativos emitidos para ele serão cancelados.';
+  }
 
   @override
   String vendorCardsNotClosed(int count) {

@@ -324,6 +324,12 @@ abstract class AppLocalizations {
   /// **'Overdue'**
   String get dashboardOverdue;
 
+  /// Screen-reader hint on the dashboard Overdue card: tapping it opens the Invoices tab filtered to overdue invoices.
+  ///
+  /// In en, this message translates to:
+  /// **'Shows the overdue invoices'**
+  String get dashboardOverdueOpen;
+
   /// No description provided for @dashboardApproved.
   ///
   /// In en, this message translates to:
@@ -534,6 +540,12 @@ abstract class AppLocalizations {
   /// **'Paid'**
   String get invoicesFilterPaid;
 
+  /// Invoices list quick-view chip: owed and past due, across statuses (the set the dashboard Overdue figure counts).
+  ///
+  /// In en, this message translates to:
+  /// **'Overdue'**
+  String get invoicesFilterOverdue;
+
   /// No description provided for @invoicesColInvoiceNumber.
   ///
   /// In en, this message translates to:
@@ -725,6 +737,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Vendor rejected'**
   String get vendorRejected;
+
+  /// No description provided for @vendorRejectConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reject {name}?'**
+  String vendorRejectConfirmTitle(String name);
+
+  /// Confirm dialog before rejecting a vendor. The server cancels the vendor's live virtual cards on reject.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} will be marked rejected. Any live virtual cards issued to it will be cancelled.'**
+  String vendorRejectConfirmBody(String name);
 
   /// No description provided for @vendorCardsNotClosed.
   ///

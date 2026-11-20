@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/ambient_localizations.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
@@ -56,6 +57,8 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
 
   List<PaymentQueueItem> _queue = [];
   List<PaymentRun> _runs = [];
+  Map<String, PaymentRunRecordDetail> _runVerdicts = {};
+  Set<String> _runVerdictsFailed = {};
   PaymentSummary? _summary;
   bool _loading = false;
   bool _runsLoading = false;
@@ -127,6 +130,54 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
       item.requiredMethod ?? _selection[item.id] ?? PaymentMethod.ach;
 
   int get selectedCount => _selection.length;
+  /// Read the caller's verdicts on each draft run's actions — `POST /runs/{id}/
+  /// approve`, `/execute` and `/cancel` — from the run detail's `actions`
+  /// (`run_action_refusals`, the gates those endpoints raise from). The run
+  /// list carries none of them, so the detail is read per draft run: a
+  /// non-draft run takes none of the three. The list is already published;
+  /// each verdict is filled in (and listeners told) as its read lands, so one
+  /// slow read never holds the Runs tab back. A failed read is recorded in
+  /// [runVerdictsFailed] — still no tappable action (fail closed), but the
+  /// screen can say why — and is retried on the next [fetchRuns].
+  Future<void> _loadRunVerdicts(List<PaymentRun> runs, int token) async {
+    await Future.wait(
+      runs.where((r) => r.isDraft).map((r) async {
+        PaymentRunRecordDetail? detail;
+        try {
+          detail = await PaymentApi.runDetail(r.id);
+        } catch (_) {
+          detail = null;
+        }
+        if (!_runsSeq.isCurrent(token)) return;
+        if (detail != null) {
+          _runVerdicts[r.id] = detail;
+        } else {
+          _runVerdictsFailed.add(r.id);
+        }
+        notifyListeners();
+      }),
+    );
+  }
+
+  /// Whether [runId]'s verdict read failed on the last [fetchRuns]: its
+  /// controls render disabled with "couldn't check", never enabled.
+  bool runVerdictsFailed(String runId) => _runVerdictsFailed.contains(runId);
+
+  /// The caller's verdict on signing [runId] off as CFO —
+  /// [ActionVerdict.unanswered] for a run not read or whose read failed.
+  ActionVerdict runApproveVerdict(String runId) =>
+      _runVerdicts[runId]?.approve ?? ActionVerdict.unanswered;
+
+  /// The caller's verdict on executing [runId] (it moves money) —
+  /// [ActionVerdict.unanswered] for a run not read or whose read failed.
+  ActionVerdict runExecuteVerdict(String runId) =>
+      _runVerdicts[runId]?.execute ?? ActionVerdict.unanswered;
+
+  /// The caller's verdict on cancelling [runId] —
+  /// [ActionVerdict.unanswered] for a run not read or whose read failed.
+  ActionVerdict runCancelVerdict(String runId) =>
+      _runVerdicts[runId]?.cancel ?? ActionVerdict.unanswered;
+
   bool get hasSelection => _selection.isNotEmpty;
 
   /// Drop all in-memory state. Called on logout / forced logout through
@@ -136,6 +187,8 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
   void reset() {
     _queue = [];
     _runs = [];
+    _runVerdicts = {};
+    _runVerdictsFailed = {};
     _summary = null;
     _loading = false;
     _runsLoading = false;
@@ -301,7 +354,15 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
     try {
       final runs = await PaymentApi.runs();
       if (!_runsSeq.isCurrent(token)) return;
+      // Publish the list now; the per-run verdicts follow as they land. A
+      // previous read's verdicts are dropped, never shown against new state.
       _runs = runs;
+      _runVerdicts = {};
+      _runVerdictsFailed = {};
+      _runsLoading = false;
+      notifyListeners();
+      await _loadRunVerdicts(runs, token);
+      return;
     } catch (e) {
       if (!_runsSeq.isCurrent(token)) return;
       _runsLoadError = e;

@@ -115,6 +115,7 @@ async def _paid(mk, org_id, vendor_id, amount, year, *, gl=None):
             invoice_number=f"THR-{uuid.uuid4().hex[:10]}",
             vendor_name="x",
             amount=Decimal(amount),
+            currency="USD",
             status=InvoiceStatus.paid,
             vendor_id=vendor_id,
             gl_account=gl,

@@ -358,7 +358,14 @@ docker compose up -d
 
 All services have health checks configured:
 
-- **PostgreSQL**: `pg_isready -U postgres` (every 5s)
+- **PostgreSQL**: `pg_isready -U postgres -h 127.0.0.1` (every 5s). Over TCP on
+  purpose: on a fresh volume the image runs a temporary socket-only server for
+  initdb and `init-tenants.sql`, and a socket-form probe reports *that* server
+  ready, so the first client (`seed.py`, migrations, a CI job) hits "the
+  database system is shutting down". The same form is used by
+  `deploy/compose.prod.yml`, the Authentik Postgres, and every CI service
+  container; `backend/tests/test_postgres_healthchecks.py` fails on any
+  `pg_isready` without `-h`.
 - **Redis**: `redis-cli ping` (every 5s)
 - **MinIO**: no explicit health check (starts immediately)
 

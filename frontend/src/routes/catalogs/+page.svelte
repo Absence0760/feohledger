@@ -142,9 +142,9 @@
 
 	const COLUMNS = $derived([
 		{ label: m('catalogs.col.name') },
-		{ label: m('catalogs.col.type') },
-		{ label: m('catalogs.col.items'), class: 'right' },
-		{ label: m('catalogs.col.status') },
+		{ label: m('catalogs.col.type'), class: 'col-type' },
+		{ label: m('catalogs.col.items'), class: 'right col-count' },
+		{ label: m('catalogs.col.status'), class: 'col-status' },
 		{ label: '', class: 'actions-col' }
 	]);
 
@@ -391,7 +391,9 @@
 		     reported it has already faded. -->
 		<LoadError message={m('catalogs.empty.errored')} onretry={() => load()} testId="catalogs-error" />
 	{:else}
+	<div class="catalog-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={catalogs.length === 0}
 		{loading}
@@ -427,6 +429,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 
 	<!-- Inside the success branch: under LoadError the stale rows' counts
 	     ("Load more (100 of 240)") describe a list that is not on screen. -->
@@ -473,6 +476,23 @@
 {/if}
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content in any locale; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.catalog-table { min-width: 0; }
+	.catalog-table :global(table) { min-width: 830px; }
+	.catalog-table :global(th.col-type) { width: 150px; }
+	.catalog-table :global(th.col-count) { width: 110px; }
+	.catalog-table :global(th.col-status) { width: 120px; }
+	.catalog-table :global(th.actions-col) { width: 220px; }
+
 	.toolbar-row {
 		display: flex;
 		gap: 10px;

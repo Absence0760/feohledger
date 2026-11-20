@@ -8,7 +8,9 @@ the PII-free category taxonomy, and timestamps (invariant #7).
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+import uuid
+
+from pydantic import BaseModel, Field, field_validator
 
 from app.services.sanctions_categories import (
     categories_from_raw_response,
@@ -67,11 +69,83 @@ class ScreeningReviewItem(BaseModel):
     risk_score: str | None = None
     latest_matched_list: str | None = None
     latest_provider: str | None = None
+    # The stored screen the row shows (`sanctions_adjudication.latest_stored_screen`:
+    # never a `pre_payment` row). An adjudication posts it back, and the stamp
+    # covers exactly this screen or answers 409 (decisions §477).
+    latest_check_id: str | None = None
     # PII-free taxonomy from the same latest row — lets the queue distinguish a
     # negative-news hit from a watchlist match at a glance, which is a different
     # instruction to the reviewer.
     latest_categories: list[str] = []
     adverse_media: bool = False
+    # The active false-positive adjudication covering the stored screen
+    # (decisions §477), or None.
+    adjudication: SanctionsAdjudicationResponse | None = None
+    # EVERY unrevoked adjudication of the vendor, newest first; revoke ends
+    # them all, so none can keep clearing a later screen unseen.
+    active_adjudications: list[SanctionsAdjudicationResponse] = []
+    # Action verdicts (issue #575): None = the endpoint would accept the
+    # reader, else the coded refusal it would answer with.
+    adjudicate_refusal: dict | None = None
+    revoke_adjudication_refusal: dict | None = None
+
+
+class SanctionsAdjudicationRevokeRequest(BaseModel):
+    """Revoke payload (and the base of the adjudicate one). The reason is
+    required: it is the recorded justification an auditor reads."""
+
+    reason: str = Field(..., min_length=3, max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("reason is required")
+        return v
+
+
+class SanctionsAdjudicateRequest(SanctionsAdjudicationRevokeRequest):
+    """Adjudicate payload: the reason plus the screen the reviewer saw (the
+    queue row's ``latest_check_id``). 409 when a newer screen has landed."""
+
+    sanctions_check_id: uuid.UUID
+
+
+class SanctionsAdjudicationResponse(BaseModel):
+    """One adjudication, PII-free: the list NAME, provider, verdict and hash."""
+
+    id: str
+    vendor_id: str
+    sanctions_check_id: str
+    provider: str
+    result: str
+    matched_list: str | None = None
+    fingerprint: str
+    reason: str
+    adjudicated_by_user_id: str
+    adjudicated_at: str
+    revoked_by_user_id: str | None = None
+    revoked_at: str | None = None
+    revoke_reason: str | None = None
+
+    @classmethod
+    def from_db(cls, a) -> SanctionsAdjudicationResponse:
+        return cls(
+            id=str(a.id),
+            vendor_id=str(a.vendor_id),
+            sanctions_check_id=str(a.sanctions_check_id),
+            provider=a.provider,
+            result=a.result,
+            matched_list=a.matched_list,
+            fingerprint=a.fingerprint,
+            reason=a.reason,
+            adjudicated_by_user_id=str(a.adjudicated_by_user_id),
+            adjudicated_at=a.adjudicated_at.isoformat(),
+            revoked_by_user_id=str(a.revoked_by_user_id) if a.revoked_by_user_id else None,
+            revoked_at=a.revoked_at.isoformat() if a.revoked_at else None,
+            revoke_reason=a.revoke_reason,
+        )
 
 
 class VendorBlockRequest(BaseModel):
@@ -95,3 +169,7 @@ class VendorRiskSummaryItem(BaseModel):
 
     risk_level: str
     count: int
+
+
+# `ScreeningReviewItem` names the adjudication model defined after it.
+ScreeningReviewItem.model_rebuild()

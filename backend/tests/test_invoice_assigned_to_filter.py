@@ -26,6 +26,7 @@ async def _add_invoice(mk, org_id, *, assigned_to_id=None, assigned_to=None, n=1
                 invoice_number=f"INV-assign-{assigned_to_id}-{i}",
                 vendor_name="Acme",
                 amount=Decimal("100.00"),
+                currency="USD",
                 status=InvoiceStatus.ready_for_review,
                 assigned_to_id=assigned_to_id,
                 assigned_to=assigned_to,
@@ -112,6 +113,7 @@ async def test_assigned_to_id_composes_with_status_filter(realdb):
             invoice_number="INV-assign-approved",
             vendor_name="Acme",
             amount=Decimal("50.00"),
+            currency="USD",
             status=InvoiceStatus.approved,
             assigned_to_id=manager_id,
         )

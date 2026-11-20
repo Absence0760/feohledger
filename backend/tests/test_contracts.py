@@ -155,6 +155,7 @@ async def test_spend_summary_over_limit(realdb):
                     invoice_number=f"INV-{uuid.uuid4().hex[:6]}",
                     vendor_name="Globex Industrial",
                     amount=amt,
+                    currency="USD",
                     status=InvoiceStatus.approved,
                     vendor_id=uuid.UUID(vendor_id),
                     contract_id=uuid.UUID(contract_id),
@@ -167,6 +168,7 @@ async def test_spend_summary_over_limit(realdb):
                 invoice_number=f"INV-{uuid.uuid4().hex[:6]}",
                 vendor_name="Globex Industrial",
                 amount=Decimal("9999.00"),
+                currency="USD",
                 status=InvoiceStatus.rejected,
                 vendor_id=uuid.UUID(vendor_id),
                 contract_id=uuid.UUID(contract_id),
@@ -652,6 +654,7 @@ async def _add_invoice(mk, org_id, vendor_id, *, amount="500.00") -> str:
             invoice_number=f"INV-{uuid.uuid4().hex[:6]}",
             vendor_name="Globex Industrial",
             amount=Decimal(amount),
+            currency="USD",
             status=InvoiceStatus.approved,
             vendor_id=uuid.UUID(vendor_id),
         )

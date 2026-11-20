@@ -52,6 +52,9 @@ function suggestion(overrides: Record<string, unknown> = {}) {
 		status: 'open',
 		created_at: '2026-08-01T10:00:00+00:00',
 		dismissed_at: null,
+		// The server's verdict on Dismiss (`dismiss_refusal`); the page offers
+		// the control by it and never restates the status.
+		actions: { dismiss: null },
 		...overrides
 	};
 }
@@ -198,7 +201,20 @@ test.describe('/adaptive — advisory suggestions', () => {
 			if (p === `${PATH.suggestions}/${suggestion().id}/dismiss` && req.method() === 'POST') {
 				dismissPosts += 1;
 				dismissed = true;
-				return json(route, { suggestions: [suggestion({ status: 'dismissed' })] });
+				return json(route, {
+					suggestions: [
+						suggestion({
+							status: 'dismissed',
+							actions: {
+								dismiss: {
+									code: 'workflow_suggestion_not_dismissable',
+									message: 'A suggestion that is dismissed cannot be dismissed.',
+									params: { status: 'dismissed' }
+								}
+							}
+						})
+					]
+				});
 			}
 			return route.continue();
 		});
@@ -216,6 +232,48 @@ test.describe('/adaptive — advisory suggestions', () => {
 
 		await expect(page.getByTestId('table-empty')).toBeVisible({ timeout: 10_000 });
 		expect(dismissPosts).toBe(1);
+	});
+
+	test('Dismiss follows the server verdict, not the status', async ({ page }) => {
+		// An `open` row the reader may not dismiss shows no Dismiss; a `stale`
+		// row the endpoint accepts a dismiss for shows one. A restated
+		// `status === 'open'` check gets both wrong.
+		await stubPageLoad(page);
+		await page.route('**/api/adaptive/suggestions**', async (route) => {
+			const req = route.request();
+			if (pathOf(req) === PATH.suggestions && req.method() === 'GET') {
+				return json(route, {
+					suggestions: [
+						suggestion({
+							title: 'Refused open suggestion',
+							actions: {
+								dismiss: {
+									code: 'role_not_permitted',
+									message: 'Your role does not permit this action.',
+									params: {}
+								}
+							}
+						}),
+						suggestion({
+							id: '33333333-3333-3333-3333-333333333333',
+							title: 'Stale suggestion',
+							status: 'stale'
+						})
+					]
+				});
+			}
+			return route.continue();
+		});
+
+		await page.goto('/adaptive');
+		const rows = page.getByTestId('adaptive-suggestion-row');
+		await expect(rows).toHaveCount(2, { timeout: 15_000 });
+		await expect(
+			rows.filter({ hasText: 'Refused open suggestion' }).getByRole('button', { name: 'Dismiss' })
+		).toHaveCount(0);
+		await expect(
+			rows.filter({ hasText: 'Stale suggestion' }).getByRole('button', { name: 'Dismiss' })
+		).toHaveCount(1);
 	});
 });
 

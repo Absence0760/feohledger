@@ -57,12 +57,11 @@ async def _default_entity_id(s):
     return (await s.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
 
 
-def _inv(org_id, ent, **kw) -> Invoice:
+def _inv(org_id, ent, *, currency="USD", **kw) -> Invoice:
     kw.setdefault("invoice_number", f"DA-{uuid.uuid4().hex[:8]}")
     kw.setdefault("vendor_name", "Dashboard Aggregates Co")
     kw.setdefault("amount", _USD_FACE)
-    kw.setdefault("currency", "USD")
-    return Invoice(organization_id=org_id, entity_id=ent, **kw)
+    return Invoice(organization_id=org_id, entity_id=ent, currency=currency, **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -1106,3 +1105,120 @@ async def test_overdue_is_scoped_to_the_selected_entity(realdb):
     assert consolidated["overdue_count"] == 3
     assert scoped["overdue_count"] == 2
     assert scoped["overdue_total"] == [{"currency": "USD", "amount": 2000.0, "count": 2}]
+
+
+# ---------------------------------------------------------------------------
+# 6. `GET /api/invoices?overdue=true` — the list the mobile Overdue card opens
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_overdue_list_filter_returns_exactly_the_rows_the_dashboard_counts(realdb):
+    """The card's tap-through lands on `?overdue=true`, so the list must hold the
+    same fifteen invoices `overdue_count` counts — past ten, the in-review row,
+    the slipped schedule and the EUR row in; the due-today, undated, settled,
+    rejected and rescheduled-forward rows out — and `/counts` and `/ids` must
+    describe that same set (`services/open_ap_due.overdue_invoice_ids`)."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    today = utc_today()
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+    await _seed_due(mk, org_id, ent, today)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        dash = (await c.get("/api/dashboard")).json()
+        r = await c.get("/api/invoices", params={"overdue": "true", "page_size": 50})
+        counts = (await c.get("/api/invoices/counts", params={"overdue": "true"})).json()
+        ids = (await c.get("/api/invoices/ids", params={"overdue": "true"})).json()
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["total"] == dash["overdue_count"] == 15
+    assert len(body["items"]) == 15
+    assert {row["status"] for row in body["items"]} == {"approved", "ready_for_review"}
+    assert sorted(row["currency"] for row in body["items"]).count("EUR") == 1
+    assert counts["total"] == 15
+    assert counts["counts"] == {"approved": 14, "ready_for_review": 1}
+    assert ids["total"] == 15
+    assert set(ids["ids"]) == {row["id"] for row in body["items"]}
+
+
+@pytest.mark.asyncio
+async def test_overdue_list_filter_excludes_a_row_due_today_and_composes_with_status(realdb):
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    today = utc_today()
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        late = _inv(org_id, ent, status=InvoiceStatus.approved, due_date=today - timedelta(days=1))
+        on_time = _inv(org_id, ent, status=InvoiceStatus.approved, due_date=today)
+        in_review = _inv(
+            org_id,
+            ent,
+            status=InvoiceStatus.ready_for_review,
+            due_date=today - timedelta(days=1),
+        )
+        s.add_all([late, on_time, in_review])
+        await s.commit()
+        late_id, on_time_id, review_id = str(late.id), str(on_time.id), str(in_review.id)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        overdue = (await c.get("/api/invoices", params={"overdue": "true"})).json()
+        approved_overdue = (
+            await c.get("/api/invoices", params={"overdue": "true", "status": "approved"})
+        ).json()
+        unfiltered = (
+            await c.get("/api/invoices", params={"overdue": "false", "page_size": 100})
+        ).json()
+
+    assert {row["id"] for row in overdue["items"]} == {late_id, review_id}
+    assert [row["id"] for row in approved_overdue["items"]] == [late_id]
+    # `overdue=false` is "not filtered", not "not overdue".
+    assert {late_id, on_time_id, review_id} <= {row["id"] for row in unfiltered["items"]}
+
+
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
+@pytest.mark.asyncio
+async def test_overdue_list_filter_is_scoped_to_the_selected_entity(realdb):
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    today = utc_today()
+    async with realdb.client(key=TENANT, role="admin") as c:
+        r = await c.post("/api/entities", json={"name": "Overdue List", "slug": "overdue-list"})
+        assert r.status_code == 201, r.text
+        sub_id = r.json()["id"]
+        default_id = next(e["id"] for e in (await c.get("/api/entities")).json() if e["is_default"])
+
+    async with mk() as s:
+        s.add(
+            _inv(
+                org_id,
+                uuid.UUID(default_id),
+                status=InvoiceStatus.approved,
+                due_date=today - timedelta(days=2),
+            )
+        )
+        for _ in range(2):
+            s.add(
+                _inv(
+                    org_id,
+                    uuid.UUID(sub_id),
+                    status=InvoiceStatus.approved,
+                    due_date=today - timedelta(days=2),
+                )
+            )
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        consolidated = (await c.get("/api/invoices", params={"overdue": "true"})).json()
+        scoped = (
+            await c.get(
+                "/api/invoices", params={"overdue": "true"}, headers={"X-Entity-ID": sub_id}
+            )
+        ).json()
+        scoped_dash = (await c.get("/api/dashboard", headers={"X-Entity-ID": sub_id})).json()
+
+    assert consolidated["total"] == 3
+    assert scoped["total"] == scoped_dash["overdue_count"] == 2

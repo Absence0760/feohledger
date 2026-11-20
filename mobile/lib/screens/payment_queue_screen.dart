@@ -4,6 +4,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/load_error_messages.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/payment.dart';
 import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -686,15 +687,18 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     final subtitle =
         l.payRunSubtitle(run.paymentCount, formatDate(run.createdAt)) +
         (run.awaitsCfoApproval ? l.payRunCfoRequiredSuffix : '');
-    return Semantics(
-      label: l.payRunAnnounce(
-        _runTotal(run),
-        _runStatusLabel(l, run),
-        subtitle,
-      ),
-      excludeSemantics: true,
-      child: ListTile(
-        title: Row(
+    // One merged announcement for the title + subtitle only: wrapping the
+    // whole ListTile in `excludeSemantics` also swallowed `trailing`, so a
+    // screen-reader user could never reach the "Run actions" menu.
+    return ListTile(
+      title: Semantics(
+        label: l.payRunAnnounce(
+          _runTotal(run),
+          _runStatusLabel(l, run),
+          subtitle,
+        ),
+        excludeSemantics: true,
+        child: Row(
           children: [
             Expanded(
               child: Text(
@@ -705,15 +709,20 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
             _runStatusChip(run),
           ],
         ),
-        subtitle: Padding(
+      ),
+      subtitle: ExcludeSemantics(
+        child: Padding(
           padding: const EdgeInsets.only(top: 4),
           child: Text(
             subtitle,
-            style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
           ),
         ),
-        trailing: _runMenu(run),
       ),
+      trailing: _runMenu(run),
     );
   }
 
@@ -721,22 +730,31 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
   Widget? _runMenu(PaymentRun run) {
     final l = AppLocalizations.of(context);
     final store = PaymentQueueStore.instance;
-    final manageDraft = _canManage && run.isExecutable;
+    final approve = _approveItem(l, run);
+    // Execute only where FeohLedger SENDS payments — the server's execution
+    // mode, failing closed while it is unknown. On a record-only tenant the
+    // endpoint answers `payments_record_only`, so the control could only
+    // ever be refused; the record path below replaces it. Who may execute
+    // THIS run (`payment.execute`, maker-checker, CFO sign-off) is the run
+    // detail's `actions.execute`, never a role or status check here.
+    final execute = store.canDispatch
+        ? _verdictItem(
+            'execute',
+            l.payRunActionExecute,
+            store.runExecuteVerdict(run.id),
+            runId: run.id,
+          )
+        : null;
+    final cancel = _verdictItem(
+      'cancel',
+      l.payRunActionCancel,
+      store.runCancelVerdict(run.id),
+      runId: run.id,
+    );
     final items = <PopupMenuEntry<String>>[
-      // CFO sign-off. Offered only to the one role the backend accepts
-      // (`require_roles(ROLE_CFO)`) and only while the run is actually waiting
-      // on it — otherwise the person reading "needs CFO approval" is the
-      // person who can't act on it, which is exactly the gap this closes.
-      if (manageDraft && _canApproveRun(run))
-        PopupMenuItem(value: 'approve', child: Text(l.payRunActionApprove)),
-      // Execute only where FeohLedger SENDS payments — the server's execution
-      // mode, failing closed while it is unknown. On a record-only tenant the
-      // endpoint answers `payments_record_only`, so the control could only
-      // ever be refused; the record path below replaces it.
-      if (manageDraft && store.canDispatch)
-        PopupMenuItem(value: 'execute', child: Text(l.payRunActionExecute)),
-      if (_canManage && run.isCancellable)
-        PopupMenuItem(value: 'cancel', child: Text(l.payRunActionCancel)),
+      ?approve,
+      ?execute,
+      ?cancel,
       // Record the run as paid outside FeohLedger, in either mode. The menu
       // entry appears where [PaymentRun.mayRecordOutside] says a run can hold
       // an open record decision; whether THIS reader may record it is the
@@ -746,21 +764,94 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
         PopupMenuItem(value: 'record', child: Text(l.payRunActionRecord)),
     ];
     if (items.isEmpty) return null;
-    return Semantics(
-      label: l.payRunActions,
-      button: true,
-      child: PopupMenuButton<String>(
-        onSelected: (v) => _runMenuAction(run, v),
-        itemBuilder: (_) => items,
+    // MergeSemantics makes the label and the menu button ONE node. A bare
+    // `Semantics(label:)` is not a semantics boundary, so its label bubbled
+    // up into the ListTile's own node (the row read "… Run actions") while
+    // the tappable button underneath was announced only as "Show menu".
+    return MergeSemantics(
+      child: Semantics(
+        label: l.payRunActions,
+        button: true,
+        child: PopupMenuButton<String>(
+          onSelected: (v) => _runMenuAction(run, v),
+          itemBuilder: (_) => items,
+        ),
       ),
     );
   }
 
-  /// Whether the signed-in user can sign this run off: the backend's
-  /// `require_roles(ROLE_CFO)` on `POST /api/payments/runs/{id}/approve`
-  /// (the role) and its state guards ([PaymentRun.canTakeCfoApproval]).
-  bool _canApproveRun(PaymentRun run) =>
-      AuthStore.instance.canApprovePaymentRun && run.canTakeCfoApproval;
+  /// CFO sign-off, from the server's verdict ([PaymentQueueStore.
+  /// runApproveVerdict] — the run detail's `actions.approve`), never a role or
+  /// maker-checker check here. [PaymentRun.canTakeCfoApproval] decides only
+  /// whether the run HAS a CFO step to render a control for (the web run
+  /// dialog's `pendingCfo`). A role refusal (`role_not_permitted`: anyone not
+  /// a CFO, admins included) hides it; any other refusal — the CFO who
+  /// created the run (maker-checker) — renders it disabled with the reason,
+  /// as the web does, instead of an Approve that can only 403.
+  PopupMenuEntry<String>? _approveItem(AppLocalizations l, PaymentRun run) {
+    if (!run.canTakeCfoApproval) return null;
+    return _verdictItem(
+      'approve',
+      l.payRunActionApprove,
+      PaymentQueueStore.instance.runApproveVerdict(run.id),
+      runId: run.id,
+    );
+  }
+
+  /// A run menu item offered from the server's [verdict]: none while it is
+  /// unanswered (fail closed) or refused for the reader's role
+  /// (`role_not_permitted`) or the run's status (`payment_run_not_draft` —
+  /// a run the list showed as a draft that has since moved on); enabled when
+  /// accepted; otherwise disabled with the refusal in the reader's language
+  /// (maker-checker, the CFO wait), instead of a control that can only 403.
+  ///
+  /// A run whose verdict read failed ([PaymentQueueStore.runVerdictsFailed])
+  /// renders the item disabled with "couldn't check — pull to refresh":
+  /// still nothing to tap, but the reader learns why there is no control
+  /// (a CFO otherwise saw "awaiting CFO approval" with nothing to press).
+  PopupMenuEntry<String>? _verdictItem(
+    String value,
+    String label,
+    ActionVerdict verdict, {
+    required String runId,
+  }) {
+    final l = AppLocalizations.of(context);
+    final String reason;
+    if (PaymentQueueStore.instance.runVerdictsFailed(runId)) {
+      reason = l.reviewVerdictsUnavailable;
+    } else {
+      if (!verdict.isOffered(hiddenCodes: const {'payment_run_not_draft'})) {
+        return null;
+      }
+      if (verdict.allowed) {
+        return PopupMenuItem(value: value, child: Text(label));
+      }
+      reason = localizeCodedRefusal(l, verdict.refusal) ??
+          (verdict.refusal?['message'] as String? ?? '');
+    }
+    return PopupMenuItem(
+      value: value,
+      enabled: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label),
+          if (reason.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                reason,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _runMenuAction(PaymentRun run, String action) async {
     final l = AppLocalizations.of(context);
@@ -789,14 +880,6 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
       A11y.announce(context, text);
     } else if (action == 'execute') {
-      // CFO approval is a server-side gate; surface it before attempting.
-      if (run.awaitsCfoApproval) {
-        final text = l.payRunCfoBlocked;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(text)));
-        A11y.announce(context, text);
-        return;
-      }
       final confirmed = await _confirm(
         l.payRunExecuteTitle,
         l.payRunExecuteBody(_runTotal(run)),

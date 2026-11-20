@@ -168,6 +168,14 @@ function base(patch: DashboardPatch): DashboardData {
 		},
 		monthly_trend: [],
 		upcoming_payments: patch.upcomingPayments ?? [],
+		// The four past-due aging bands above, as `services/open_ap_due` counts
+		// them: four invoices, FACE sums per currency (never converted, so the
+		// code is the invoices' own, not the reporting currency). Nothing falls
+		// due in the next seven days.
+		overdue_count: 4,
+		overdue_total: [{ currency: REPORTING_CURRENCY, amount: 2000, count: 4 }],
+		due_soon_count: 0,
+		due_soon_total: [],
 		discount_capture: {
 			eligible_count: 0,
 			captured_count: 0,
@@ -222,7 +230,11 @@ export function emptyTenantDashboardResponse(
 		total_pending_reporting: 0,
 		pipeline: {},
 		aging: zeroBands,
-		aging_reporting: { ...zeroBands, unconverted_count: 0 }
+		aging_reporting: { ...zeroBands, unconverted_count: 0 },
+		overdue_count: 0,
+		overdue_total: [],
+		due_soon_count: 0,
+		due_soon_total: []
 	};
 }
 

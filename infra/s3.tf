@@ -357,7 +357,7 @@ resource "aws_s3_bucket_ownership_controls" "access_logs" {
 }
 
 # The S3 logging service principal writes the log objects. Pinned to this
-# account and to the four source buckets, so no other bucket can use this one
+# account and to the five source buckets, so no other bucket can use this one
 # as its log destination.
 data "aws_iam_policy_document" "access_logs_delivery" {
   statement {
@@ -379,6 +379,7 @@ data "aws_iam_policy_document" "access_logs_delivery" {
         aws_s3_bucket.audit_logs.arn,
         aws_s3_bucket.backups.arn,
         aws_s3_bucket.frontend.arn,
+        aws_s3_bucket.canary_artifacts.arn,
       ]
     }
 

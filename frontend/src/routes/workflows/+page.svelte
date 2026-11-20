@@ -278,11 +278,13 @@
 			testId="workflows-load-error"
 		/>
 	{:else}
+	<div class="wf-table">
 	<DataTable
 		isEmpty={workflowStore.all.length === 0}
 		loading={workflowStore.loading}
 		empty={m('workflows.list.empty')}
 		colspan={6}
+		fixed
 	>
 		{#snippet header()}
 			<tr>
@@ -296,9 +298,9 @@
 				</th>
 				<th>{m('workflows.list.col.name')}</th>
 				<th>{m('workflows.list.col.steps')}</th>
-				<th>{m('workflows.list.col.status')}</th>
-				<th>{m('workflows.list.col.created')}</th>
-				<th></th>
+				<th class="col-status">{m('workflows.list.col.status')}</th>
+				<th class="col-created">{m('workflows.list.col.created')}</th>
+				<th class="col-actions"></th>
 			</tr>
 		{/snippet}
 		{#snippet body()}
@@ -355,6 +357,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 	{/if}
 
 	<LoadMoreFooter
@@ -455,6 +458,22 @@
 		border-color: var(--accent);
 		color: var(--accent);
 	}
+
+	/* Column widths for the `fixed` list: under `table-layout: auto` the
+	   columns were sized against the "Loading…" row and re-sized against the
+	   real rows, sliding sideways as the workflows landed. Status, Created and
+	   the four row actions get widths sized to their widest content in any
+	   locale (the actions to de "Versionen" + "Simulieren" + "Exportieren" +
+	   "Löschen", and ja, on one line); Name and Steps share the rest, and the
+	   `min-width` keeps them readable — past it the table scrolls inside its
+	   region (frontend/docs/ui-patterns.md § Data tables). */
+	.wf-table {
+		min-width: 0;
+	}
+	.wf-table :global(table) { min-width: 1160px; }
+	.col-status { width: 120px; }
+	.col-created { width: 130px; }
+	.col-actions { width: 430px; }
 
 	.checkbox-col {
 		width: 36px;

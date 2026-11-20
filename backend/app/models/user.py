@@ -76,10 +76,17 @@ class User(Base, TimestampMixin):
             "sso_provider_id",
             postgresql_where=text("sso_provider IS NOT NULL"),
         ),
+        # One account per address WITHOUT regard to case — the login identifier
+        # (`utils/emails`). An expression index, not `unique=True` on the
+        # column: `email_matches` compares `lower(email)`, which a plain btree
+        # cannot serve, and a plain UNIQUE let `Jane@x` and `jane@x` coexist.
+        # Migration 0138's; declared here so `create_all` builds it too.
+        Index("uq_users_email_lower", text("lower(email)"), unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
+    # Unique via `uq_users_email_lower` above, never a plain UNIQUE (§475).
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     sso_provider: Mapped[str | None] = mapped_column(String(50))
     sso_provider_id: Mapped[str | None] = mapped_column(String(255))

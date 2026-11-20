@@ -310,10 +310,12 @@ def test_every_segregation_shim_states_both_attributes():
     fraud control reads as an oversight and behaves as an exemption. Every shim
     must answer, even when the answer is ``None``.
 
-    A shim is either built inline at the call or returned by a same-module helper
+    A shim is built inline at the call, returned by a same-module helper
     (``expense_controls._segregation_subject``, shared by the raising check and
-    the ``violates_segregation`` verdict) — both are followed, and both entry
-    points are scanned, since the getattr default lives in the predicate.
+    the ``violates_segregation`` verdict), or bound to a local in the calling
+    function first (``procurement_controls.requisition_approve_refusal``) — all
+    three are followed, and both entry points are scanned, since the getattr
+    default lives in the predicate.
     """
     import ast
     from pathlib import Path
@@ -338,6 +340,24 @@ def test_every_segregation_shim_states_both_attributes():
                 ]
                 if returned:
                     helpers[fn.name] = returned
+        # A shim bound to a local first (`subject = SimpleNamespace(...)`, then
+        # `violates_segregation(subject, ...)`), followed within its own function.
+        local_shims: dict[tuple[int, str], list[ast.Call]] = {}
+        call_scope: dict[int, int] = {}
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for inner in ast.walk(fn):
+                if isinstance(inner, ast.Call):
+                    call_scope[id(inner)] = id(fn)
+                if (
+                    isinstance(inner, ast.Assign)
+                    and _is_namespace(inner.value)
+                    and len(inner.targets) == 1
+                    and isinstance(inner.targets[0], ast.Name)
+                ):
+                    key = (id(fn), inner.targets[0].id)
+                    local_shims.setdefault(key, []).append(inner.value)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -350,6 +370,11 @@ def test_every_segregation_shim_states_both_attributes():
                 candidates = [subject]
             elif isinstance(subject, ast.Call) and getattr(subject.func, "id", None) in helpers:
                 candidates = helpers[subject.func.id]
+            elif (
+                isinstance(subject, ast.Name)
+                and (call_scope.get(id(node)), subject.id) in local_shims
+            ):
+                candidates = local_shims[(call_scope[id(node)], subject.id)]
             else:
                 continue  # a real Invoice — the model guarantees the attribute
             for shim in candidates:

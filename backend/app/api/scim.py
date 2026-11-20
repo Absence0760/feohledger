@@ -23,6 +23,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -196,7 +197,8 @@ async def _refuse_taken_username(
     ANYWHERE on the platform.
 
     Scoped platform-wide, not to the calling tenant, because `users.email`
-    carries a global UNIQUE constraint — it is the login identifier, and
+    is unique platform-wide without regard to case (`uq_users_email_lower`,
+    §475) — it is the login identifier, and
     `/auth/login` resolves an account by address alone with no tenant hint.
 
     Checking only `organization_id == org.id` (which is what create and PUT used
@@ -537,8 +539,16 @@ async def create_user(
         organization_id=org.id,
         must_change_password=False,
     )
-    db.add(user)
-    await db.flush()
+    # A concurrent create that took the address between the check above and
+    # this flush trips `uq_users_email_lower` (§475): answer it with the same
+    # 409 `uniqueness`, not a 500 the IdP would retry forever.
+    try:
+        async with db.begin_nested():
+            db.add(user)
+            await db.flush()
+    except IntegrityError:
+        await _refuse_taken_username(db, org, email)
+        raise
     await db.commit()
     await db.refresh(user)
     logger.info("SCIM provisioned user %s in org %s", user.id, org.slug)
@@ -594,12 +604,24 @@ async def replace_user(
 
     if not body.active:
         await _refuse_if_last_admin(db, org, user, operation="put")
-    user.email = email
     user.full_name = _extract_full_name(body.name, email)
     if body.externalId is not None:
         user.sso_provider_id = body.externalId
     user.is_active = body.active
-    await db.flush()
+    # Savepoint: a concurrent writer taking `email` after the check above trips
+    # `uq_users_email_lower` (§475); answer the same 409 `uniqueness`, not a 500.
+    # The rename is assigned INSIDE it: `begin_nested()` first flushes whatever
+    # is already pending in the outer transaction, so a rename made before it
+    # would fail there and poison the session rather than the savepoint.
+    try:
+        async with db.begin_nested():
+            user.email = email
+            await db.flush()
+    except IntegrityError:
+        # `user_id`, not `user.id`: the savepoint's rollback expired `user`,
+        # and reading it would lazy-load outside the async context.
+        await _refuse_taken_username(db, org, email, exclude_user_id=user_id)
+        raise
     # `_commit_user_change` reloads the row before we serialize — the same
     # `updated_at` onupdate-expiry guard as patch_user.
     await _commit_user_change(db, org, user, before, operation="put")
@@ -683,8 +705,6 @@ async def patch_user(
     if new_active is False:
         await _refuse_if_last_admin(db, org, user, operation="patch")
 
-    if new_email is not None:
-        user.email = new_email
     if new_active is not None:
         user.is_active = new_active
     if new_external_id is not None:
@@ -692,7 +712,18 @@ async def patch_user(
     if new_full_name is not None:
         user.full_name = new_full_name
 
-    await db.flush()
+    # Savepoint, as PUT: a rename that loses the race to `uq_users_email_lower`
+    # (§475) is the 409 `uniqueness`, not a 500. The rename is assigned inside
+    # it, as PUT, since `begin_nested()` flushes pending changes outside it.
+    try:
+        async with db.begin_nested():
+            if new_email is not None:
+                user.email = new_email
+            await db.flush()
+    except IntegrityError:
+        if new_email is not None:
+            await _refuse_taken_username(db, org, new_email, exclude_user_id=user_id)
+        raise
     # The UPDATE fires `updated_at`'s server-side `onupdate=func.now()`, which
     # SQLAlchemy then marks expired. `_commit_user_change` reloads it inside the
     # async context, so building the SCIM response (which reads `updated_at` for

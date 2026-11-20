@@ -122,6 +122,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get dashboardOverdue => 'Vencidas';
 
   @override
+  String get dashboardOverdueOpen => 'Muestra las facturas vencidas';
+
+  @override
   String get dashboardApproved => 'Aprobadas';
 
   @override
@@ -272,6 +275,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get invoicesFilterPaid => 'Pagadas';
 
   @override
+  String get invoicesFilterOverdue => 'Vencidas';
+
+  @override
   String get invoicesColInvoiceNumber => 'N.º de factura';
 
   @override
@@ -373,6 +379,16 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get vendorRejected => 'Proveedor rechazado';
+
+  @override
+  String vendorRejectConfirmTitle(String name) {
+    return '¿Rechazar a $name?';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$name se marcará como rechazado. Se cancelarán todas las tarjetas virtuales activas emitidas a su nombre.';
+  }
 
   @override
   String vendorCardsNotClosed(int count) {

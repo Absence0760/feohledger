@@ -376,12 +376,14 @@
      have until now), so a 500 or an offline backend used to leave the user
      directory asserting "No users found." with no toast, no banner and no
      retry, on the page an admin opens precisely when access is misbehaving. -->
+<div class="users-table">
 <DataTable
 	isEmpty={adminStore.users.length === 0}
 	loading={adminStore.loading}
 	errored={adminStore.errored}
 	empty={m('admin.users.empty')}
 	colspan={7}
+	fixed
 >
 	{#snippet header()}
 		<tr>
@@ -395,10 +397,10 @@
 			</th>
 			<th>{m('admin.users.col.name')}</th>
 			<th>{m('admin.users.col.email')}</th>
-			<th>{m('admin.users.col.roles')} <HelpTip term="role" /></th>
-			<th>{m('admin.users.col.status')}</th>
-			<th>{m('admin.users.col.created')}</th>
-			<th></th>
+			<th class="col-roles">{m('admin.users.col.roles')} <HelpTip term="role" /></th>
+			<th class="col-status">{m('admin.users.col.status')}</th>
+			<th class="col-created">{m('admin.users.col.created')}</th>
+			<th class="col-actions"></th>
 		</tr>
 	{/snippet}
 	{#snippet body()}
@@ -430,7 +432,7 @@
 						<span class="you-badge">{m('admin.users.you')}</span>
 					{/if}
 				</td>
-				<td class="email-cell">{user.email}</td>
+				<td class="email-cell" title={user.email}>{user.email}</td>
 				<td>
 					<div class="role-badges">
 						{#each user.roles as role}
@@ -496,6 +498,7 @@
 		{/each}
 	{/snippet}
 </DataTable>
+</div>
 
 <LoadMoreFooter
 	shown={adminStore.users.length}
@@ -639,6 +642,31 @@
 	.checkbox-col input[type='checkbox'] {
 		cursor: pointer;
 		accent-color: var(--accent);
+	}
+
+	/* --- Column widths ---
+	   The directory is `table-layout: fixed` (DataTable's `fixed`): under
+	   `auto` the columns were sized against the "Loading…" row and re-sized
+	   against the real rows, sliding every column sideways as the users
+	   landed. The predictable columns get widths sized to their widest
+	   content in the longest locale (Roles to two badges, actions to es
+	   "Desactivar" + "Cerrar todas las sesiones" + "Eliminar" on one line);
+	   Name and Email share the rest, and the table's
+	   `min-width` keeps them readable — past it the table scrolls inside its
+	   region (frontend/docs/ui-patterns.md § Data tables). */
+	.users-table {
+		min-width: 0;
+	}
+	.users-table :global(table) { min-width: 1280px; }
+	.col-roles { width: 220px; }
+	.col-status { width: 110px; }
+	.col-created { width: 130px; }
+	.col-actions { width: 420px; }
+
+	.email-cell {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	/* --- Table cells --- */

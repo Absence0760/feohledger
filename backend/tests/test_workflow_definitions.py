@@ -439,6 +439,7 @@ async def test_delete_workflow_with_instances_409(realdb):
             invoice_number="INV-WF",
             vendor_name="V",
             amount=Decimal("10.00"),
+            currency="USD",
             status=InvoiceStatus.new,
             organization_id=org_id,
         )

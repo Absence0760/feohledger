@@ -116,6 +116,16 @@ named tenant DB. Deployed by the `lambdas` job in `aws-deploy.yml`.
 | MinIO container | S3 |
 | localhost | Route 53 + CloudFront + ALB |
 
+**TLS certificate monitoring.** On this architecture every public certificate
+is ACM's (CloudFront and the ALB), renewed by ACM and watched by the
+`DaysToExpiry` alarm in `infra/uptime.tf`. The single-VM stack that runs today
+(`docs/minimal-deployment.md`) also serves `api.<domain>` on a Let's Encrypt
+certificate Caddy renews on the VM, which no AWS metric sees; `infra/canary.tf`
+watches it with an hourly CloudWatch Synthetics canary that validates the
+certificate and pages under 14 days to expiry (`infra/README.md` § Certificate
+canary). Moving the API behind the ALB retires that canary along with Caddy's
+certificate.
+
 ## Environment Configuration
 
 The FastAPI app uses `pydantic-settings` (`backend/app/config.py`) with the `FEOH_` prefix. **Every variable below MUST be prefixed with `FEOH_`** — pydantic-settings ignores unprefixed names and silently falls back to defaults.
@@ -267,6 +277,17 @@ rolling the service, so new code never serves against an un-migrated schema and
 the revision fans out to **every tenant DB** (not just the control plane). A
 non-zero exit fails the job and the service is never rolled. This needs the
 task's network placement — `ECS_SUBNETS` + `ECS_SECURITY_GROUPS` below.
+
+A revision can refuse on data only an operator can resolve, and then the
+deploy stops before rolling anything. **0138** (email addresses unique without
+regard to case, decisions §475) is one: it stops with `EmailCaseCollision` when
+two `users` rows (control plane), or two `vendor_users` rows in one tenant,
+hold the same address apart from case. The message names the table, database
+and counts, never an address. Before deploying a release that carries 0138, run
+the two id-only queries in `backend/docs/database.md` § Email case collisions;
+if either returns a row, resolve each pair with the workspace's administrator
+first. The same applies to the VM path (`deploy/deploy.sh` migrates before
+rolling too).
 
 ### Lambda workers (extraction / ERP / audit)
 

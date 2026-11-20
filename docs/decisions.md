@@ -24013,3 +24013,235 @@ production dependency chain. `tests/test_portal_cross_vendor.py` covers every
 by-id portal route, so one supplier gets the same 404 for another's id as for
 an unknown one. `tests/test_tenant_isolation.py` pins the refusal and the MFA
 exemption.
+
+## 475. An email address is unique without regard to case in the database, and the migration refuses rather than picks a winner (closes a followup; round 32, 2026-11-20)
+
+The app already stored `utils/emails.normalize_email(...)` and matched every
+identity lookup on `lower(email)` (`docs/authentication.md` § An email address
+is matched without regard to case). The database still held a plain,
+case-sensitive `UNIQUE(email)` on `users` (control plane) and `vendor_users`
+(each tenant). So rows written before normalization kept their mixed case, a
+pair differing only in case could exist, a create that passed the app's check
+and lost a race could still land a case variant, and the `lower(email)` lookups
+on login, forgot-password, SSO JIT and SCIM could not use the btree.
+
+**Decision:** migration 0138 replaces the plain constraint on both tables with
+a unique index on `lower(email)` (`uq_users_email_lower`,
+`uq_vendor_users_email_lower`), after lower-casing and trimming every stored
+address. The models declare the same index, so `create_all` builds it for a
+fresh control plane or tenant. `email_matches` already compares exactly that
+expression, so every identity lookup becomes an index probe with no code
+change. One revision serves both databases, the precedent 0059 set: the `users`
+half is gated on `plans` (the control-plane probe 0117 uses), the
+`vendor_users` half on that table existing.
+
+**When two rows share a normalized address, the migration refuses**
+(`EmailCaseCollision`) before changing anything on any table. The message
+names the table, the database and the counts. It never names an address,
+because migration output lands in CI and deploy logs and an address is PII. It
+points at an id-only query (`backend/docs/database.md` § Email case
+collisions). Which account keeps the address is an operator's call: one of the
+pair may hold the roles, the password or the SSO link, and a migration cannot
+know which is real.
+
+Admin create, SCIM create and the supplier-portal invite now flush inside a
+savepoint. A create that loses the race to the index gets the same 409 its
+pre-check gives (coded `email_in_this_workspace` / `email_in_other_workspace`,
+SCIM `uniqueness`, the portal's "already exists"), never a 500. SSO JIT already
+did this. Renames get the same treatment: admin `PATCH /users/{id}` and SCIM
+`PUT` / `PATCH /Users/{id}` flush inside a savepoint, so a rename onto an
+address a concurrent writer just took is the same 409, not a 500.
+
+Rejected:
+
+- **Merging or renaming the losing row in the migration** (oldest wins, or most
+  roles wins). Every heuristic picks wrong for some tenant, and it does so
+  silently, on the login table.
+- **A `citext` column.** It needs the extension in every tenant DB and changes
+  the column type every query and schema reads. The expression index gives the
+  same guarantee on the existing `varchar`.
+- **Building the index `CONCURRENTLY`.** Both tables are small, and a
+  concurrent build cannot run inside the migration's transaction. Then a
+  refusal could no longer roll the normalization back with it.
+- **Dropping `exact_email_first`.** After 0138 it decides nothing. It stays on
+  the single-row lookups only so a second match can never 500 a login.
+
+Tests: `tests/test_migration_0138_email_lower_unique.py` (the refusal names no
+address and changes nothing; normalization; constraint swap; idempotence; each
+half only where its table lives; model parity).
+`tests/test_email_identity_case.py` covers the index refusing a case-variant
+insert, and admin create, SCIM create and the portal invite each losing the
+race and getting their 409.
+
+## 476. An `Invoice` built without a currency is NULL; fixtures name theirs (closes the last §473 followup; round 32, 2026-11-20)
+
+§473 removed the `invoices.currency` column default but kept a constructor
+fallback: `Invoice.__init__` set `"USD"` whenever a construction did not
+mention `currency`, because about a hundred test fixtures relied on it. No
+application site reached it, yet it was still a default currency in the model,
+the substitution §160/§196/§200 forbid, one forgotten keyword away from
+labelling a real document.
+
+The override is gone. An omitted `currency` is now NULL, the same "unknown" as
+`currency=None`. Every fixture, seed and script construction under
+`backend/tests/` and `backend/scripts/` names its currency, almost always the
+`"USD"` it already got, so no test changes meaning. A helper that built from
+`**kwargs` takes a `currency` parameter and names it at the call (its callers
+still override it). The seeds' tax-exclusive header no longer carries the code
+inside its kwargs dict. The extraction golden harness starts its invoice with
+`currency=None`, as the upload does (§473), rather than the old USD
+placeholder.
+
+`tests/test_invoice_currency_explicit.py` now also scans `tests/` and
+`scripts/`, follows `Invoice` imported under an alias, and refuses a
+construction there that omits `currency`. Fixtures may state a literal code;
+only a test whose subject is the omission itself may omit it, declared with its
+reason. It also asserts that the model has no column, server or constructor
+default (`Invoice().currency is None`), so a default cannot come back without
+failing a test that says why.
+
+Rejected: keeping the fallback and only guarding `app/` (the §473 state),
+which leaves a default in the model for the next non-`app` caller, such as a
+script, to reach; and a column `default`, which also overwrites an explicit
+`None` at INSERT (§473).
+
+## 477. A sanctions false positive is adjudicated once, for that exact result, under its own permission (closes a §333 followup; round 33, 2026-11-20)
+
+**Context.** §333 refuses the ERP push on a stored `match` / `review` screen,
+and dispatch and `/compliance/release` re-screen live, so a vendor the provider
+keeps flagging wrongly could be neither paid nor booked, and nothing recorded a
+human's finding that the hit is not this vendor.
+
+**Decision.** `sanctions_adjudications` (migration 0139) records who, when, why
+(required, 3–2000 characters) and WHICH result: provider, verdict, list name
+and `fingerprint`, a sha256 over those plus the matched entry
+(`services/sanctions_adjudication.screen_fingerprint`: an adapter's own
+`raw_response.match_fingerprint` — entry id + list version — when it sets one,
+else the raw response minus per-call keys such as request ids and timestamps;
+only the hash is stored, never match details). An active row covers a screen
+only when provider and fingerprint are equal, so a fresh screen of the same
+match stays cleared and a new or different hit (another entry, another list, a
+`review` escalating to `match`, a republished list version) holds again.
+
+- The stored screen (`screen_vendor_record`) keeps
+  `vendors.screening_adjudication_id` in step and, on a covered `match`, neither
+  re-sets the sticky block nor revokes cards; `VendorPayability.sanctions_hold`
+  (the run gate and the ERP push) lifts the `match` / `review` hold only while
+  it is set. The live screen (`check_payment_compliance`) reads a covered result
+  as clear, adverse-media hold included.
+- **The sticky `payments_blocked` flag is not lifted.** It may carry a manual
+  reason and it is `vendor.block`'s to lift, so clearing a `match` takes two
+  signatures (adjudicator, then unblocker). `admin` holds both permissions, so
+  `/unblock` refuses (403 `vendor_unblock_adjudicator`) the adjudicator of the
+  adjudication covering a stored `match`: the two signatures are two people.
+- **Permission `vendor.sanctions.adjudicate`, default admin + cfo.** Not
+  `ap_manager`: that role onboards vendors, approves their bank details and
+  executes runs, so clearing the sanctions hold too would put the whole payee
+  path in one role. Never `ap_clerk`; the grant guard's subset rule already
+  stops a user-manager handing it out without holding it.
+- **Segregation:** refused (403 `sanctions_adjudication_segregation`) for the
+  vendor's onboarder (`vendors.onboarded_by_user_id`, stamped by create and both
+  CSV imports from 0139; not backfilled — NULL reads "no onboarder known", as
+  §141) and for the latest applied bank change's requester, the AP user who
+  provisioned the portal login that requested it, and its approver.
+- Stamp and revocation each write `vendor.sanctions_adjudicated` /
+  `vendor.sanctions_adjudication_revoked` plus a status-change row
+  `vendor.screening_clearance_changed` (`from` / `to`). Revocation needs the
+  same permission and no segregation (it only tightens). A merge leaves a
+  duplicate's adjudications on the duplicate: a judgement of one record's
+  screen is not transferred.
+
+**Review fixes (same round).**
+
+- *The stamp covers the screen the reviewer saw.* The request carries
+  `sanctions_check_id` (the queue row's `latest_check_id`); under the vendor
+  row lock a different latest stored screen answers 409
+  `sanctions_adjudication_stale_screen`. The queue and `latest_stored_screen`
+  agree: both read the newest non-`pre_payment` check, since the dispatch
+  gate's rows do not update the vendor.
+- *Changed inputs owe a fresh judgement (bound by hash, chosen over "treat a
+  bank-change re-screen as uncovered").* Every screen stores
+  `raw_response.screened_inputs`, a sha256 over the name, tax id, bank country,
+  beneficial owners and the id of the latest applied bank change (never the
+  account number), and the fingerprint (scheme v2) includes it. A later
+  identity edit or bank change, by anyone including the adjudicator, makes the
+  same hit a new result, so segregation holds in both orders. The hash was
+  chosen because it also covers the live pre-payment screen and edits that
+  arrive by paths with no re-screen check type of their own (enrichment, ERP
+  sync); a check-type rule would have missed those and been undone by the next
+  periodic re-screen of unchanged-looking inputs.
+- *Revoking a `match` re-applies the match.* When the revoked row covered a
+  stored `match`, revoke sets the sticky block and closes the vendor's live
+  cards (`vendor_screening.apply_sanctions_match`) in the same transaction, so
+  a card issued while the stamp stood does not outlive it.
+- *No hidden adjudication.* Revoke ends every active row of the vendor, the
+  queue lists them all (`active_adjudications`), and the live screen honours
+  only the vendor's pointer row (`vendors.screening_adjudication_id`).
+
+**Rejected.** Rewriting `screening_status` to `clear` (the stored status would
+stop saying what the provider said); clearing by vendor rather than by result
+(a new hit would ride an old judgement); lifting the block in the same click.
+
+**Tests.** `test_sanctions_adjudication.py`,
+`test_sanctions_adjudication_verdicts.py` (queue verdict ↔ endpoint parity),
+`test_permissions.py`, `test_sod_endpoint_wiring.py`, `test_vendor_merge.py`.
+
+## 478. A white-label accent is derived per theme, not set per theme (closes the §289 accent-as-text followup; round 33, 2026-11-20)
+
+A tenant's `accent_color` was written inline on `<html>` as `--accent`, so it
+beat both palettes. `--accent` is also small text (links, the active tab, armed
+row actions), and no colour clears 4.5:1 on both palettes' text surfaces: to
+reach it on the light `--bg` (#f4f5f8) a colour needs relative luminance below
+about 0.16, and on the dark `--surface` (#181a23) above about 0.22. So one inline
+value always failed WCAG 1.4.3 in one theme. The platform's own dark accent
+`#638cff` is 2.86:1 on the light `--bg`, and nothing measured a brand accent as
+text in either theme.
+
+Decision: keep one tenant setting and derive the colour shown in each theme.
+`stores/brandTheme.ts` `themeAccent(color, theme)` returns the colour unchanged
+when it clears 4.5:1 on that theme's `--bg` and `--surface` (the two surfaces
+the platform accent is held to in `tokenPairing.test.ts`). Otherwise it returns
+the least mix of the colour toward black (Light) or white (Dark) that does,
+found by bisection on the byte-rounded colour. A linear mix with black or white
+keeps the hue. The store writes the results as `--brand-accent-dark` and
+`--brand-accent-light`, never `--accent`, and each palette in `src/app.css`
+reads its own (`--accent: var(--brand-accent-dark, #638cff)`, and
+`var(--brand-accent-light, #2c4fc4)` in both light copies). `--accent-strong`
+stays one inline value, because its contract (white text on it) does not depend
+on the theme. The `/organization` Branding panel reports the colour as text in
+both themes while it is typed, with the shade shown in place of a failing one
+(`accentTextContrast`). The accent cache and the `accent-boot` script carry the
+new props. An entry cached before this change holds `--accent`, which both drop,
+so that workspace's next cold load paints the platform accent once.
+
+Rejected: a per-theme tenant setting (`accent_color_light`). It needs a schema,
+API, partner-modal and mobile change, and it still lets a tenant save an
+illegible light accent: the advisory alone would not fix 1.4.3. Nothing in
+`docs/white-label.md` or §28 asks for per-theme brand control. A tenant whose
+brand needs an exact light shade can still pick a colour that clears 4.5:1 in
+Light; it is then shown unchanged there. Also rejected: CSS `light-dark()` in
+the inline value, which also needs two colours and would put a non-hex string
+in the cache and the boot script, which validate hex; and refusing a failing
+colour, which §28 already rejected for the strong accent.
+
+## 479. An offer's status writers lock its row before checking it, and the wait is not bounded (round 33, 2026-11-20)
+
+`POST /api/discounts/offers/{id}/accept` and `/decline` (and the supplier
+portal's pair) loaded the offer with a plain `SELECT`, so two concurrent
+decisions both passed the `offered` check, the last commit won and two audit
+rows recorded two decisions. They now read the row `FOR UPDATE` with
+`populate_existing` (`discount_offers.lock_offer`) before the refusal check, the
+lock the auto-capture sweep (`_claim_if_still_offered`), the copilot enact and
+settlement capture already took. The second request waits and gets the 409.
+
+The wait is plain, not `bounded_lock_wait` (§233). §233 bounds a lock a holder
+may keep across a processor call; no holder of an offer's lock does, and
+settlement capture, the one writer reached from a payment path, runs after the
+processor call in a transaction committed per payment. A bound would add a
+named refusal and a savepoint for a wait that is one short transaction.
+
+A re-sent accept stays a 409 (`discount_offer_not_open`) rather than becoming a
+200 replay of the same tier. Accepting moves no money, so there is no second
+effect to suppress, and a 200 for "same tier" would need the endpoint to
+distinguish a retry from a second person choosing the same tier.
+`backend/docs/dynamic-discounting.md` § Concurrency.

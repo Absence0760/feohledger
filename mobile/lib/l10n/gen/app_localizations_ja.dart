@@ -121,6 +121,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get dashboardOverdue => '期限超過';
 
   @override
+  String get dashboardOverdueOpen => '期限超過の請求書を表示します';
+
+  @override
   String get dashboardApproved => '承認済み';
 
   @override
@@ -262,6 +265,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get invoicesFilterPaid => '支払済み';
 
   @override
+  String get invoicesFilterOverdue => '期限超過';
+
+  @override
   String get invoicesColInvoiceNumber => '請求書番号';
 
   @override
@@ -360,6 +366,16 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get vendorRejected => '取引先を却下しました';
+
+  @override
+  String vendorRejectConfirmTitle(String name) {
+    return '$nameを却下しますか？';
+  }
+
+  @override
+  String vendorRejectConfirmBody(String name) {
+    return '$nameは却下済みとなります。この取引先に発行された有効なバーチャルカードはすべて取り消されます。';
+  }
 
   @override
   String vendorCardsNotClosed(int count) {

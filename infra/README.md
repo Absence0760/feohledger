@@ -22,6 +22,8 @@ infra/
 ├── database.tf                  # RDS Postgres 16: private, encrypted, TLS-only, point-in-time restore, write-only password
 ├── monitoring.tf                # SNS alerts (email) + pager (SMS) topics + VM recovery/reboot and DB CPU/memory/storage alarms
 ├── uptime.tf                    # Route 53 HTTPS checks on the apex, a tenant host and api./api/health, their paging alarms, ACM expiry alarm
+├── canary.tf                    # hourly Synthetics canary validating api.'s Let's Encrypt certificate (pages under 14 days) + its artifacts bucket and role
+├── canary/api-certificate/      # the canary's script (index.js), zipped at plan time into .build/ (gitignored)
 ├── deploy.tf                    # release deploys: the SSM command document that runs deploy.sh --ref, + the deploy role's grant to run it
 ├── frontend.tf                  # the SPA: private S3 bucket + CloudFront (OAC, SPA router, headers, logs, alarms) + the deploy role's publish grant
 ├── cloudfront/spa-router.js     # the CloudFront Function: built files pass through, routes become /index.html
@@ -43,7 +45,7 @@ Every resource in this module follows the SOC 2 baseline:
 | S3 Object Lock — governance mode, 365d | `s3.tf` — invoice-files bucket |
 | S3 Object Lock — compliance mode, 7y | `s3.tf` — audit-logs bucket |
 | SSE-KMS on every data bucket; SSE-S3 on the access-logs sink | `s3.tf` — the invoice-files, audit-logs and backups buckets reference `aws_kms_key.app`. AWS does not support SSE-KMS on a server-access-log destination, so the sink uses S3-managed keys (`../docs/decisions.md` §166) |
-| Server-access logging on every data bucket | `s3.tf` — delivered to the access-logs sink, whose bucket policy grants `logging.s3.amazonaws.com` `s3:PutObject`, pinned to this account and the four source buckets (the SPA bucket included); CloudFront access logs arrive through `delivery.logs.amazonaws.com`, under `cloudfront/` only; ACLs disabled |
+| Server-access logging on every data bucket | `s3.tf` — delivered to the access-logs sink, whose bucket policy grants `logging.s3.amazonaws.com` `s3:PutObject`, pinned to this account and the five source buckets (the SPA and canary-artifacts buckets included); CloudFront access logs arrive through `delivery.logs.amazonaws.com`, under `cloudfront/` only; ACLs disabled |
 | Public access block on every bucket | `s3.tf`, `frontend.tf` — all four flags true; the SPA bucket is read only by its CloudFront distribution (OAC) |
 | Lifecycle cost guards | `s3.tf` — backups bucket expires dumps after `backup_retention_days` (90d default; deliberately NO Object Lock — the lifecycle IS the retention policy), and every lifecycle rule reaps incomplete multipart uploads after 7 days |
 
@@ -407,8 +409,8 @@ container that exited on a healthy VM.
   certificate's `DaysToExpiry` under 30. Route 53 checks complete the TLS
   handshake but don't validate the certificate, so an expired one would pass
   them. ACM renews from 60 days out on its own, so this only fires when that
-  renewal has failed. The VM's own Let's Encrypt certificates (Caddy, on `api.`)
-  are not covered yet: `../docs/followups.md`.
+  renewal has failed. The VM's own Let's Encrypt certificate (Caddy, on `api.`)
+  is the certificate canary's job: § Certificate canary.
 
 **Cost**: about **$8–13 a month**. Each HTTPS check is $0.50–0.75 a month plus
 $1–2 for HTTPS and, on the API, $1–2 for the string match. The lower figures are
@@ -473,6 +475,62 @@ cheapest: $2 a month, registration in about 15 days.
    A text and an email arrive within a minute. The next evaluation sets the
    alarm back to OK, which sends a second text. If no text comes, check
    `feohledger-prod-pager-sms-failed` and the registration status.
+
+## Certificate canary
+
+`canary.tf` watches the one certificate no AWS metric sees: the Let's Encrypt
+certificate Caddy obtains and renews on the VM for `api.<domain>` (since
+`../docs/decisions.md` §364 the apex and tenant hosts are on CloudFront's ACM
+certificate, which § Uptime checks and paging already covers). The Route 53
+checks complete the TLS handshake without validating the certificate, so an
+expired one reads healthy there while every browser refuses the API.
+
+**What it creates**
+
+- **A CloudWatch Synthetics canary** `<project>-<env>-cert` (us-east-1), on the
+  pinned runtime `syn-nodejs-puppeteer-19.0`, running
+  `canary/api-certificate/index.js` **hourly**. It fetches
+  `https://api.<domain>/api/health` with Node's certificate validation on (an
+  expired, self-signed or wrong-host certificate fails the handshake), fails the
+  run when the certificate has fewer than `certificate_canary_min_days` (default
+  **14**, must be under 30) days left, and requires the liveness body
+  `"status":"ok"`. Caddy renews 30 days ahead, so a failing run means renewal
+  has been failing for over two weeks.
+- **An alarm** `<project>-<env>-api-certificate` on the canary's
+  `SuccessPercent`: two failed hourly runs in a row **page and email**, like the
+  uptime checks. Missing data is breaching (a canary that stops running is a
+  watch gone blind), so expect one page right after the first apply, before
+  the first two runs land.
+- **An artifacts bucket** `<project>-canary-<env>-<account-id>`: versioned,
+  SSE-KMS under the app key, public access blocked, access-logged to the sink,
+  TLS only, run reports expired after 30 days.
+- **An execution role** `<project>-<env>-certificate-canary`, trusted by Lambda
+  in this account only, allowed to write its own artifacts (`canary/*`) and log
+  group (`/aws/lambda/cwsyn-<name>-*`), use the app key, and publish metrics to
+  the `CloudWatchSynthetics` namespace only. `s3:ListAllMyBuckets` and
+  `cloudwatch:PutMetricData` take `"*"` because AWS offers no narrower resource.
+
+**Runtime upkeep.** The runtime is pinned, never floating. AWS deprecates old
+Synthetics runtimes, and a canary on a deprecated one can no longer be updated,
+so bump `local.certificate_canary_runtime` to the newest
+`syn-nodejs-puppeteer-*` listed under "Runtime versions using Node.js and
+Puppeteer" in the CloudWatch docs whenever this file is touched. The script uses
+only `node:https`, so a runtime bump needs no code change.
+
+**Cost**: about **$1 a month**: $0.0012 a run × ~730 runs ≈ $0.88 (the list
+price this was sized on; check the CloudWatch pricing page), one alarm $0.10,
+a few KB of S3 artifacts and logs, Lambda time inside the free tier.
+
+**Operator step: apply it** (not yet applied). Plan and apply as in
+§ Workload stack step 3; it needs no new variable. The plan should add the
+canary, its alarm, its role and inline policy, the artifacts bucket and its
+six settings resources, and change only `access_logs_delivery`'s bucket policy
+(its source list gains the artifacts bucket); it destroys nothing. Then, in the
+CloudWatch console (us-east-1) → Application Signals → Synthetics Canaries,
+the first run should be **Passed**, its log naming the certificate's issuer and
+days left. To see the failure path without touching production, run the
+script locally against an expired host
+(`CANARY_HOST=expired.badssl.com CANARY_PATH=/ node -e 'require("./canary/api-certificate/index.js").handler().catch(e=>console.log(e.message))'`).
 
 ## Secrets
 

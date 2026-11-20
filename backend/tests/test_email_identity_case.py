@@ -338,7 +338,7 @@ async def test_sso_jit_concurrent_insert_is_still_a_refusal(realdb, mixed_case_u
 
     async with realdb.control_sessionmaker()() as s:
         with pytest.raises(EmailInOtherWorkspace):
-            # Exact case, so the stored row's case-sensitive UNIQUE trips.
+            # `uq_users_email_lower` trips on the insert (any case, since 0138).
             await jit_provision(s, org_b, email, "sub-race", "oidc", {})
         await s.rollback()
 
@@ -539,3 +539,210 @@ async def test_wrong_workspace_audit_names_the_page_and_the_verified_password(
     assert row["details"]["password_verified"] is True
     assert row["details"]["email"] == email.lower()
     assert not [a for a in audits if a["organization_id"] == realdb.info("b").org_id]
+
+
+# ---------------------------------------------------------------------------
+# The database refuses a case variant (migration 0138, decisions §475)
+# ---------------------------------------------------------------------------
+#
+# The app checks before it writes, so these tests make the check lose the race:
+# it says "free" (a concurrent writer had not committed yet) and the row is
+# already there. Under the old case-sensitive UNIQUE(email) a lower-cased
+# insert beside a mixed-case row succeeded and minted a duplicate; under
+# `uq_users_email_lower` it is refused, and each create maps that to its 409.
+
+
+async def test_the_index_refuses_a_case_variant_insert(realdb, mixed_case_user):
+    from sqlalchemy.exc import IntegrityError
+
+    _user_id, email = await mixed_case_user()
+    async with realdb.control_sessionmaker()() as s:
+        s.add(
+            User(
+                id=uuid.uuid4(),
+                email=email.upper(),
+                full_name="Variant",
+                organization_id=realdb.info("b").org_id,
+                is_active=True,
+                must_change_password=False,
+            )
+        )
+        with pytest.raises(IntegrityError, match="uq_users_email_lower"):
+            await s.flush()
+        await s.rollback()
+    assert len(await _accounts_for(realdb, email)) == 1
+
+
+async def test_admin_create_that_loses_the_race_is_the_coded_409(
+    realdb, mixed_case_user, monkeypatch
+):
+    from app.api import admin
+
+    _user_id, email = await mixed_case_user()  # held in A, stored mixed-case
+
+    async def _check_passed(*_a, **_kw):
+        return None  # the pre-check ran before the other writer committed
+
+    monkeypatch.setattr(admin, "_refuse_taken_email", _check_passed)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            "/api/admin/users",
+            json={"email": email.lower(), "full_name": "Racer", "role_names": ["ap_clerk"]},
+        )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "email_in_this_workspace"
+    assert email not in resp.text and email.lower() not in resp.text
+    assert len(await _accounts_for(realdb, email)) == 1
+
+
+@pytest.mark.plan("scale")
+async def test_scim_create_that_loses_the_race_is_a_409(realdb, mixed_case_user, monkeypatch):
+    from app.api import scim
+
+    _user_id, email = await mixed_case_user()
+    org = await _org_a(realdb)
+    real_check = scim._refuse_taken_username
+    calls = {"n": 0}
+
+    async def _first_says_free(db, org_, address, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return await real_check(db, org_, address, **kw)
+
+    monkeypatch.setattr(scim, "_refuse_taken_username", _first_says_free)
+    async with realdb.control_sessionmaker()() as s:
+        with pytest.raises(HTTPException) as exc:
+            await create_user(SCIMUserCreate(userName=email.lower()), _REQUEST, org, s)
+        await s.rollback()
+
+    assert calls["n"] == 2
+    assert exc.value.status_code == 409
+    assert exc.value.detail["scimType"] == "uniqueness"
+    assert len(await _accounts_for(realdb, email)) == 1
+
+
+async def test_admin_rename_that_loses_the_race_is_the_coded_409(
+    realdb, mixed_case_user, monkeypatch
+):
+    from app.api import admin
+
+    _held_id, email = await mixed_case_user()  # held in A
+    target_id, _target_email = await mixed_case_user()  # renamed onto it
+
+    async def _check_passed(*_a, **_kw):
+        return None  # the pre-check ran before the other writer committed
+
+    monkeypatch.setattr(admin, "_refuse_taken_email", _check_passed)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.patch(f"/api/admin/users/{target_id}", json={"email": email.lower()})
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "email_in_this_workspace"
+    assert len(await _accounts_for(realdb, email)) == 1
+
+
+@pytest.mark.plan("scale")
+@pytest.mark.parametrize("operation", ["put", "patch"])
+async def test_scim_rename_that_loses_the_race_is_a_409(
+    realdb, mixed_case_user, monkeypatch, operation
+):
+    from app.api import scim
+    from app.api.scim import patch_user, replace_user
+    from app.schemas.scim import SCIMPatchOp, SCIMPatchRequest
+
+    _held_id, email = await mixed_case_user()
+    target_id, _target_email = await mixed_case_user()
+    org = await _org_a(realdb)
+    real_check = scim._refuse_taken_username
+    calls = {"n": 0}
+
+    async def _first_says_free(db, org_, address, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return await real_check(db, org_, address, **kw)
+
+    monkeypatch.setattr(scim, "_refuse_taken_username", _first_says_free)
+    async with realdb.control_sessionmaker()() as s:
+        with pytest.raises(HTTPException) as exc:
+            if operation == "put":
+                await replace_user(
+                    target_id, SCIMUserCreate(userName=email.lower()), _REQUEST, org, s
+                )
+            else:
+                body = SCIMPatchRequest(
+                    Operations=[SCIMPatchOp(op="replace", path="userName", value=email.lower())]
+                )
+                await patch_user(target_id, body, _REQUEST, org, s)
+        await s.rollback()
+
+    assert calls["n"] == 2
+    assert exc.value.status_code == 409
+    assert exc.value.detail["scimType"] == "uniqueness"
+    assert len(await _accounts_for(realdb, email)) == 1
+
+
+async def test_portal_invite_that_loses_the_race_is_a_409(realdb, monkeypatch):
+    """`vendor_users` carries the same index per tenant. The race: the
+    invite's existence check reads before a concurrent invite commits."""
+    from app.api import vendors as vendors_api
+    from app.config import settings as cfg
+    from app.models.vendor import Vendor
+    from app.models.vendor_user import VendorUser
+
+    monkeypatch.setattr(cfg, "tenant_url_template", "https://{slug}.feohledger.test", raising=True)
+    org_id = realdb.info("a").org_id
+    vendor_id = uuid.uuid4()
+    stored = f"Portal.{vendor_id.hex[:10]}@Supplier.Test"
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        s.add(
+            Vendor(
+                id=vendor_id,
+                name="Race Supply",
+                organization_id=org_id,
+                status="active",
+                source="manual",
+            )
+        )
+        s.add(
+            VendorUser(
+                vendor_id=vendor_id,
+                organization_id=org_id,
+                email=stored,  # as a pre-normalization row is stored
+                full_name="Existing",
+                is_active=True,
+            )
+        )
+        await s.commit()
+
+    real_matches = vendors_api.email_matches
+    calls = {"n": 0}
+
+    def _first_misses(column, address):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return column == "__nobody__"  # the check read before the commit
+        return real_matches(column, address)
+
+    monkeypatch.setattr(vendors_api, "email_matches", _first_misses)
+    try:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(
+                f"/api/vendors/{vendor_id}/portal-users",
+                json={"email": stored.lower(), "full_name": "Racer"},
+            )
+        assert resp.status_code == 409, resp.text
+        assert stored.lower() not in resp.text
+        async with mk() as s:
+            rows = (
+                await s.execute(
+                    select(VendorUser.id).where(func.lower(VendorUser.email) == stored.lower())
+                )
+            ).all()
+        assert len(rows) == 1
+    finally:
+        async with mk() as s:
+            await s.execute(delete(VendorUser).where(VendorUser.vendor_id == vendor_id))
+            await s.execute(delete(Vendor).where(Vendor.id == vendor_id))
+            await s.commit()

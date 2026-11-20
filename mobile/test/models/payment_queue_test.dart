@@ -233,7 +233,7 @@ void main() {
       };
 
   group('PaymentRun.fromJson', () {
-    test('parses a draft run and derives isExecutable + cfoApproved', () {
+    test('parses a draft run and derives isDraft + cfoApproved', () {
       final run = PaymentRun.fromJson(
         runResponse(requiresCfoApproval: true),
       );
@@ -243,7 +243,7 @@ void main() {
       expect(run.paymentCount, 3);
       expect(run.requiresCfoApproval, isTrue);
       expect(run.cfoApproved, isFalse);
-      expect(run.isExecutable, isTrue);
+      expect(run.isDraft, isTrue);
     });
 
     test('a run under the threshold needs no CFO sign-off', () {
@@ -252,7 +252,7 @@ void main() {
       expect(run.cfoApproved, isFalse);
     });
 
-    test('a completed run is not executable; cfoApproved reflects the stamp',
+    test('a completed run is not a draft; cfoApproved reflects the stamp',
         () {
       final run = PaymentRun.fromJson(runResponse(
         id: 'run2',
@@ -263,7 +263,7 @@ void main() {
         cfoApprovedAt: '2026-01-11T09:00:00',
         executedAt: '2026-01-11T10:00:00',
       ));
-      expect(run.isExecutable, isFalse);
+      expect(run.isDraft, isFalse);
       expect(run.cfoApproved, isTrue);
       expect(run.executedAt, DateTime(2026, 1, 11, 10));
     });
@@ -311,14 +311,12 @@ void main() {
       expect(PaymentRunStatus.fromString(''), PaymentRunStatus.other);
     });
 
-    test('only a draft executes or cancels', () {
+    test('only a draft is a draft (the runs the Runs tab asks about)', () {
       for (final s in PaymentRunStatus.values) {
         final code = s == PaymentRunStatus.other ? 'executing' : s.value;
         final run = PaymentRun.fromJson(runResponse(status: code));
         final draft = s == PaymentRunStatus.draft;
         expect(run.isDraft, draft, reason: code);
-        expect(run.isExecutable, draft, reason: code);
-        expect(run.isCancellable, draft, reason: code);
       }
     });
 
@@ -363,6 +361,113 @@ void main() {
         method: PaymentMethod.wire,
       );
       expect(sel.toJson(), {'invoice_id': 'inv1', 'method': 'wire'});
+    });
+  });
+
+  // `GET /api/payments/runs/{id}`'s `actions` (`run_action_refusals`): the
+  // Runs tab offers "Approve as CFO" from `approve`, never from a role check.
+  group('PaymentRunRecordDetail.approve', () {
+    Map<String, dynamic> detail(Object? actions) => {
+          'id': 'run1',
+          'status': 'draft',
+          'total_amount': '10.00',
+          'created_at': '2026-01-10T12:00:00',
+          'requires_cfo_approval': true,
+          'cfo_approved_at': null,
+          'actions': actions,
+        };
+
+    test('null is the server accepting the sign-off', () {
+      final d = PaymentRunRecordDetail.fromJson(detail({'approve': null}));
+      expect(d.approve.allowed, isTrue);
+    });
+
+    test('a coded refusal is carried with its code', () {
+      final d = PaymentRunRecordDetail.fromJson(detail({
+        'approve': {
+          'code': 'payment_run_segregation',
+          'message': 'm',
+          'params': {'step': 'approve'},
+        },
+      }));
+      expect(d.approve.allowed, isFalse);
+      expect(d.approve.code, 'payment_run_segregation');
+      expect(d.approve.isOffered(), isTrue);
+    });
+
+    test('role_not_permitted is not offered at all', () {
+      final d = PaymentRunRecordDetail.fromJson(detail({
+        'approve': {'code': 'role_not_permitted', 'message': 'm'},
+      }));
+      expect(d.approve.isOffered(), isFalse);
+    });
+
+    test('a missing verdict fails closed', () {
+      expect(
+        PaymentRunRecordDetail.fromJson(detail({})).approve.answered,
+        isFalse,
+      );
+      expect(
+        PaymentRunRecordDetail.fromJson(detail(null)).approve.answered,
+        isFalse,
+      );
+    });
+  });
+
+  // The same detail's `execute` / `cancel`: the Runs tab offers Execute and
+  // Cancel from them, never from a role, status or CFO pre-flight check.
+  group('PaymentRunRecordDetail.execute / .cancel', () {
+    Map<String, dynamic> detail(Object? actions) => {
+          'id': 'run1',
+          'status': 'draft',
+          'total_amount': '10.00',
+          'created_at': '2026-01-10T12:00:00',
+          'requires_cfo_approval': true,
+          'cfo_approved_at': null,
+          'actions': actions,
+        };
+
+    test('null is the server accepting each', () {
+      final d = PaymentRunRecordDetail.fromJson(
+        detail({'execute': null, 'cancel': null}),
+      );
+      expect(d.execute.allowed, isTrue);
+      expect(d.cancel.allowed, isTrue);
+    });
+
+    test('the CFO wait on execute is carried, offered and not allowed', () {
+      final d = PaymentRunRecordDetail.fromJson(detail({
+        'execute': {
+          'code': 'payment_run_awaiting_cfo',
+          'message': 'm',
+          'params': <String, dynamic>{},
+        },
+        'cancel': null,
+      }));
+      expect(d.execute.code, 'payment_run_awaiting_cfo');
+      expect(d.execute.isOffered(), isTrue);
+      expect(d.execute.allowed, isFalse);
+      expect(d.cancel.allowed, isTrue);
+    });
+
+    test('a role refusal on either is not offered', () {
+      const role = {'code': 'role_not_permitted', 'message': 'm'};
+      final d = PaymentRunRecordDetail.fromJson(
+        detail({'execute': role, 'cancel': role}),
+      );
+      expect(d.execute.isOffered(), isFalse);
+      expect(d.cancel.isOffered(), isFalse);
+    });
+
+    test('a missing verdict fails closed, independently per action', () {
+      final onlyApprove =
+          PaymentRunRecordDetail.fromJson(detail({'approve': null}));
+      expect(onlyApprove.approve.allowed, isTrue);
+      expect(onlyApprove.execute.answered, isFalse);
+      expect(onlyApprove.cancel.answered, isFalse);
+      final none = PaymentRunRecordDetail.fromJson(detail(null));
+      expect(none.execute.answered, isFalse);
+      expect(none.cancel.answered, isFalse);
     });
   });
 }

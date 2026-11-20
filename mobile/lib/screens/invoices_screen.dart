@@ -47,12 +47,27 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
 
   bool get _canBulk => AuthStore.instance.canBulkEditInvoices;
 
+  /// The last [InvoiceStore.searchClearedExternally] this screen acted on.
+  int _searchClearsSeen = 0;
+
   @override
   void initState() {
     super.initState();
+    _searchClearsSeen = InvoiceStore.instance.searchClearedExternally;
+    InvoiceStore.instance.addListener(_syncSearchBox);
     SchedulerBinding.instance.addPostFrameCallback((_) {
       InvoiceStore.instance.fetch();
     });
+  }
+
+  /// The dashboard's Overdue tap-through clears the store's search; the box
+  /// must not keep showing a query the list no longer applies.
+  void _syncSearchBox() {
+    final clears = InvoiceStore.instance.searchClearedExternally;
+    if (clears == _searchClearsSeen) return;
+    _searchClearsSeen = clears;
+    _searchDebouncer.cancel();
+    _searchController.clear();
   }
 
   @override
@@ -62,6 +77,7 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     if (InvoiceStore.instance.selectionMode) {
       InvoiceStore.instance.exitSelectionMode();
     }
+    InvoiceStore.instance.removeListener(_syncSearchBox);
     _searchDebouncer.cancel();
     _searchController.dispose();
     super.dispose();
@@ -84,12 +100,23 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
                 child: ListenableBuilder(
                   listenable: InvoiceStore.instance,
                   builder: (context, _) {
-                    final current = InvoiceStore.instance.statusFilter;
+                    // The Overdue quick view selects its own chip, so no
+                    // status chip (not even All) reads as selected with it.
+                    final overdue = InvoiceStore.instance.overdueOnly;
+                    final current = overdue
+                        ? _overdueChipValue
+                        : InvoiceStore.instance.statusFilter;
                     return ListView(
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       children: [
                         _filterChip(l.invoicesFilterAll, null, current),
+                        _filterChip(
+                          l.invoicesFilterOverdue,
+                          _overdueChipValue,
+                          current,
+                          onSelected: InvoiceStore.instance.setOverdueOnly,
+                        ),
                         _filterChip(l.invoicesFilterNew, 'new', current),
                         _filterChip(l.invoicesFilterPending, 'pending', current),
                         _filterChip(
@@ -279,14 +306,27 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     );
   }
 
-  Widget _filterChip(String label, String? value, String? current) {
-    final selected = current == value;
+  /// Stands in for the Overdue quick view as the chip row's current value;
+  /// never a real status, so no status chip matches it.
+  static const _overdueChipValue = '__overdue__';
+
+  /// One chip of the row. A status chip selects [value] as the status
+  /// filter; a quick view (Overdue) passes its own [onSelected] and a
+  /// sentinel [value] that [current] holds while it is active.
+  Widget _filterChip(
+    String label,
+    String? value,
+    String? current, {
+    VoidCallback? onSelected,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: FilterChip(
         label: Text(label),
-        selected: selected,
-        onSelected: (_) => InvoiceStore.instance.setStatusFilter(value),
+        selected: current == value,
+        onSelected: (_) => onSelected != null
+            ? onSelected()
+            : InvoiceStore.instance.setStatusFilter(value),
       ),
     );
   }

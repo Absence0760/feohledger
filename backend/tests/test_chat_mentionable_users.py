@@ -72,6 +72,7 @@ async def _add_invoice(mk, org_id) -> uuid.UUID:
                 invoice_number=f"INV-{uuid.uuid4().hex[:6]}",
                 vendor_name="Acme Supplies",
                 amount=Decimal("100.00"),
+                currency="USD",
                 status=InvoiceStatus.new,
             )
         )

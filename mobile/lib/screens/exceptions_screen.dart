@@ -15,8 +15,12 @@ import 'package:feohledger_mobile/widgets/exception_list_tile.dart';
 
 /// Exception queue — list flagged invoices with status filters and act on each
 /// (resolve / escalate / dismiss). Swipe a row right to resolve, left to
-/// dismiss; the trailing menu carries escalate (a third action doesn't map onto
-/// a binary swipe). Mirrors `ApprovalsScreen` + `InvoicesScreen`.
+/// dismiss; the detail screen carries escalate (a third action doesn't map
+/// onto a binary swipe). Each direction is offered from the row's
+/// `decision_refusals` verdict, never a role or status check here: a swipe
+/// goes only where the server would accept it now, and a refused action is
+/// explained on the detail screen. Mirrors `ApprovalsScreen` +
+/// `InvoicesScreen`.
 class ExceptionsScreen extends StatefulWidget {
   const ExceptionsScreen({super.key});
 
@@ -198,6 +202,13 @@ class _ExceptionsScreenState extends State<ExceptionsScreen> {
     final l = AppLocalizations.of(context);
     final store = ExceptionStore.instance;
     final selecting = store.selectionMode;
+    final resolve = exc.resolveVerdict;
+    final dismiss = exc.dismissVerdict;
+    // A row the reader may decide at all — not refused for their role or for
+    // a terminal status. Only those enter bulk selection.
+    final decidable =
+        resolve.isOffered(hiddenCodes: kExceptionHiddenRefusals) ||
+        dismiss.isOffered(hiddenCodes: kExceptionHiddenRefusals);
 
     final tile = ExceptionListTile(
       exception: exc,
@@ -205,18 +216,27 @@ class _ExceptionsScreenState extends State<ExceptionsScreen> {
       onTap: selecting
           ? () => store.toggleSelected(exc.id)
           : () => _openDetail(exc),
-      onLongPress: _canBulk && !selecting && exc.status.isActionable
+      onLongPress: _canBulk && !selecting && decidable
           ? () => store.enterSelectionMode(exc.id)
           : null,
     );
 
-    // In selection mode, or for terminal (read-only) rows, no swipe.
-    if (selecting || !exc.status.isActionable) {
+    // In selection mode no swipe; otherwise only in a direction the server
+    // would accept now (a segregation refusal is explained on the detail).
+    final direction = resolve.allowed && dismiss.allowed
+        ? DismissDirection.horizontal
+        : resolve.allowed
+        ? DismissDirection.startToEnd
+        : dismiss.allowed
+        ? DismissDirection.endToStart
+        : null;
+    if (selecting || direction == null) {
       return tile;
     }
 
     return Dismissible(
       key: ValueKey(exc.id),
+      direction: direction,
       background: _swipeBackground(
         Colors.green.shade700,
         Icons.check,

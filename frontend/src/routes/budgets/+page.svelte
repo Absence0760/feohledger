@@ -73,10 +73,10 @@
 
 	const COLUMNS = $derived([
 		{ label: m('budgets.col.name') },
-		{ label: m('budgets.col.dimension') },
+		{ label: m('budgets.col.dimension'), class: 'col-type' },
 		{ label: m('budgets.col.value') },
-		{ label: m('budgets.col.period') },
-		{ label: m('budgets.col.allocation'), class: 'right' },
+		{ label: m('budgets.col.period'), class: 'col-period' },
+		{ label: m('budgets.col.allocation'), class: 'right col-amount' },
 		{ label: '', class: 'actions-col' }
 	]);
 
@@ -329,7 +329,9 @@
 	{#if errored}
 		<LoadError message={m('budgets.empty.errored')} onretry={() => load()} testId="budgets-error" />
 	{:else}
+	<div class="budget-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={visibleBudgets.length === 0}
 		{loading}
@@ -366,6 +368,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 	{/if}
 
 	<LoadMoreFooter
@@ -389,6 +392,23 @@
 {/if}
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content in any locale; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.budget-table { min-width: 0; }
+	.budget-table :global(table) { min-width: 920px; }
+	.budget-table :global(th.col-type) { width: 150px; }
+	.budget-table :global(th.col-period) { width: 130px; }
+	.budget-table :global(th.col-amount) { width: 160px; }
+	.budget-table :global(th.actions-col) { width: 140px; }
+
 	.filter-row {
 		display: flex;
 		align-items: center;

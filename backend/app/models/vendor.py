@@ -125,6 +125,18 @@ class Vendor(Base, EntityMixin, TimestampMixin):
     payments_blocked: Mapped[bool] = mapped_column(default=False, nullable=False)
     payments_blocked_reason: Mapped[str | None] = mapped_column(String(255))
     payments_blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The ACTIVE false-positive adjudication (`sanctions_adjudications`,
+    # migration 0139) that covers the stored screen above, or NULL. Kept in
+    # step by every stored screen (`vendor_screening.screen_vendor_record`) and
+    # by adjudicate / revoke, so the ERP push and the run gate read "stored
+    # screen is `match` / `review` but adjudicated" without a join. No FK: the
+    # adjudication already points at the vendor, and a cycle buys nothing.
+    screening_adjudication_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    # The employee who created this vendor in FeohLedger (`POST /api/vendors`,
+    # CSV import), migration 0139. Refused as the adjudicator of the vendor's
+    # sanctions screen (segregation). NULL: created before 0139, or by a
+    # system path (ERP sync, AI extraction) with no employee behind it.
+    onboarded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
     # Composite vendor-risk score (0–100) + bucket. Derived by
     # `services.vendor_risk_scoring` from sanctions signals + fraud

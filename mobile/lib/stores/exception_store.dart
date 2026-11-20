@@ -265,5 +265,8 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
     'resolved_at': e.resolvedAt?.toIso8601String(),
     'due_at': e.dueAt?.toIso8601String(),
     'time_to_resolution_hours': e.timeToResolutionHours,
+    // The caller's Resolve / Dismiss / Escalate verdicts, so a cached queue
+    // offers the same controls the live one did.
+    'decision_refusals': e.decisionRefusals,
   };
 }

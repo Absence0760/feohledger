@@ -3,6 +3,7 @@
 // display via `formatMoney` / render directly, never `parseFloat`.
 
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 
 export type ExperimentStatus = 'draft' | 'running' | 'concluded';
@@ -81,6 +82,9 @@ export interface Experiment {
 	entity_id: string | null;
 	created_at: string | null;
 	updated_at: string | null;
+	/** The caller's verdict on Start (`api/workflow_experiments.start_refusal`):
+	 *  `null` offers it. Absent means not known yet (fail closed). */
+	actions?: { start: ActionRefusal };
 }
 
 export interface ExperimentListResponse {

@@ -53,6 +53,7 @@ async def _paid_invoice(mk, org_id, vendor_id, amount, completed_at):
             invoice_number=f"INV-{vendor_id}-{uuid.uuid4().hex[:8]}",
             vendor_name="x",
             amount=Decimal(amount),
+            currency="USD",
             status=InvoiceStatus.paid,
             vendor_id=vendor_id,
         )

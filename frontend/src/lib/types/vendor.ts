@@ -188,8 +188,37 @@ export interface ScreeningReviewItem {
 	risk_score: string | null;
 	latest_matched_list: string | null;
 	latest_provider: string | null;
+	/** The stored screen this row shows; an adjudication posts it back. */
+	latest_check_id: string | null;
 	latest_categories: string[];
 	adverse_media: boolean;
+	/** The active false-positive adjudication covering the stored screen
+	 *  (decisions §477), or null. */
+	adjudication: SanctionsAdjudication | null;
+	/** Every active adjudication of the vendor, newest first. */
+	active_adjudications?: SanctionsAdjudication[];
+	/** Server verdicts (issue #575): null = the endpoint would accept the
+	 *  reader; absent = not known (yet), which offers nothing. */
+	adjudicate_refusal?: ActionRefusal;
+	revoke_adjudication_refusal?: ActionRefusal;
+}
+
+/** `POST /api/vendors/{id}/screening/adjudicate` / `.../adjudication/revoke`.
+ *  PII-free: the list NAME, provider, verdict and a hash of the matched entry. */
+export interface SanctionsAdjudication {
+	id: string;
+	vendor_id: string;
+	sanctions_check_id: string;
+	provider: string;
+	result: string;
+	matched_list: string | null;
+	fingerprint: string;
+	reason: string;
+	adjudicated_by_user_id: string;
+	adjudicated_at: string;
+	revoked_by_user_id: string | null;
+	revoked_at: string | null;
+	revoke_reason: string | null;
 }
 
 /**

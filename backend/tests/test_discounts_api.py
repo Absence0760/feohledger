@@ -8,11 +8,15 @@ tenants — plus RBAC, tenant isolation, audit rows, and exact ``Numeric`` money
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import timedelta
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models.discount import (
@@ -1430,3 +1434,208 @@ async def test_optimizer_and_projected_savings_exclude_offers_on_settled_invoice
     assert Decimal(str(opt["total_savings_selected"])) == Decimal("30.00")
     assert Decimal(str(opt["total_outlay_selected"])) == Decimal("970.00")
     assert Decimal(str(dash["projected_savings"])) == Decimal("30.00")
+
+
+# ---------------------------------------------------------------------------
+# concurrency — two decisions on one offer serialize on its row lock
+# ---------------------------------------------------------------------------
+
+# A decision's audit action, by endpoint.
+_DECISION_AUDIT = {"accept": "discount_offer.accepted", "decline": "discount_offer.declined"}
+
+
+async def _add_open_offer(mk, org_id) -> uuid.UUID:
+    """An `offered` row whose two tiers (5 and 10 days, measured from today)
+    are both capturable today, so either accept can be named and decline's
+    window is open."""
+    async with mk() as s:
+        offer = DiscountOffer(
+            organization_id=org_id,
+            entity_id=await _default_entity_id(s),
+            scope="vendor",
+            source="supplier",
+            status=OFFER_STATUS_OFFERED,
+            tiers=_tiers(),
+            base_amount=Decimal("1000.00"),
+            currency="USD",
+            valid_from=utc_today(),
+            valid_until=utc_today() + timedelta(days=30),
+        )
+        s.add(offer)
+        await s.commit()
+        return offer.id
+
+
+async def _wait_for_lock_waiter(mk, *, timeout: float = 15.0) -> bool:
+    """True once Postgres reports another backend in this database waiting on
+    a lock (False after `timeout`). Asked of `pg_stat_activity` from an
+    independent session — the real signal, never a sleep — as
+    `test_payment_concurrency` does."""
+    from sqlalchemy import text
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        async with mk() as s:
+            waiting = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "AND pid <> pg_backend_pid() "
+                        "AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+        if waiting:
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def _decision_audit_rows(mk, offer_id) -> list[AuditLog]:
+    async with mk() as s:
+        return list(
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.entity_id == offer_id,
+                        AuditLog.action.in_(tuple(_DECISION_AUDIT.values())),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (("accept", 5), ("decline", None)),
+        (("decline", None), ("accept", 5)),
+        (("accept", 5), ("accept", 10)),
+    ],
+    ids=["accept-then-decline", "decline-then-accept", "accept-two-tiers"],
+)
+async def test_concurrent_decisions_on_one_offer_serialize(realdb, first, second):
+    """Two decisions racing on one offer: exactly one lands, the other is the
+    refusal's 409, and the append-only trail holds one decision.
+
+    Before the row lock, `_get_offer_scoped` was a plain SELECT: both requests
+    read `offered`, both passed `accept_refusal` / `decline_refusal`, the last
+    commit won and two audit rows asserted two decisions. The first racer is
+    parked mid-transaction (inside its audit write, after its status change)
+    while the second starts; the test then requires the second to be WAITING ON
+    A LOCK — a plain read would not wait — before letting the first commit.
+    """
+    from app.api import discounts as discounts_api
+    from app.schemas.discount import AcceptOfferRequest
+
+    mk = realdb.sessionmaker("a")
+    info = realdb.info("a")
+    org_id = info.org_id
+    user = SimpleNamespace(id=info.users["ap_manager"], roles=[SimpleNamespace(name="ap_manager")])
+    offer_id = await _add_open_offer(mk, org_id)
+
+    real_dispatch = discounts_api.dispatch_audit
+    parked = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def _gated_dispatch(db, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            parked.set()
+            await release.wait()
+        return await real_dispatch(db, **kwargs)
+
+    async def _decide(kind: str, tier_days: int | None):
+        async with realdb.sessionmaker("a")() as db:
+            try:
+                if kind == "accept":
+                    resp = await discounts_api.accept_offer(
+                        offer_id=offer_id,
+                        body=AcceptOfferRequest(tier_days=tier_days),
+                        db=db,
+                        org_id=org_id,
+                        user=user,
+                        entity_id=None,
+                    )
+                else:
+                    resp = await discounts_api.decline_offer(
+                        offer_id=offer_id, db=db, org_id=org_id, user=user, entity_id=None
+                    )
+                return ("ok", resp)
+            except HTTPException as exc:
+                await db.rollback()
+                return ("http", exc.status_code, exc.detail)
+
+    with patch.object(discounts_api, "dispatch_audit", _gated_dispatch):
+        first_task = asyncio.create_task(_decide(*first))
+        second_task = None
+        try:
+            await asyncio.wait_for(parked.wait(), timeout=15)
+            second_task = asyncio.create_task(_decide(*second))
+            second_queued = await _wait_for_lock_waiter(mk)
+        finally:
+            # Never leave the first racer parked holding the row lock: the
+            # harness's per-test TRUNCATE would queue behind it forever.
+            release.set()
+            tasks = [t for t in (first_task, second_task) if t is not None]
+            results = await asyncio.gather(*tasks)
+
+    assert second_queued, "the second decision did not wait on the offer's row lock"
+    first_result, second_result = results
+    assert first_result[0] == "ok", first_result
+
+    winner_status = OFFER_STATUS_DECLINED if first[0] == "decline" else "accepted"
+    assert second_result == (
+        "http",
+        409,
+        f"cannot {second[0]} an offer in status {winner_status!r} (must be 'offered')",
+    )
+
+    async with mk() as s:
+        row = (
+            await s.execute(select(DiscountOffer).where(DiscountOffer.id == offer_id))
+        ).scalar_one()
+    assert row.status == winner_status
+    if first[0] == "accept":
+        assert row.accepted_tier["days"] == first[1]
+    else:
+        assert row.accepted_tier is None
+        assert row.accepted_at is None
+
+    audits = await _decision_audit_rows(mk, offer_id)
+    assert [a.action for a in audits] == [_DECISION_AUDIT[first[0]]]
+
+
+async def test_a_resent_accept_is_refused_without_a_second_write(realdb):
+    """A re-sent accept — the same tier, a double-click or a client retry — is
+    the status guard's 409 (`discount_offer_not_open` in the row's verdict),
+    not a second acceptance: `accepted_at` and the tier stay the first
+    request's, and the trail holds one `discount_offer.accepted`."""
+    mk = realdb.sessionmaker("a")
+    offer_id = await _add_open_offer(mk, realdb.info("a").org_id)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        first = await c.post(f"/api/discounts/offers/{offer_id}/accept", json={"tier_days": 10})
+        assert first.status_code == 200, first.text
+        replay = await c.post(f"/api/discounts/offers/{offer_id}/accept", json={"tier_days": 10})
+        assert replay.status_code == 409, replay.text
+        assert replay.json()["detail"] == (
+            "cannot accept an offer in status 'accepted' (must be 'offered')"
+        )
+        verdict = (await c.get(f"/api/discounts/offers/{offer_id}")).json()["actions"]["accept"]
+        assert verdict["code"] == "discount_offer_not_open"
+
+    async with mk() as s:
+        row = (
+            await s.execute(select(DiscountOffer).where(DiscountOffer.id == offer_id))
+        ).scalar_one()
+    assert row.accepted_tier["days"] == 10
+    assert row.accepted_at.isoformat() == first.json()["accepted_at"]
+    audits = await _decision_audit_rows(mk, offer_id)
+    assert [a.action for a in audits] == ["discount_offer.accepted"]

@@ -84,6 +84,7 @@ async def _seed_invoice(
             invoice_number=number,
             vendor_name="x",
             amount=Decimal("100.00"),
+            currency="USD",
             vendor_id=vendor_id,
             status=status,
             approved_by="Original Approver" if approved else None,
@@ -888,6 +889,13 @@ _VENDOR_FK_NOT_PLAIN_REASSIGNED = {
     # realm by realm with the row link, or refuses the merge (decisions §373).
     "vendor_erp_links": (
         "unique (vendor_id, realm) — moved realm by realm with the row link, not plain-reassigned"
+    ),
+    # A false-positive adjudication judges ONE vendor record's screen result
+    # (decisions §477); it stays with the retired duplicate rather than clear
+    # the canonical's screens, and a blind move could collide with the
+    # canonical's own active row on the partial unique index.
+    "sanctions_adjudications": (
+        "judges one vendor record's screen — stays with the duplicate, never transferred"
     ),
 }
 

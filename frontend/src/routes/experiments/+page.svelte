@@ -31,6 +31,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import LoadingState from '#lib/components/ui/LoadingState.svelte';
@@ -54,10 +55,10 @@
 	const COLUMNS = $derived([
 		{ label: m('experiments.col.name') },
 		{ label: m('experiments.col.workflow') },
-		{ label: m('experiments.col.primaryMetric') },
-		{ label: m('experiments.col.split') },
-		{ label: m('experiments.col.assigned'), class: 'right' },
-		{ label: m('experiments.col.status') },
+		{ label: m('experiments.col.primaryMetric'), class: 'col-metric' },
+		{ label: m('experiments.col.split'), class: 'col-split' },
+		{ label: m('experiments.col.assigned'), class: 'right col-count' },
+		{ label: m('experiments.col.status'), class: 'col-status' },
 		{ class: 'actions-col' }
 	]);
 
@@ -388,7 +389,9 @@
 		     banner came from a dependency-free `$effect`. -->
 		<LoadError message={loadError} onretry={load} testId="experiments-error" />
 	{:else}
+	<div class="experiment-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={filtered.length === 0}
 		{loading}
@@ -414,7 +417,10 @@
 						</Badge>
 					</td>
 					<td class="actions">
-						{#if canMutate && exp.status === 'draft'}
+						<!-- Start reads the row's verdict (`actions.start`, from the
+						     endpoint's own `start_refusal`); Delete, Stop and Conclude
+						     still restate theirs (docs/followups.md). -->
+						{#if isAllowed(exp.actions?.start)}
 							<RowAction
 								variant="success"
 								busy={isBusy('start', exp.id)}
@@ -422,6 +428,8 @@
 								ariaLabel={m('common.rowActionAria', { action: m('experiments.row.start'), name: exp.name })}
 								onclick={() => doStart(exp)}
 							>{m('experiments.row.start')}</RowAction>
+						{/if}
+						{#if canMutate && exp.status === 'draft'}
 							<RowAction
 								variant="danger"
 								armed={isArmed('delete', exp.id)}
@@ -461,6 +469,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 	{/if}
 </PageHeader>
 
@@ -608,6 +617,24 @@
 </Modal>
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content in any locale; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.experiment-table { min-width: 0; }
+	.experiment-table :global(table) { min-width: 1200px; }
+	.experiment-table :global(th.col-metric) { width: 190px; }
+	.experiment-table :global(th.col-split) { width: 130px; }
+	.experiment-table :global(th.col-count) { width: 120px; }
+	.experiment-table :global(th.col-status) { width: 160px; }
+	.experiment-table :global(th.actions-col) { width: 220px; }
+
 	.lede {
 		color: var(--text-muted);
 		max-width: 70ch;

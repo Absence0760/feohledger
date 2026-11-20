@@ -95,11 +95,14 @@ test.describe('/portal/login — decorative backdrop (#422)', () => {
 		await putBranding(page, { ...EMPTY_BRAND, accent_color: ACCENT });
 		try {
 			await page.goto('/portal/login');
-			// The brand store writes --accent onto <html> asynchronously after
+			// The brand store writes its accent props onto <html> asynchronously after
 			// the public branding read resolves.
 			await expect
 				.poll(async () =>
-					page.evaluate(() => document.documentElement.style.getPropertyValue('--accent').trim())
+					// The dark-theme accent: #2fae5c reads as text there unchanged (§478).
+					page.evaluate(() =>
+						document.documentElement.style.getPropertyValue('--brand-accent-dark').trim()
+					)
 				)
 				.toBe(ACCENT);
 

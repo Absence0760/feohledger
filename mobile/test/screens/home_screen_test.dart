@@ -19,6 +19,7 @@ import 'package:feohledger_mobile/stores/exception_store.dart';
 import 'package:feohledger_mobile/stores/invoice_store.dart';
 import 'package:feohledger_mobile/stores/payment_queue_store.dart';
 import 'package:feohledger_mobile/stores/vendor_store.dart';
+import 'package:feohledger_mobile/widgets/kpi_card.dart';
 
 import '../support/role_permissions.dart';
 
@@ -42,8 +43,16 @@ Map<String, dynamic> _meBody(
     };
 
 /// Minimal-but-valid dashboard payload so DashboardStore.fetch resolves to a
-/// loaded state (and the dashboard child's spinner leaves the tree).
-Map<String, dynamic> _dashboardBody() => {
+/// loaded state (and the dashboard child's spinner leaves the tree). With
+/// [overdue] it carries the whole-book `overdue_*` pair, so the dashboard
+/// draws its tappable Overdue card.
+Map<String, dynamic> _dashboardBody({bool overdue = false}) => {
+      if (overdue) ...{
+        'overdue_count': 2,
+        'overdue_total': [
+          {'currency': 'USD', 'amount': 200, 'count': 2},
+        ],
+      },
       'total_invoices': 3,
       'total_amount': 4200,
       'pipeline': {'ready_for_review': 1, 'approved': 2},
@@ -78,6 +87,7 @@ MockClient _homeClient(
   List<String> roles, {
   List<Map<String, dynamic>>? invoices,
   List<String>? permissions,
+  bool overdue = false,
 }) {
   return MockClient((req) async {
     final path = req.url.path;
@@ -91,7 +101,7 @@ MockClient _homeClient(
       return _json({});
     }
     if (req.method == 'GET' && path == '/api/dashboard') {
-      return _json(_dashboardBody());
+      return _json(_dashboardBody(overdue: overdue));
     }
     if (req.method == 'GET' && path == '/api/invoices') {
       // Honour the `status` filter the way the real endpoint does. The
@@ -192,9 +202,15 @@ void main() {
     List<String> roles, {
     List<Map<String, dynamic>>? invoices,
     List<String>? permissions,
+    bool overdue = false,
   }) async {
     ApiClient().debugConfigure(
-      client: _homeClient(roles, invoices: invoices, permissions: permissions),
+      client: _homeClient(
+        roles,
+        invoices: invoices,
+        permissions: permissions,
+        overdue: overdue,
+      ),
     );
     final result =
         await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
@@ -400,4 +416,35 @@ void main() {
 
     expect(find.text('All caught up!'), findsOneWidget);
   });
+
+  // The dashboard's Overdue card hands off to the home shell, which owns the
+  // tabs: Invoices is tab 1 for every role, ahead of the role-gated tabs.
+  for (final role in ['ap_clerk', 'cfo']) {
+    testWidgets('$role: tapping the Overdue card opens the Invoices tab on '
+        'its Overdue view', (tester) async {
+      await loginAs([role], overdue: true);
+      await pumpHome(tester);
+
+      final card = find.widgetWithText(KpiCard, 'Overdue');
+      await tester.ensureVisible(card);
+      await tester.pump();
+      await tester.tap(card);
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(
+        tester
+            .widget<BottomNavigationBar>(find.byType(BottomNavigationBar))
+            .currentIndex,
+        1,
+      );
+      expect(find.widgetWithText(AppBar, 'Invoices'), findsOneWidget);
+      expect(InvoiceStore.instance.overdueOnly, isTrue);
+      expect(
+        tester
+            .widget<FilterChip>(find.widgetWithText(FilterChip, 'Overdue'))
+            .selected,
+        isTrue,
+      );
+    });
+  }
 }

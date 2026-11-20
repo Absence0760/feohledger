@@ -81,6 +81,10 @@ export const messages = {
 	'org.branding.accentColorPicker': 'Selector de color de acento',
 	'org.branding.accentStrong': 'Color de acento (fuerte)',
 	'org.branding.accentStrongPicker': 'Selector de color de acento fuerte',
+	'org.branding.accentTextLight':
+		'Como texto en el tema claro este color solo alcanza {ratio} (WCAG AA exige 4,5:1), así que los enlaces y pestañas activas lo mostrarán oscurecido a {applied}.',
+	'org.branding.accentTextDark':
+		'Como texto en el tema oscuro este color solo alcanza {ratio} (WCAG AA exige 4,5:1), así que los enlaces y pestañas activas lo mostrarán aclarado a {applied}.',
 	'org.branding.supportUrl': 'URL de soporte',
 	'org.branding.supportUrlPlaceholder': 'https://help.example.com',
 	'org.branding.legalUrl': 'URL legal / términos',
@@ -731,7 +735,6 @@ export const messages = {
 	'admin.entities.title': 'Entidades',
 	'admin.entities.createEntity': '+ Crear entidad',
 	'admin.entities.hint': 'Las entidades son las personas jurídicas o filiales de este espacio de trabajo. Cada factura, proveedor y pago pertenece exactamente a una; los flujos de trabajo y las cuentas contables pueden pertenecer a una o compartirse entre todas. El selector de entidad de la barra lateral aparece cuando hay dos o más.',
-	'admin.entities.loading': 'Cargando entidades…',
 	'admin.entities.loadFailed': 'No se pudieron cargar las entidades.',
 	'admin.entities.col.name': 'Nombre',
 	'admin.entities.col.slug': 'Identificador',
@@ -799,7 +802,6 @@ export const messages = {
 	'admin.apiKeys.hintPre': 'Las claves programáticas autentican la API pública para desarrolladores (',
 	'admin.apiKeys.hintPost':
 		'). Cada clave está limitada a este espacio de trabajo y otorga acceso de lectura. La clave completa se muestra solo una vez al crearla — guárdala en un lugar seguro.',
-	'admin.apiKeys.loading': 'Cargando claves de API…',
 	'admin.apiKeys.loadFailed': 'No se pudieron cargar las claves de API.',
 	'admin.apiKeys.col.name': 'Nombre',
 	'admin.apiKeys.col.keyPrefix': 'Prefijo de clave',

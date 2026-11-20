@@ -9,6 +9,7 @@
 		intakeTypeLabelKey
 	} from '#lib/types/intake.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listIntake,
@@ -44,15 +45,18 @@
 
 	const PAGE_SIZE = 50;
 
-	// Intake is broad-access — anyone in the org can raise / read / cancel.
+	// Intake is broad-access — anyone in the org can raise / read / delete.
+	// Whether a row offers Submit / Approve / Reject / Convert / Reopen /
+	// Cancel is NOT decided here: each row carries the server's verdict
+	// (`i.actions`, built from the gates the endpoints raise from — backend
+	// `api/intake.intake_action_refusals`), read through `isAllowed`. Every
+	// refusal those gates give is about the row's status or the reader's role,
+	// so a refused control is hidden rather than explained
+	// (`frontend/docs/ui-patterns.md` § Whether to offer an action).
+	// Creating a request and deleting a draft are not verdict-driven yet
+	// (docs/followups.md § Other pages still restate server predicates), so
+	// they keep the create roles `POST /api/intake` is gated on.
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk', 'cfo'));
-	// approve / reject / convert = admin | ap_manager (the reviewers).
-	const canReview = $derived(auth.isManager);
-	// `POST /api/intake/{id}/reopen` is gated
-	// `require_roles(ADMIN, AP_MANAGER, AP_CLERK, CFO)` — the broad set, NOT the
-	// reviewer set. Reopening is the requester redoing their own ask, so it
-	// reuses `canCreate`; gating it on `canReview` would hide the rework loop
-	// from the clerk who actually has to redo the request.
 
 	let items = $state<IntakeRequest[]>([]);
 	let total = $state(0);
@@ -102,12 +106,12 @@
 	]);
 
 	const COLUMNS = $derived([
-		{ label: m('intake.col.requestNumber') },
+		{ label: m('intake.col.requestNumber'), class: 'col-number' },
 		{ label: m('intake.col.title') },
-		{ label: m('intake.col.type') },
+		{ label: m('intake.col.type'), class: 'col-type' },
 		{ label: m('intake.col.vendor') },
-		{ label: m('intake.col.estimated'), class: 'right' },
-		{ label: m('intake.col.status') },
+		{ label: m('intake.col.estimated'), class: 'right col-amount' },
+		{ label: m('intake.col.status'), class: 'col-status' },
 		{ label: '', class: 'actions-col' }
 	]);
 
@@ -407,7 +411,9 @@
 	{#if errored}
 		<LoadError message={m('intake.empty.errored')} onretry={() => load()} testId="intake-error" />
 	{:else}
+	<div class="intake-table">
 	<DataTable
+		fixed
 		columns={COLUMNS}
 		isEmpty={items.length === 0}
 		{loading}
@@ -435,11 +441,13 @@
 						</Badge>
 					</td>
 					<td class="actions">
-						{#if canCreate && i.status === 'open'}
+						{#if isAllowed(i.actions?.submit)}
 							<RowAction variant="default" disabled={busyId === i.id} onclick={() => onSubmit(i)}>{m('intake.row.submit')}</RowAction>
 						{/if}
-						{#if canReview && i.status === 'in_review'}
+						{#if isAllowed(i.actions?.approve)}
 							<RowAction variant="success" disabled={busyId === i.id} onclick={() => onApprove(i)}>{m('intake.row.approve')}</RowAction>
+						{/if}
+						{#if isAllowed(i.actions?.reject)}
 							<RowAction
 								variant="danger"
 								armed={rejectArmedId === i.id}
@@ -453,10 +461,10 @@
 								{rejectArmedId === i.id ? m('intake.row.confirm') : m('intake.row.reject')}
 							</RowAction>
 						{/if}
-						{#if canReview && i.status === 'approved'}
+						{#if isAllowed(i.actions?.convert) && !i.converted_requisition_id}
 							<RowAction variant="default" disabled={busyId === i.id} onclick={() => onConvert(i)}>{m('intake.row.convertToRequisition')}</RowAction>
 						{/if}
-						{#if canCreate && i.status === 'rejected'}
+						{#if isAllowed(i.actions?.reopen)}
 							<RowAction
 								variant="default"
 								armed={reopenArmedId === i.id}
@@ -474,7 +482,7 @@
 						{#if i.status === 'converted' && i.converted_requisition_id}
 							<a class="req-link" href={`/requisitions?id=${i.converted_requisition_id}`}>{m('intake.row.viewRequisition')}</a>
 						{/if}
-						{#if canCreate && (i.status === 'open' || i.status === 'in_review' || i.status === 'approved')}
+						{#if isAllowed(i.actions?.cancel)}
 							<RowAction variant="default" disabled={busyId === i.id} onclick={() => onCancel(i)}>{m('intake.row.cancel')}</RowAction>
 						{/if}
 						{#if canCreate}
@@ -495,6 +503,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 	{/if}
 
 	<LoadMoreFooter
@@ -518,6 +527,24 @@
 {/if}
 
 <style>
+	/* Column widths. The table is `table-layout: fixed` (DataTable's
+	   `fixed`): under `auto` the columns were sized against the one
+	   "Loading…" row, then re-sized against the real rows, so every column
+	   slid sideways as the data landed (tests-e2e/reactivity/
+	   layout-stability.spec.ts). The predictable columns get widths sized to
+	   their widest content in any locale; the text column(s) carry none and share the rest.
+	   Past the `min-width` the table scrolls inside its region
+	   (frontend/docs/ui-patterns.md § Data tables). DataTable renders these
+	   `<th>` from `columns`, so the selectors go through `:global` under a
+	   page-owned wrapper (the /gl-accounts pattern). */
+	.intake-table { min-width: 0; }
+	.intake-table :global(table) { min-width: 1280px; }
+	.intake-table :global(th.col-number) { width: 140px; }
+	.intake-table :global(th.col-type) { width: 150px; }
+	.intake-table :global(th.col-amount) { width: 150px; }
+	.intake-table :global(th.col-status) { width: 180px; }
+	.intake-table :global(th.actions-col) { width: 360px; }
+
 	.filter-row {
 		display: flex;
 		align-items: center;

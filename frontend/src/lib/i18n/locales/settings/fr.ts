@@ -81,6 +81,10 @@ export const messages = {
 	'org.branding.accentColorPicker': 'Sélecteur de couleur d\'accent',
 	'org.branding.accentStrong': 'Couleur d\'accent (forte)',
 	'org.branding.accentStrongPicker': 'Sélecteur de couleur d\'accent forte',
+	'org.branding.accentTextLight':
+		'En texte sur le thème clair, cette couleur n\'atteint que {ratio} (WCAG AA exige 4,5:1) : les liens et onglets actifs l\'afficheront assombrie en {applied}.',
+	'org.branding.accentTextDark':
+		'En texte sur le thème sombre, cette couleur n\'atteint que {ratio} (WCAG AA exige 4,5:1) : les liens et onglets actifs l\'afficheront éclaircie en {applied}.',
 	'org.branding.supportUrl': 'URL d\'assistance',
 	'org.branding.supportUrlPlaceholder': 'https://help.example.com',
 	'org.branding.legalUrl': 'URL des mentions légales / CGU',
@@ -731,7 +735,6 @@ export const messages = {
 	'admin.entities.title': 'Entités',
 	'admin.entities.createEntity': '+ Créer une entité',
 	'admin.entities.hint': 'Les entités sont les personnes morales ou filiales de cet espace de travail. Chaque facture, fournisseur et paiement appartient à une seule d’entre elles ; les workflows et les comptes généraux peuvent appartenir à une entité ou être partagés par toutes. Le sélecteur d’entité de la barre latérale apparaît dès qu’il y en a au moins deux.',
-	'admin.entities.loading': 'Chargement des entités…',
 	'admin.entities.loadFailed': 'Échec du chargement des entités.',
 	'admin.entities.col.name': 'Nom',
 	'admin.entities.col.slug': 'Identifiant',
@@ -799,7 +802,6 @@ export const messages = {
 	'admin.apiKeys.hintPre': 'Les clés programmatiques authentifient l\'API publique pour développeurs (',
 	'admin.apiKeys.hintPost':
 		'). Chaque clé est limitée à cet espace de travail et accorde un accès en lecture. La clé complète n\'est affichée qu\'une seule fois à la création — conservez-la en lieu sûr.',
-	'admin.apiKeys.loading': 'Chargement des clés API…',
 	'admin.apiKeys.loadFailed': 'Échec du chargement des clés API.',
 	'admin.apiKeys.col.name': 'Nom',
 	'admin.apiKeys.col.keyPrefix': 'Préfixe de clé',

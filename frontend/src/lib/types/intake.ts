@@ -11,6 +11,7 @@
 // the list/summary envelopes stays `number`: it is a ROW COUNT, not money.
 // See `frontend/CLAUDE.md` § Money formatting.
 
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
@@ -131,6 +132,21 @@ export interface IntakeRequest {
 	converted_po_id: string | null;
 	created_at: string;
 	updated_at: string;
+	// The caller's verdict on each lifecycle action — on every response from
+	// the router, mutations included. Absent is a refusal: read it through
+	// `#lib/api/actionVerdicts.ts`, never beside a restated status / role rule.
+	actions?: IntakeActions;
+}
+
+/** `IntakeActions` (backend `api/intake.intake_action_refusals`): `null` = the endpoint
+ *  would accept the caller, else its coded refusal. */
+export interface IntakeActions {
+	submit: ActionRefusal;
+	approve: ActionRefusal;
+	reject: ActionRefusal;
+	convert: ActionRefusal;
+	cancel: ActionRefusal;
+	reopen: ActionRefusal;
 }
 
 export interface IntakeListResponse {

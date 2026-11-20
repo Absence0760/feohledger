@@ -67,6 +67,7 @@ async def _add_invoice(mk, org_id, *, po_number: str, entity_id, number: str) ->
             invoice_number=number,
             vendor_name="Shared Supplier Ltd",
             amount=Decimal("1000.00"),
+            currency="USD",
             po_number=po_number,
             status=InvoiceStatus.approved,
             organization_id=org_id,

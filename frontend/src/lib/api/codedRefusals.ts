@@ -72,6 +72,8 @@ import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types
 import { refusalBlockers } from '#lib/types/workspaceClosureRefusal.ts';
 import { vendorStatusLabelKey } from '#lib/types/vendor.ts';
 import { expenseReportStatusLabelKey } from '#lib/types/expense.ts';
+import { intakeStatusLabelKey } from '#lib/types/intake.ts';
+import { requisitionStatusLabelKey } from '#lib/types/requisition.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 type Params = Record<string, unknown>;
@@ -174,6 +176,27 @@ const CREDIT_MEMO_STATUS_KEYS: Record<string, MessageKey> = {
 	open: 'creditMemos.status.open',
 	applied: 'creditMemos.status.applied',
 	void: 'creditMemos.status.void'
+};
+
+const DISCOUNT_OFFER_STATUS_KEYS: Record<string, MessageKey> = {
+	offered: 'discounts.status.offered',
+	accepted: 'discounts.status.accepted',
+	captured: 'discounts.status.captured',
+	declined: 'discounts.status.declined',
+	expired: 'discounts.status.expired'
+};
+
+const EXPERIMENT_STATUS_KEYS: Record<string, MessageKey> = {
+	draft: 'experiments.status.draft',
+	running: 'experiments.status.running',
+	concluded: 'experiments.status.concluded'
+};
+
+const SUGGESTION_STATUS_KEYS: Record<string, MessageKey> = {
+	open: 'adaptive.suggestions.status.open',
+	stale: 'adaptive.suggestions.status.stale',
+	applied: 'adaptive.suggestions.status.applied',
+	dismissed: 'adaptive.suggestions.status.dismissed'
 };
 
 // --- the invoice approval money gates ---------------------------------------
@@ -454,6 +477,12 @@ const BUILDERS: Record<string, Builder> = {
 	// `api/vendors.py::change_request_approve_refusal` — the queue's verdict
 	vendor_change_self_requested: fixed('refusal.vendorChangeSelfRequested'),
 	vendor_change_self_provisioned: fixed('refusal.vendorChangeSelfProvisioned'),
+	// `services/sanctions_adjudication.py` — the screening queue's verdicts (decisions §477)
+	sanctions_adjudication_not_flagged: fixed('refusal.sanctionsAdjudicationNotFlagged'),
+	sanctions_adjudication_already_cleared: fixed('refusal.sanctionsAdjudicationAlreadyCleared'),
+	sanctions_adjudication_no_screen: fixed('refusal.sanctionsAdjudicationNoScreen'),
+	sanctions_adjudication_segregation: fixed('refusal.sanctionsAdjudicationSegregation'),
+	sanctions_adjudication_not_active: fixed('refusal.sanctionsAdjudicationNotActive'),
 	// `services/review.py::_enforce_approval_thresholds`
 	approval_max_amount_exceeded: (p, t) => approvalGate(p, t, 'refusal.approvalMaxExceeded', null),
 	approval_max_amount_misconfigured: fixed('refusal.approvalMaxMisconfigured'),
@@ -489,6 +518,28 @@ const BUILDERS: Record<string, Builder> = {
 	card_txn_not_matched: fixed('refusal.cardTxnNotMatched'),
 	card_txn_matched_not_ignorable: fixed('refusal.cardTxnMatchedNotIgnorable'),
 	card_txn_already_ignored: fixed('refusal.cardTxnAlreadyIgnored'),
+	// `services/procurement_controls.py` — an intake / requisition lifecycle
+	// action its status does not allow (the /intake and /requisitions rows'
+	// `actions` verdicts are read from the same gates)
+	intake_status_refused: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.intakeStatusRefused', {
+					status: statusLabel(status, intakeStatusLabelKey, t)
+				});
+	},
+	// `services/procurement_controls.requisition_approve_refusal` — the
+	// requester or a material editor approving it (not the invoice sentence)
+	requisition_approval_segregation: fixed('refusal.requisitionApprovalSegregation'),
+	requisition_status_refused: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.requisitionStatusRefused', {
+					status: statusLabel(status, requisitionStatusLabelKey, t)
+				});
+	},
 	// …and the endpoints' own refusals that are not in a row's verdict
 	// (decisions §361): a line on a locked report, an attached line with no
 	// rate into the report currency, deleting a reconciled expense, and
@@ -549,6 +600,45 @@ const BUILDERS: Record<string, Builder> = {
 	credit_memo_invoice_currency_unknown: fixed('refusal.creditMemoInvoiceCurrencyUnknown'),
 	// `api/discounts.py` — an invoice-scoped offer on an invoice in no stated currency.
 	discount_offer_invoice_currency_unknown: fixed('refusal.discountOfferInvoiceCurrencyUnknown'),
+	// `api/discounts.py::accept_refusal` / `decline_refusal` — the offer row's
+	// `actions.{accept,decline}` verdicts and the endpoints' 409s / 422
+	discount_offer_invoice_settled: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.discountOfferInvoiceSettled', {
+					status: statusLabel(status, invoiceStatusLabelKey, t)
+				});
+	},
+	discount_offer_no_capturable_tier: fixed('refusal.discountOfferNoCapturableTier'),
+	discount_offer_tier_unavailable: fixed('refusal.discountOfferTierUnavailable'),
+	discount_offer_not_open: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.discountOfferNotOpen', {
+					status: statusLabel(status, (s) => DISCOUNT_OFFER_STATUS_KEYS[s] ?? null, t)
+				});
+	},
+	discount_offer_decline_window_closed: fixed('refusal.discountOfferDeclineWindowClosed'),
+	// `api/workflow_experiments.py::start_refusal` — the row's `actions.start`
+	experiment_not_startable: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.experimentNotStartable', {
+					status: statusLabel(status, (s) => EXPERIMENT_STATUS_KEYS[s] ?? null, t)
+				});
+	},
+	// `api/adaptive_workflows.py::dismiss_refusal` — the row's `actions.dismiss`
+	workflow_suggestion_not_dismissable: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.workflowSuggestionNotDismissable', {
+					status: statusLabel(status, (s) => SUGGESTION_STATUS_KEYS[s] ?? null, t)
+				});
+	},
 	// `api/organization.py` — `payments.home_currency` that is not a code.
 	organization_home_currency_invalid: fixed('refusal.organizationHomeCurrencyInvalid'),
 	credit_memo_invoice_settled: (p, t) => {

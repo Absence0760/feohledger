@@ -13,11 +13,55 @@ void main() {
     test('fromString falls back to unverified for unknown values', () {
       expect(VendorStatus.fromString('???'), VendorStatus.unverified);
     });
+  });
 
-    test('isUnverified is true only for unverified', () {
-      expect(VendorStatus.unverified.isUnverified, isTrue);
-      expect(VendorStatus.active.isUnverified, isFalse);
-      expect(VendorStatus.rejected.isUnverified, isFalse);
+  // The list row's `status_actions` (`api/vendors.py::vendor_status_actions`):
+  // the screen offers Verify / Reject from these, per role × vendor status.
+  group('Vendor.fromJson status_actions', () {
+    const role = {'code': 'role_not_permitted', 'message': 'm'};
+    const status = {'code': 'vendor_status_not_allowed', 'message': 'm'};
+    const hidden = {'vendor_status_not_allowed'};
+
+    Vendor row(String vendorStatus, Object? actions) => Vendor.fromJson({
+      'id': 'v1',
+      'name': 'Acme',
+      'status': vendorStatus,
+      'source': 'manual',
+      'status_actions': actions,
+    });
+
+    test('a manager on an unverified vendor may verify and reject', () {
+      final v = row('unverified', {'verify': null, 'reject': null});
+      expect(v.verifyVerdict.allowed, isTrue);
+      expect(v.rejectVerdict.allowed, isTrue);
+    });
+
+    test('a manager on an active vendor may reject but not verify', () {
+      final v = row('active', {'verify': status, 'reject': null});
+      expect(v.verifyVerdict.isOffered(hiddenCodes: hidden), isFalse);
+      expect(v.rejectVerdict.allowed, isTrue);
+    });
+
+    test('a manager on a rejected vendor is offered neither', () {
+      final v = row('rejected', {'verify': status, 'reject': status});
+      expect(v.verifyVerdict.isOffered(hiddenCodes: hidden), isFalse);
+      expect(v.rejectVerdict.isOffered(hiddenCodes: hidden), isFalse);
+    });
+
+    test('a reader without vendor.manage is offered neither', () {
+      for (final s in ['unverified', 'active']) {
+        final v = row(s, {'verify': role, 'reject': role});
+        expect(v.verifyVerdict.isOffered(), isFalse, reason: s);
+        expect(v.rejectVerdict.isOffered(), isFalse, reason: s);
+      }
+    });
+
+    test('a row with no status_actions fails closed', () {
+      for (final actions in [null, <String, dynamic>{}]) {
+        final v = row('unverified', actions);
+        expect(v.verifyVerdict.answered, isFalse);
+        expect(v.rejectVerdict.answered, isFalse);
+      }
     });
   });
 

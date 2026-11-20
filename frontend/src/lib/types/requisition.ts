@@ -1,3 +1,4 @@
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { MoneyAmount } from '#lib/utils/money.ts';
@@ -175,6 +176,21 @@ export interface Requisition {
 	line_items: RequisitionLineItem[];
 	created_at: string;
 	updated_at: string;
+	// The caller's verdict on each lifecycle action — on every response from
+	// the router, mutations included. Absent is a refusal: read it through
+	// `#lib/api/actionVerdicts.ts`, never beside a restated status / role rule.
+	actions?: RequisitionActions;
+}
+
+/** `RequisitionActions` (backend `api/requisitions.requisition_action_refusals`): `null` = the endpoint
+ *  would accept the caller, else its coded refusal. */
+export interface RequisitionActions {
+	submit: ActionRefusal;
+	approve: ActionRefusal;
+	reject: ActionRefusal;
+	convert: ActionRefusal;
+	cancel: ActionRefusal;
+	reopen: ActionRefusal;
 }
 
 export interface RequisitionListResponse {

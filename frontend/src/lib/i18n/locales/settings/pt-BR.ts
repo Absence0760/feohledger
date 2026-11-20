@@ -81,6 +81,10 @@ export const messages = {
 	'org.branding.accentColorPicker': 'Seletor de cor de destaque',
 	'org.branding.accentStrong': 'Cor de destaque (forte)',
 	'org.branding.accentStrongPicker': 'Seletor de cor de destaque forte',
+	'org.branding.accentTextLight':
+		'Como texto no tema claro esta cor atinge só {ratio} (a WCAG AA exige 4,5:1), então links e abas ativas a mostrarão escurecida para {applied}.',
+	'org.branding.accentTextDark':
+		'Como texto no tema escuro esta cor atinge só {ratio} (a WCAG AA exige 4,5:1), então links e abas ativas a mostrarão clareada para {applied}.',
 	'org.branding.supportUrl': 'URL de suporte',
 	'org.branding.supportUrlPlaceholder': 'https://help.example.com',
 	'org.branding.legalUrl': 'URL legal / termos',
@@ -731,7 +735,6 @@ export const messages = {
 	'admin.entities.title': 'Entidades',
 	'admin.entities.createEntity': '+ Criar entidade',
 	'admin.entities.hint': 'Entidades são as pessoas jurídicas ou subsidiárias deste workspace. Cada nota fiscal, fornecedor e pagamento pertence a exatamente uma; fluxos de trabalho e contas contábeis podem pertencer a uma ou ser compartilhados por todas. O seletor de entidade na barra lateral aparece quando há duas ou mais.',
-	'admin.entities.loading': 'Carregando entidades…',
 	'admin.entities.loadFailed': 'Falha ao carregar as entidades.',
 	'admin.entities.col.name': 'Nome',
 	'admin.entities.col.slug': 'Identificador',
@@ -799,7 +802,6 @@ export const messages = {
 	'admin.apiKeys.hintPre': 'Chaves programáticas autenticam a API pública para desenvolvedores (',
 	'admin.apiKeys.hintPost':
 		'). Cada chave é limitada a este espaço de trabalho e concede acesso de leitura. A chave completa é exibida apenas uma vez na criação — guarde-a em local seguro.',
-	'admin.apiKeys.loading': 'Carregando chaves de API…',
 	'admin.apiKeys.loadFailed': 'Falha ao carregar as chaves de API.',
 	'admin.apiKeys.col.name': 'Nome',
 	'admin.apiKeys.col.keyPrefix': 'Prefixo da chave',

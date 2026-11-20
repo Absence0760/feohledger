@@ -8,7 +8,7 @@ JWT rejected outside the portal, an employee JWT rejected inside it.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,12 @@ from app.models.base import Base, TimestampMixin
 
 class VendorUser(Base, TimestampMixin):
     __tablename__ = "vendor_users"
+
+    # One portal login per address WITHOUT regard to case, as `users`
+    # (`uq_users_email_lower`, §475): `email_matches` compares `lower(email)`,
+    # which this index serves. Migration 0138's; declared here so `create_all`
+    # builds it for a fresh tenant.
+    __table_args__ = (Index("uq_vendor_users_email_lower", text("lower(email)"), unique=True),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     vendor_id: Mapped[uuid.UUID] = mapped_column(
@@ -37,7 +43,8 @@ class VendorUser(Base, TimestampMixin):
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True, index=True
     )
-    email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
+    # Unique via `uq_vendor_users_email_lower` above, never a plain UNIQUE.
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     hashed_password: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

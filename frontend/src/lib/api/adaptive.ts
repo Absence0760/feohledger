@@ -19,6 +19,7 @@
 // per page visit.
 import { api } from '#lib/api.ts';
 import type { MoneyString } from '#lib/utils/money.ts';
+import type { ActionRefusal } from '#lib/api/actionVerdicts.ts';
 
 // ---------------------------------------------------------------------------
 // Approval patterns — GET /api/adaptive/approval-patterns
@@ -153,6 +154,9 @@ export interface WorkflowSuggestion {
 	status: SuggestionStatus;
 	created_at: string | null;
 	dismissed_at: string | null;
+	/** The caller's verdict on Dismiss (`api/adaptive_workflows.dismiss_refusal`):
+	 *  `null` offers it. Absent means not known yet (fail closed). */
+	actions?: { dismiss: ActionRefusal };
 }
 
 export interface SuggestionList {

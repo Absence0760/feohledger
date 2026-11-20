@@ -72,6 +72,7 @@ when each piece graduates.
 | CloudFront additional metrics on the SPA distribution (feeds the 404 alarm; up to 8 metrics × $0.30) | ~$2.40 |
 | **Total** | **~$45–55** |
 | Plus external uptime checks (3 Route 53 HTTPS checks) and SMS paging (a toll-free number), `infra/uptime.tf` | ~$8–13 |
+| Plus the hourly certificate canary on `api.`'s Let's Encrypt certificate, `infra/canary.tf` | ~$1 |
 
 This is the stack `infra/` defines (`docs/decisions.md` §254). Both instances are
 burstable in unlimited credit mode, so sustained load adds surplus-CPU charges on
@@ -339,8 +340,10 @@ Caddy, must get a 200 with a non-empty body from
 (over a valid certificate), and `/api/public-config` must report signup as
 `.env` configures it, with a captcha site key while it is on — or the deploy
 fails (`deploy/README.md` § Deploys). The VM builds no SPA (`docs/decisions.md`
-§364); the release workflow publishes it to CloudFront afterwards and checks
-the edge. Flags: `--no-pull`, `--ref <sha>`, and `--backend-only`, which every
+§364); the release workflow publishes it to CloudFront afterwards, checks
+the edge, and last runs `deploy/smoke.sh` from the runner through public DNS
+(the apex, `api.` health, `smoke-check.<apex>` TLS and `public-config`), the
+check the on-VM one cannot make. Flags: `--no-pull`, `--ref <sha>`, and `--backend-only`, which every
 deploy now is and which is accepted for compatibility. Only one deploy runs at a time (a `flock`
 on `deploy/.deploy.lock`), and after the checkout the script re-runs the
 `deploy.sh` it just checked out, so a release that changes the deploy steps is

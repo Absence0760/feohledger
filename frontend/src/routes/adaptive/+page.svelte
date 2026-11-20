@@ -44,6 +44,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import LoadError from '#lib/components/ui/LoadError.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import LoadingState from '#lib/components/ui/LoadingState.svelte';
@@ -71,7 +72,10 @@
 
 	// RBAC mirrors the backend exactly:
 	//   read   → _READ_ROLES            = admin | ap_manager | cfo
-	//   dismiss/route-apply → _WRITE_ROLES = admin | ap_manager
+	//   route-apply → _WRITE_ROLES = admin | ap_manager
+	//   dismiss → the row's `actions.dismiss` verdict (`dismiss_refusal`), never
+	//             restated here (`frontend/docs/ui-patterns.md` § Whether to
+	//             offer an action)
 	//   threshold apply → _THRESHOLD_APPLY_ROLES = admin (it edits a workflow
 	//                                              definition, like PATCH /workflows)
 	// Wait for `auth.user` before redirecting so we don't bounce ahead of /me
@@ -492,7 +496,7 @@
 									</Badge>
 								</td>
 								<td class="actions">
-									{#if canAct && s.status === 'open'}
+									{#if isAllowed(s.actions?.dismiss)}
 										<RowAction
 											variant="danger"
 											armed={armedDismissId === s.id}

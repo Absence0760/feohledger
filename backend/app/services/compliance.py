@@ -74,6 +74,13 @@ from app.services.sanctions_adapters import (
     UnknownSanctionsProviderError,
     get_sanctions_adapter,
 )
+from app.services.sanctions_adjudication import (
+    ADJUDICABLE_RESULTS,
+    SCREENED_INPUTS_KEY,
+    covering_adjudication,
+    screen_fingerprint,
+    screened_inputs_hash,
+)
 from app.services.sanctions_categories import (
     adverse_media_finding,
     adverse_media_reason,
@@ -343,6 +350,24 @@ async def check_payment_compliance(
         beneficial_owners=beneficial_owners,
     )
 
+    # Only a `match` / `review_required` answer can be covered by an
+    # adjudicated false positive (decisions §477). `result` is provider data
+    # whose shape we do not control (a dict or list is unhashable), so the
+    # membership test is guarded by type: an unreadable answer is never
+    # adjudicable and falls through to the unrecognised-result hold below.
+    adjudicable = isinstance(screening.result, str) and screening.result in ADJUDICABLE_RESULTS
+    # The adjudication the stored screen is shown under
+    # (`vendors.screening_adjudication_id`). No pointer means nothing can
+    # cover this screen: fail closed, with no lookup.
+    pointer = getattr(vendor, "screening_adjudication_id", None)
+    raw_response = (
+        merge_categories_into_raw_response(screening.raw_response, screening.categories) or {}
+    )
+    if adjudicable and pointer is not None:
+        # What was screened: an adjudication covers the result only for the
+        # inputs it was made on, so they join the fingerprint compared below.
+        raw_response = {**raw_response, SCREENED_INPUTS_KEY: await screened_inputs_hash(db, vendor)}
+
     sanctions_row = SanctionsCheck(
         vendor_id=vendor.id,
         organization_id=organization_id,
@@ -352,42 +377,77 @@ async def check_payment_compliance(
         risk_score=screening.risk_score,
         # The PII-free category taxonomy rides the row so `vendor_risk_scoring`
         # (compute-on-read, no adapter call) can see WHY a screen was elevated.
-        raw_response=merge_categories_into_raw_response(
-            screening.raw_response, screening.categories
-        ),
+        raw_response=raw_response,
         matched_list=screening.matched_list,
         correlation_id=correlation_id,
     )
     db.add(sanctions_row)
 
-    if screening.result == "match":
-        match_reasons = [
-            f"vendor matched sanctions list "
-            f"({screening.matched_list or 'unspecified'}) via {screening.provider}"
-        ]
-        if screening.adverse_media:
-            match_reasons.append(adverse_media_reason(screening.provider))
-        return ComplianceDecision(
-            verdict="refuse",
-            reasons=match_reasons,
-            screening_result=screening,
-            sanctions_check_row=sanctions_row,
+    # An adjudicated false positive (decisions §477): the SAME result a human
+    # has recorded as not this vendor reads as clear. Only that exact result —
+    # same provider, verdict, list, entry and screened inputs — is covered, and
+    # only by the adjudication the stored screen is shown under
+    # (`vendors.screening_adjudication_id`); a new or different hit, or an
+    # older active row the review queue does not lead with, falls through to
+    # the refusal / hold below.
+    covering = None
+    if adjudicable and pointer is not None:
+        covering = await covering_adjudication(
+            db,
+            pointer_only=True,
+            pointer=pointer,
+            vendor_id=vendor.id,
+            provider=screening.provider,
+            result=screening.result,
+            fingerprint=screen_fingerprint(
+                provider=screening.provider,
+                result=screening.result,
+                matched_list=screening.matched_list,
+                raw_response=sanctions_row.raw_response,
+            ),
         )
-    if screening.result == "review_required":
-        if screening.matched_list:
-            hold_reason(
-                exception_finding(
-                    "compliance_review_required",
-                    matchedList=screening.matched_list,
-                    provider=screening.provider,
-                )
+    if covering is not None:
+        logger.info(
+            "[compliance] vendor=%s screen result=%s covered by adjudication=%s",
+            vendor.id,
+            screening.result,
+            covering.id,
+        )
+    adjudicated = covering is not None
+
+    # An adjudicated `match` / `review_required` adds no reason here (it reads
+    # as clear); it still takes its own branch, so it can never reach the
+    # unrecognised-result default below.
+    if screening.result == "match":
+        if not adjudicated:
+            match_reasons = [
+                f"vendor matched sanctions list "
+                f"({screening.matched_list or 'unspecified'}) via {screening.provider}"
+            ]
+            if screening.adverse_media:
+                match_reasons.append(adverse_media_reason(screening.provider))
+            return ComplianceDecision(
+                verdict="refuse",
+                reasons=match_reasons,
+                screening_result=screening,
+                sanctions_check_row=sanctions_row,
             )
-        else:
-            hold_reason(
-                exception_finding(
-                    "compliance_review_required_unlisted", provider=screening.provider
+    elif screening.result == "review_required":
+        if not adjudicated:
+            if screening.matched_list:
+                hold_reason(
+                    exception_finding(
+                        "compliance_review_required",
+                        matchedList=screening.matched_list,
+                        provider=screening.provider,
+                    )
                 )
-            )
+            else:
+                hold_reason(
+                    exception_finding(
+                        "compliance_review_required_unlisted", provider=screening.provider
+                    )
+                )
     elif screening.result != "clear":
         # `ScreeningResult.result` is a three-value contract — 'clear' | 'match'
         # | 'review_required'. Anything else is a provider we do not understand,
@@ -423,7 +483,7 @@ async def check_payment_compliance(
     # alongside a `clear` verdict (nothing on a formal list yet) would otherwise
     # be auto-allowed, and one reason here is what turns the verdict into a
     # `hold` for AP review — fail closed.
-    if screening.adverse_media:
+    if screening.adverse_media and not adjudicated:
         hold_reason(adverse_media_finding(screening.provider))
 
     # ---------- 2. KYC status on high-risk corridors -------------------------

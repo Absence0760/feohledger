@@ -59,7 +59,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import and_, case
+from sqlalchemy import Select, and_, case
 
 from app.models.discount import (
     OFFER_SCOPE_VENDOR,
@@ -418,6 +418,23 @@ def invoice_awaits_payment(status) -> bool:
         seen.add(current)
         frontier.extend(VALID_TRANSITIONS.get(current, set()))
     return False
+
+
+def lock_offer(query: Select) -> Select:
+    """``query`` (a ``select(DiscountOffer)``) as the status writers' row lock.
+
+    Every path that moves an offer's status — the AP accept / decline, the
+    supplier portal's, the cash-flow enact, the auto-capture sweep's claim and
+    payment-settlement capture — reads the row ``FOR UPDATE`` before it checks
+    the status it is about to change, so two decisions serialize and the
+    second sees the first's result. ``populate_existing`` makes a row already
+    in the session's identity map take the locked, committed values rather
+    than the stale copy. The wait is deliberately NOT bounded
+    (``utils/db_locks``, decisions §233): no holder of this lock makes an
+    external call while holding it, so the wait is one short transaction
+    (decisions §479).
+    """
+    return query.with_for_update().execution_options(populate_existing=True)
 
 
 def accept_offer(offer, *, tier: dict, actor_id, now: datetime) -> None:

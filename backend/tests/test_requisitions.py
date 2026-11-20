@@ -297,7 +297,7 @@ async def test_approve_self_blocked_by_segregation(realdb):
         resp = await c.post(f"/api/requisitions/{rid}/approve")
     assert resp.status_code == 403
     assert "segregation" in resp.json()["detail"]["message"].lower()
-    assert resp.json()["detail"]["code"] == "approval_segregation"
+    assert resp.json()["detail"]["code"] == "requisition_approval_segregation"
 
 
 async def test_different_manager_approves(realdb):

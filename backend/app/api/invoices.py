@@ -114,6 +114,7 @@ from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_invoices_csv
 from app.services.gl_chart import refuse_gl_codes_outside_chart
 from app.services.gl_recode import RecodeFilter, bulk_recode_gl
 from app.services.invoice_warnings import reconcile_line_totals, refresh_warnings
+from app.services.open_ap_due import overdue_invoice_ids
 from app.services.payment_runs import live_payment_invoices
 from app.services.report_export import csv_safe_cell
 from app.services.storage import (
@@ -146,7 +147,7 @@ from app.tenant import (
     get_tenant_db,
     get_write_entity_id,
 )
-from app.utils.dates import resolve_day_first_preference
+from app.utils.dates import resolve_day_first_preference, utc_today
 from app.utils.http import content_disposition_attachment, detail_text
 from app.utils.search import ilike_contains
 
@@ -231,6 +232,7 @@ def _invoice_list_filters(
     exclude_status: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
     vendor_id: uuid.UUID | None = None,
+    overdue: bool = False,
 ):
     """Apply the invoice-list filters to ``query``.
 
@@ -253,6 +255,12 @@ def _invoice_list_filters(
     invoice picker's eligible set (``credit_memos._eligible_invoices_query``
     composes this builder), so "this vendor's invoices" means one thing on
     both surfaces — ``docs/decisions.md`` §202.
+
+    ``overdue`` narrows to the invoices ``GET /api/dashboard`` counts as
+    ``overdue_count``: ``services/open_ap_due.overdue_invoice_ids``, the
+    predicate the dashboard and the /cfo card read, never restated here (the
+    effective due date is the latest payment schedule's, so ``due_date_to``
+    is not the same filter). "Today" is the UTC date, as on the dashboard.
 
     Every parameter defaults to "not filtered", so a caller names only the
     legs it applies.
@@ -297,6 +305,8 @@ def _invoice_list_filters(
         query = query.where(Invoice.assigned_to_id == assigned_to_id)
     if vendor_id:
         query = query.where(Invoice.vendor_id == vendor_id)
+    if overdue:
+        query = query.where(Invoice.id.in_(overdue_invoice_ids(utc_today())))
     return query
 
 
@@ -319,6 +329,7 @@ async def list_invoices(
     search: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
     vendor_id: uuid.UUID | None = None,
+    overdue: bool = False,
     include: str | None = None,
     sort: SortParams = Depends(sort_params),
     db: AsyncSession = Depends(get_tenant_db),
@@ -357,6 +368,7 @@ async def list_invoices(
         search=search,
         assigned_to_id=assigned_to_id,
         vendor_id=vendor_id,
+        overdue=overdue,
     )
 
     # Count
@@ -427,6 +439,7 @@ async def invoice_counts(
     search: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
     vendor_id: uuid.UUID | None = None,
+    overdue: bool = False,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -462,6 +475,7 @@ async def invoice_counts(
         search=search,
         assigned_to_id=assigned_to_id,
         vendor_id=vendor_id,
+        overdue=overdue,
     ).group_by(Invoice.status)
     result = await db.execute(counts_q)
     counts: dict[str, int] = {}
@@ -501,6 +515,7 @@ async def list_invoice_ids(
     exclude_status: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
     vendor_id: uuid.UUID | None = None,
+    overdue: bool = False,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -533,6 +548,7 @@ async def list_invoice_ids(
         exclude_status=exclude_status,
         assigned_to_id=assigned_to_id,
         vendor_id=vendor_id,
+        overdue=overdue,
     )
 
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0

@@ -120,6 +120,14 @@ class DiscountOfferResponse(BaseModel):
     # Joined / derived (best-effort, set by the router when context is loaded).
     vendor_name: str | None = None
     invoice_number: str | None = None
+    # The caller's verdict on each decision — `{"accept", "decline"}`, each a
+    # coded refusal or `None` — built by the endpoints' own gates
+    # (`api/discounts.accept_refusal` / `decline_refusal`, issue #575). The page
+    # offers Accept / Decline by these and never restates status or role.
+    actions: dict | None = None
+    # The tiers `POST /accept` would take by name today (`tier_days`); the
+    # accept dialog offers only these. Empty when Accept is refused.
+    capturable_tier_days: list[int] | None = None
 
     model_config = {"from_attributes": True}
 

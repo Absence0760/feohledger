@@ -1319,7 +1319,7 @@ async def test_a_reconciliation_row_takes_a_finding_or_a_description_never_both(
     """The catalogued `finding` is the norm; plain English is kept only for the
     write-back's uncatalogued failures. Both, or neither, is a programming error
     caught before anything is written."""
-    invoice = Invoice(id=uuid.uuid4())
+    invoice = Invoice(id=uuid.uuid4(), currency="USD")
     for kwargs in ({}, {"finding": {"message": "x"}, "description": "x"}):
         with pytest.raises(TypeError):
             await erp_status_sync.open_erp_reconciliation_exception(

@@ -79,6 +79,7 @@ async def _add_invoice_with_fraud_flag(mk, org_id, vendor_id, *, number, status=
             vendor_name="Acme Supply",
             vendor_id=vendor_id,
             amount=Decimal("1000"),
+            currency="USD",
             status=InvoiceStatus.new,
         )
         s.add(inv)
@@ -105,7 +106,7 @@ async def _add_completed_payment(
     number,
     amount,
     status="completed",
-    currency=None,
+    currency="USD",
     source_amount=None,
     source_currency=None,
 ):
@@ -125,7 +126,7 @@ async def _add_completed_payment(
             vendor_id=vendor_id,
             amount=Decimal(str(amount)),
             status=InvoiceStatus.approved,
-            **({"currency": currency} if currency else {}),
+            currency=currency,
         )
         s.add(inv)
         await s.commit()

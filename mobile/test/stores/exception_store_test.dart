@@ -85,6 +85,39 @@ void main() {
       expect(store.fromCache, isTrue);
     });
 
+    test('the offline cache keeps the decision verdicts', () async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _list([
+            {
+              ..._exceptionJson('1'),
+              'decision_refusals': {
+                'resolve': {
+                  'code': 'segregation_implicated',
+                  'message': 'm',
+                  'params': <String, dynamic>{},
+                },
+                'dismiss': null,
+                'escalate': null,
+              },
+            },
+          ]),
+        ),
+      );
+      await store.fetch();
+
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => throw Exception('offline')),
+      );
+      await store.fetch();
+
+      expect(store.fromCache, isTrue);
+      final e = store.exceptions.first;
+      expect(e.resolveVerdict.code, 'segregation_implicated');
+      expect(e.dismissVerdict.allowed, isTrue);
+      expect(e.escalateVerdict.allowed, isTrue);
+    });
+
     test('the offline cache keeps the exact amount and its currency', () async {
       ApiClient().debugConfigure(
         client: MockClient(

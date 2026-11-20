@@ -240,6 +240,7 @@ async def _seed_open_exception(mk, org_id):
             invoice_number="INV-REFUSAL-1",
             vendor_name="Acme",
             amount=Decimal("100.00"),
+            currency="USD",
         )
         s.add(inv)
         await s.commit()
