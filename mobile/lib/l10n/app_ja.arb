@@ -350,6 +350,7 @@
   "payRunActionExecute": "実行",
   "payRunActionCancel": "キャンセル",
   "payRunActionApprove": "CFOとして承認",
+  "payRunVerdictUnchecked": "この操作が可能か確認できませんでした。引っ張って更新してください。",
   "payRunApproveTitle": "支払実行を承認しますか？",
   "payRunApproveBody": "{date} に作成された実行の承認 — {count, plural, other {{count}件の支払}}、合計 {amount}。これは実行を承認するものであり、送金は行いません。",
   "payRunApproveConfirm": "承認",

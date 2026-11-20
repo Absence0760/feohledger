@@ -669,8 +669,72 @@ void main() {
       expect(store.runExecuteVerdict('down').answered, isFalse);
       expect(store.runCancelVerdict('down').answered, isFalse);
       expect(store.runApproveVerdict('down').answered, isFalse);
+      expect(store.runVerdictsFailed('down'), isTrue);
       expect(store.runExecuteVerdict('up').allowed, isTrue);
       expect(store.runCancelVerdict('up').allowed, isTrue);
+      expect(store.runVerdictsFailed('up'), isFalse);
+    });
+
+    test('the next refresh retries a failed read', () async {
+      var reads = 0;
+      ApiClient().debugConfigure(
+        client: client(
+          runs: [run('r', 'draft')],
+          details: {
+            'r': () => ++reads == 1
+                ? _json({'detail': 'unavailable'}, 503)
+                : _json({
+                    ...run('r', 'draft'),
+                    'actions': {'execute': null, 'cancel': null},
+                  }),
+          },
+        ),
+      );
+      await store.fetchRuns();
+      expect(store.runVerdictsFailed('r'), isTrue);
+
+      await store.fetchRuns();
+      expect(reads, 2);
+      expect(store.runVerdictsFailed('r'), isFalse);
+      expect(store.runExecuteVerdict('r').allowed, isTrue);
+    });
+
+    test('the list is published before a slow verdict read lands', () async {
+      final slow = Completer<http.Response>();
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (RegExp(r'/payments/runs/[^/]+$').hasMatch(req.url.path)) {
+            return slow.future;
+          }
+          return _json({
+            'items': [run('r', 'draft')],
+            'total': 1,
+            'page': 1,
+          });
+        }),
+      );
+      var notified = 0;
+      void listener() => notified++;
+      store.addListener(listener);
+      addTearDown(() => store.removeListener(listener));
+
+      final done = store.fetchRuns();
+      // Let the list read land while the detail read is still pending.
+      for (var i = 0; i < 10 && store.runs.isEmpty; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(store.runs.single.id, 'r');
+      expect(store.runsLoading, isFalse);
+      expect(store.runExecuteVerdict('r').answered, isFalse);
+      final before = notified;
+
+      slow.complete(_json({
+        ...run('r', 'draft'),
+        'actions': {'execute': null, 'cancel': null},
+      }));
+      await done;
+      expect(store.runExecuteVerdict('r').allowed, isTrue);
+      expect(notified, greaterThan(before));
     });
 
     test('reset forgets every verdict', () async {

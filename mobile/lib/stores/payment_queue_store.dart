@@ -57,7 +57,8 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
 
   List<PaymentQueueItem> _queue = [];
   List<PaymentRun> _runs = [];
-  Map<String, PaymentRunRecordDetail> _runVerdicts = const {};
+  Map<String, PaymentRunRecordDetail> _runVerdicts = {};
+  Set<String> _runVerdictsFailed = {};
   PaymentSummary? _summary;
   bool _loading = false;
   bool _runsLoading = false;
@@ -129,30 +130,38 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
       item.requiredMethod ?? _selection[item.id] ?? PaymentMethod.ach;
 
   int get selectedCount => _selection.length;
-  /// The caller's verdicts on each draft run's actions — `POST /runs/{id}/
+  /// Read the caller's verdicts on each draft run's actions — `POST /runs/{id}/
   /// approve`, `/execute` and `/cancel` — from the run detail's `actions`
   /// (`run_action_refusals`, the gates those endpoints raise from). The run
   /// list carries none of them, so the detail is read per draft run: a
-  /// non-draft run takes none of the three. A failed read leaves that run
-  /// with no verdicts, which offers nothing (fail closed).
-  Future<Map<String, PaymentRunRecordDetail>> _loadRunVerdicts(
-    List<PaymentRun> runs,
-  ) async {
-    final drafts = runs.where((r) => r.isDraft).toList();
-    final details = await Future.wait(
-      drafts.map((r) async {
+  /// non-draft run takes none of the three. The list is already published;
+  /// each verdict is filled in (and listeners told) as its read lands, so one
+  /// slow read never holds the Runs tab back. A failed read is recorded in
+  /// [runVerdictsFailed] — still no tappable action (fail closed), but the
+  /// screen can say why — and is retried on the next [fetchRuns].
+  Future<void> _loadRunVerdicts(List<PaymentRun> runs, int token) async {
+    await Future.wait(
+      runs.where((r) => r.isDraft).map((r) async {
+        PaymentRunRecordDetail? detail;
         try {
-          return await PaymentApi.runDetail(r.id);
+          detail = await PaymentApi.runDetail(r.id);
         } catch (_) {
-          return null;
+          detail = null;
         }
+        if (!_runsSeq.isCurrent(token)) return;
+        if (detail != null) {
+          _runVerdicts[r.id] = detail;
+        } else {
+          _runVerdictsFailed.add(r.id);
+        }
+        notifyListeners();
       }),
     );
-    return {
-      for (var i = 0; i < drafts.length; i++)
-        if (details[i] != null) drafts[i].id: details[i]!,
-    };
   }
+
+  /// Whether [runId]'s verdict read failed on the last [fetchRuns]: its
+  /// controls render disabled with "couldn't check", never enabled.
+  bool runVerdictsFailed(String runId) => _runVerdictsFailed.contains(runId);
 
   /// The caller's verdict on signing [runId] off as CFO —
   /// [ActionVerdict.unanswered] for a run not read or whose read failed.
@@ -178,7 +187,8 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
   void reset() {
     _queue = [];
     _runs = [];
-    _runVerdicts = const {};
+    _runVerdicts = {};
+    _runVerdictsFailed = {};
     _summary = null;
     _loading = false;
     _runsLoading = false;
@@ -344,10 +354,15 @@ class PaymentQueueStore extends ChangeNotifier with SequencedFetch {
     try {
       final runs = await PaymentApi.runs();
       if (!_runsSeq.isCurrent(token)) return;
-      final verdicts = await _loadRunVerdicts(runs);
-      if (!_runsSeq.isCurrent(token)) return;
+      // Publish the list now; the per-run verdicts follow as they land. A
+      // previous read's verdicts are dropped, never shown against new state.
       _runs = runs;
-      _runVerdicts = verdicts;
+      _runVerdicts = {};
+      _runVerdictsFailed = {};
+      _runsLoading = false;
+      notifyListeners();
+      await _loadRunVerdicts(runs, token);
+      return;
     } catch (e) {
       if (!_runsSeq.isCurrent(token)) return;
       _runsLoadError = e;

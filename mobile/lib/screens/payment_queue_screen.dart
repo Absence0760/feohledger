@@ -734,12 +734,14 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
             'execute',
             l.payRunActionExecute,
             store.runExecuteVerdict(run.id),
+            runId: run.id,
           )
         : null;
     final cancel = _verdictItem(
       'cancel',
       l.payRunActionCancel,
       store.runCancelVerdict(run.id),
+      runId: run.id,
     );
     final items = <PopupMenuEntry<String>>[
       ?approve,
@@ -778,6 +780,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       'approve',
       l.payRunActionApprove,
       PaymentQueueStore.instance.runApproveVerdict(run.id),
+      runId: run.id,
     );
   }
 
@@ -787,20 +790,31 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
   /// a run the list showed as a draft that has since moved on); enabled when
   /// accepted; otherwise disabled with the refusal in the reader's language
   /// (maker-checker, the CFO wait), instead of a control that can only 403.
+  ///
+  /// A run whose verdict read failed ([PaymentQueueStore.runVerdictsFailed])
+  /// renders the item disabled with "couldn't check — pull to refresh":
+  /// still nothing to tap, but the reader learns why there is no control
+  /// (a CFO otherwise saw "awaiting CFO approval" with nothing to press).
   PopupMenuEntry<String>? _verdictItem(
     String value,
     String label,
-    ActionVerdict verdict,
-  ) {
-    if (!verdict.isOffered(hiddenCodes: const {'payment_run_not_draft'})) {
-      return null;
-    }
-    if (verdict.allowed) {
-      return PopupMenuItem(value: value, child: Text(label));
-    }
+    ActionVerdict verdict, {
+    required String runId,
+  }) {
     final l = AppLocalizations.of(context);
-    final reason = localizeCodedRefusal(l, verdict.refusal) ??
-        (verdict.refusal?['message'] as String? ?? '');
+    final String reason;
+    if (PaymentQueueStore.instance.runVerdictsFailed(runId)) {
+      reason = l.payRunVerdictUnchecked;
+    } else {
+      if (!verdict.isOffered(hiddenCodes: const {'payment_run_not_draft'})) {
+        return null;
+      }
+      if (verdict.allowed) {
+        return PopupMenuItem(value: value, child: Text(label));
+      }
+      reason = localizeCodedRefusal(l, verdict.refusal) ??
+          (verdict.refusal?['message'] as String? ?? '');
+    }
     return PopupMenuItem(
       value: value,
       enabled: false,

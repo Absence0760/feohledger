@@ -998,19 +998,39 @@ void main() {
       expect(find.byType(PopupMenuButton<String>), findsNothing);
     });
 
-    testWidgets('no verdict (the detail read failed) offers neither',
-        (tester) async {
+    testWidgets('a failed detail read shows each control disabled with '
+        '"couldn\'t check", and nothing can be sent', (tester) async {
+      var posts = 0;
       await loginThen(
-        ['ap_manager'],
-        _screenClient(queue: [], runs: [_runResponse()], runDetailFails: true),
+        ['cfo'],
+        _screenClient(
+          queue: [],
+          runs: [_runResponse(requiresCfoApproval: true)],
+          runDetailFails: true,
+          onPost: (req) {
+            posts++;
+            return _json({'message': 'ok'});
+          },
+        ),
       );
 
       await tester.pumpWidget(_localized(const PaymentQueueScreen()));
       await openRunsTab(tester);
 
-      // The run still lists; only its controls are withheld.
+      // The run still lists; its controls say why they cannot be used.
       expect(find.text('Draft'), findsOneWidget);
-      expect(find.byType(PopupMenuButton<String>), findsNothing);
+      await openRunMenu(tester);
+      for (final label in ['Approve as CFO', 'Execute', 'Cancel']) {
+        expect(itemFor(tester, label).enabled, isFalse, reason: label);
+      }
+      expect(
+        find.text("Couldn't check whether you can do this. Pull to refresh."),
+        findsNWidgets(3),
+      );
+
+      await tester.tap(find.text('Execute'), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(posts, 0);
     });
 
     testWidgets('an accepted Cancel posts /cancel', (tester) async {

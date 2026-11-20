@@ -1287,6 +1287,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get payRunActionApprove => 'CFOとして承認';
 
   @override
+  String get payRunVerdictUnchecked => 'この操作が可能か確認できませんでした。引っ張って更新してください。';
+
+  @override
   String get payRunApproveTitle => '支払実行を承認しますか？';
 
   @override

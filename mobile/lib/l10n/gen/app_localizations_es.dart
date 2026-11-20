@@ -1402,6 +1402,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get payRunActionApprove => 'Aprobar como CFO';
 
   @override
+  String get payRunVerdictUnchecked =>
+      'No se pudo comprobar si puede hacer esto. Deslice hacia abajo para actualizar.';
+
+  @override
   String get payRunApproveTitle => '¿Aprobar el lote de pago?';
 
   @override
