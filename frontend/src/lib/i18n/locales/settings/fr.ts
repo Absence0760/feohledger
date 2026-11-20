@@ -731,7 +731,6 @@ export const messages = {
 	'admin.entities.title': 'Entités',
 	'admin.entities.createEntity': '+ Créer une entité',
 	'admin.entities.hint': 'Les entités sont les personnes morales ou filiales de cet espace de travail. Chaque facture, fournisseur et paiement appartient à une seule d’entre elles ; les workflows et les comptes généraux peuvent appartenir à une entité ou être partagés par toutes. Le sélecteur d’entité de la barre latérale apparaît dès qu’il y en a au moins deux.',
-	'admin.entities.loading': 'Chargement des entités…',
 	'admin.entities.loadFailed': 'Échec du chargement des entités.',
 	'admin.entities.col.name': 'Nom',
 	'admin.entities.col.slug': 'Identifiant',

@@ -649,18 +649,19 @@
 	   `auto` the columns were sized against the "Loading…" row and re-sized
 	   against the real rows, sliding every column sideways as the users
 	   landed. The predictable columns get widths sized to their widest
-	   content (Roles to two badges, actions to Deactivate + Revoke sessions +
-	   Delete on one line); Name and Email share the rest, and the table's
+	   content in the longest locale (Roles to two badges, actions to es
+	   "Desactivar" + "Cerrar todas las sesiones" + "Eliminar" on one line);
+	   Name and Email share the rest, and the table's
 	   `min-width` keeps them readable — past it the table scrolls inside its
 	   region (frontend/docs/ui-patterns.md § Data tables). */
 	.users-table {
 		min-width: 0;
 	}
-	.users-table :global(table) { min-width: 1180px; }
+	.users-table :global(table) { min-width: 1280px; }
 	.col-roles { width: 220px; }
 	.col-status { width: 110px; }
 	.col-created { width: 130px; }
-	.col-actions { width: 340px; }
+	.col-actions { width: 420px; }
 
 	.email-cell {
 		overflow: hidden;

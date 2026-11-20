@@ -721,7 +721,6 @@ export const messages = {
 	'admin.entities.title': 'エンティティ',
 	'admin.entities.createEntity': '+ エンティティを作成',
 	'admin.entities.hint': 'エンティティは、このワークスペース内の法人または子会社です。請求書・取引先・支払いはいずれか 1 つに属し、ワークフローと勘定科目は 1 つに属することも全体で共有することもできます。サイドバーのエンティティ切替は 2 件以上になると表示されます。',
-	'admin.entities.loading': 'エンティティを読み込み中…',
 	'admin.entities.loadFailed': 'エンティティを読み込めませんでした。',
 	'admin.entities.col.name': '名称',
 	'admin.entities.col.slug': 'スラッグ',

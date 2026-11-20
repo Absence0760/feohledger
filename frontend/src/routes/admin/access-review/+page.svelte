@@ -243,7 +243,8 @@
 	}
 
 	/* Column widths for the `fixed` table: the date and status columns are
-	   sized to their widest content, User and Roles share the rest, and the
+	   sized to their widest content in any locale (de "Letzte privilegierte
+	   Aktion"), User and Roles share the rest, and the
 	   `min-width` keeps them readable (past it the table scrolls inside its
 	   region). DataTable renders these `<th>` from `columns`, so the selectors
 	   go through `:global` under this page-owned wrapper (the /gl-accounts
@@ -251,8 +252,8 @@
 	.review-table {
 		min-width: 0;
 	}
-	.review-table :global(table) { min-width: 760px; }
-	.review-table :global(th.col-last) { width: 230px; }
+	.review-table :global(table) { min-width: 800px; }
+	.review-table :global(th.col-last) { width: 270px; }
 	.review-table :global(th.col-status) { width: 130px; }
 
 	tr.dormant-row td {

@@ -731,7 +731,6 @@ export const messages = {
 	'admin.entities.title': 'Gesellschaften',
 	'admin.entities.createEntity': '+ Gesellschaft anlegen',
 	'admin.entities.hint': 'Gesellschaften sind die juristischen Personen oder Tochtergesellschaften in diesem Workspace. Jede Rechnung, jeder Lieferant und jede Zahlung gehört zu genau einer; Workflows und Sachkonten können zu einer gehören oder für alle gelten. Die Gesellschaftsauswahl in der Seitenleiste erscheint ab zwei Gesellschaften.',
-	'admin.entities.loading': 'Gesellschaften werden geladen…',
 	'admin.entities.loadFailed': 'Gesellschaften konnten nicht geladen werden.',
 	'admin.entities.col.name': 'Name',
 	'admin.entities.col.slug': 'Kürzel',

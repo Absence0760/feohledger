@@ -731,7 +731,6 @@ export const messages = {
 	'admin.entities.title': 'Entidades',
 	'admin.entities.createEntity': '+ Crear entidad',
 	'admin.entities.hint': 'Las entidades son las personas jurídicas o filiales de este espacio de trabajo. Cada factura, proveedor y pago pertenece exactamente a una; los flujos de trabajo y las cuentas contables pueden pertenecer a una o compartirse entre todas. El selector de entidad de la barra lateral aparece cuando hay dos o más.',
-	'admin.entities.loading': 'Cargando entidades…',
 	'admin.entities.loadFailed': 'No se pudieron cargar las entidades.',
 	'admin.entities.col.name': 'Nombre',
 	'admin.entities.col.slug': 'Identificador',

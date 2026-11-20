@@ -50,7 +50,7 @@
 		{ label: m('admin.apiKeys.col.keyPrefix'), class: 'col-prefix' },
 		{ label: m('admin.apiKeys.col.scopes') },
 		{ label: m('admin.apiKeys.col.created'), class: 'col-date' },
-		{ label: m('admin.apiKeys.col.lastUsed'), class: 'col-date' },
+		{ label: m('admin.apiKeys.col.lastUsed'), class: 'col-last-used' },
 		{ label: m('admin.apiKeys.col.status'), class: 'col-status' },
 		{ class: 'actions-col' }
 	]);
@@ -400,7 +400,8 @@
 
 <style>
 	/* Column widths for the `fixed` key table: the prefix, dates, status and
-	   the Revoke action are sized to their widest content; Name and Scopes
+	   the Revoke action are sized to their widest content in any locale (es "Prefijo de clave",
+	   fr "Dernière utilisation", de "Widerrufen"); Name and Scopes
 	   share the rest, and the `min-width` keeps them readable (past it the
 	   table scrolls inside its region). DataTable renders these `<th>` from
 	   `columns`, so the selectors go through `:global` under this page-owned
@@ -408,10 +409,11 @@
 	.keys-table {
 		min-width: 0;
 	}
-	.keys-table :global(table) { min-width: 980px; }
-	.keys-table :global(th.col-prefix) { width: 130px; }
+	.keys-table :global(table) { min-width: 1140px; }
+	.keys-table :global(th.col-prefix) { width: 170px; }
 	.keys-table :global(th.col-date) { width: 130px; }
-	.keys-table :global(th.col-status) { width: 110px; }
+	.keys-table :global(th.col-last-used) { width: 200px; }
+	.keys-table :global(th.col-status) { width: 130px; }
 	.keys-table :global(th.actions-col) { width: 150px; }
 
 	.page-hint {
