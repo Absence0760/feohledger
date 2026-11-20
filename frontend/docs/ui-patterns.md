@@ -202,7 +202,9 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
 - **A list page's table is `fixed`.** Under `table-layout: auto` the columns
   are sized against the "Loading…" row and then re-sized against the real
   rows, so every column slides sideways as the data lands. /invoices,
-  /payments, /exceptions, /vendors, /purchase-orders and /gl-accounts are
+  /payments, /exceptions, /vendors, /purchase-orders, /gl-accounts, the
+  screening queue, bank changes, /requisitions, /intake, /catalogs, /budgets,
+  /recurring, /vendor-statements, /positive-pay and /experiments are
   converted; `tests-e2e/reactivity/layout-stability.spec.ts` holds each to a
   cumulative layout shift under 0.1 with production-like API latency and
   checks a `fixed` table's header x positions. A new sidebar page fails that

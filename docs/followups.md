@@ -1480,19 +1480,21 @@ covered the one page or shape it was written for. #646 / §318 closed the
 QuickBooks half with recorded shapes and a live check; these are the
 user-visible halves still open.
 
-- [ ] **(c) The layout-shift budget covers eleven pages.**
+- [ ] **(c) The layout-shift budget covers twenty-one pages.**
       `tests-e2e/reactivity/layout-stability.spec.ts` is table-driven
-      (`LIST_PAGES`): the dashboard and ten list pages are opened with every
+      (`LIST_PAGES`): the dashboard and twenty list pages are opened with every
       API response delayed, held to a cumulative layout shift under 0.1, and
-      the six `fixed` tables also have their header columns' x positions
-      checked. The other list pages in the sidebar (screening, bank changes,
-      goods receipts, requisitions, intake, catalogs, budgets, discounts,
-      recurring, statements, Positive Pay, audit, workflows, experiments,
-      adaptive, 1099, and the admin lists) sit in `NOT_LIST_PAGES` as
-      "Unmeasured", unmeasured and not yet given `fixed` widths. **Durable
-      fix:** move each into `LIST_PAGES`, giving its `DataTable` `fixed` plus
-      `<th>` widths where its columns slide. **Trigger:** the next polish pass
-      on any of those pages.
+      the sixteen `fixed` tables also have their header columns' x positions
+      checked. Still in `NOT_LIST_PAGES` as "Unmeasured": goods receipts,
+      audit, workflows, adaptive, the admin lists (users, roles, entities,
+      partner, API keys, webhooks, access review), plus two that need a layout
+      change first — /discounts (warning banners and the optimizer panel mount
+      above the offers table once the dashboard lands) and /tax (a loading
+      placeholder is replaced by the box-allocation panel and the table).
+      **Durable fix:** give each `DataTable` `fixed` plus `<th>` widths under a
+      page wrapper (the /gl-accounts pattern), reserve the late panels' space
+      on /discounts and /tax, and move each into `LIST_PAGES`. **Trigger:** the
+      next polish pass on any of those pages.
 - [ ] **(c) No scripted "first customer" release rehearsal.** The 2026-10-22
       walkthrough — sign up, connect QuickBooks, sync the chart and vendors,
       enter an invoice, approve it, push it, pay the bill in QuickBooks, watch
