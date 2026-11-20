@@ -105,8 +105,8 @@ describe('signed-out auth pages show no raw error message', () => {
 });
 
 describe('apiErrorMessage', () => {
-	const apiError = (message: string, status: number, detail?: unknown) =>
-		Object.assign(new Error(message), { name: 'ApiError', status, code: null, params: {}, detail });
+	const apiError = (message: string, status: number, detail?: unknown, code: string | null = null) =>
+		Object.assign(new Error(message), { name: 'ApiError', status, code, params: {}, detail });
 
 	it('shows the server’s sentence for a refusal meant for the user', () => {
 		expect(apiErrorMessage(apiError('Invalid credentials', 401, 'Invalid credentials'), 'fb')).toBe(
@@ -126,7 +126,14 @@ describe('apiErrorMessage', () => {
 		expect(apiErrorMessage('boom', 'fb')).toBe('fb');
 	});
 
-	it('falls back for a bodyless response and any 5xx', () => {
+	it('shows a CODED 5xx refusal: it was written for the user', () => {
+		const coded = { code: 'signup_email_send_failed', message: "Couldn't send", params: {} };
+		expect(
+			apiErrorMessage(apiError('Konnte nicht senden', 502, coded, 'signup_email_send_failed'), 'fb')
+		).toBe('Konnte nicht senden');
+	});
+
+	it('falls back for a bodyless response and any uncoded 5xx', () => {
 		expect(apiErrorMessage(apiError('API error 502', 502), 'fb')).toBe('fb');
 		expect(apiErrorMessage(apiError('Unauthorized', 401), 'fb')).toBe('fb');
 		expect(apiErrorMessage(apiError('Internal Server Error', 500, 'Internal Server Error'), 'fb')).toBe(

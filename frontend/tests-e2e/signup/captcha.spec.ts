@@ -117,7 +117,16 @@ test('a refused submission spends the token: the widget is reset and the retry n
 	const { submissions } = await stubCaptcha(page, {
 		start: (n) =>
 			n === 1
-				? { status: 502, json: { detail: "Couldn't send the verification email. Please try again." } }
+				? {
+						status: 502,
+						json: {
+							detail: {
+								code: 'signup_email_send_failed',
+								message: 'server fallback text',
+								params: {}
+							}
+						}
+					}
 				: undefined
 	});
 	await page.goto('/signup');
@@ -132,8 +141,9 @@ test('a refused submission spends the token: the widget is reset and the retry n
 	await submit.click();
 
 	// The server verified (and so spent) the token before failing to send.
+	// Coded, as `/start` sends it, so stated from its code even at 502.
 	await expect(page.locator('.error')).toHaveText(
-		"Couldn't send the verification email. Please try again."
+		"We couldn't send the verification email. Try again."
 	);
 	expect(submissions.map((b) => b.captcha_token)).toEqual(['token-1']);
 	// The widget no longer looks solved, and was reset rather than left

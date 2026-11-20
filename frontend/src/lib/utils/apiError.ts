@@ -154,16 +154,20 @@ export function isApiErrorLike(err: unknown): err is Error & { status: number; d
  *   allowed…"`) and `webauthn.ts`'s own English throws;
  * - an `ApiError` whose body carried no `detail` (a proxy's 502 page), whose
  *   message is `api.ts`'s internal `"API error 502"` / `"Unauthorized"`;
- * - a 5xx `detail`, which is never written for the user
+ * - an uncoded 5xx `detail`, which is never written for the user
  *   (`"Internal Server Error"`).
  *
- * Only an `ApiError` below 500 with a non-blank `detail` keeps its message —
- * and that message is already localized when the refusal is coded
+ * An `ApiError` with a non-blank `detail` keeps its message below 500, and at
+ * any status when the refusal is CODED: a `{code, message, params}` detail is
+ * written for the user on purpose (signup's 502 `signup_email_send_failed`),
+ * and its message is already localized from the code
  * (`api.ts::apiErrorFromBody`). `authRoutesErrorText.test.ts` fails if a
  * signed-out auth page reads `.message` off a caught error itself.
  */
 export function apiErrorMessage(err: unknown, fallback: string): string {
-	if (!isApiErrorLike(err) || err.status >= 500) return fallback;
+	if (!isApiErrorLike(err)) return fallback;
+	const coded = typeof (err as { code?: unknown }).code === 'string';
+	if (err.status >= 500 && !coded) return fallback;
 	if (!formatApiDetail(err.detail, '')) return fallback;
 	const text = err.message.trim();
 	return text || fallback;
