@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.procurement import IntakeStatus, IntakeType
+from app.schemas.action_verdict import CodedRefusal
 from app.schemas.currency import CurrencyCode, OptionalCurrencyCode
 from app.schemas.money import OptionalMoneyAmount
 
@@ -72,6 +73,22 @@ class IntakeRequestUpdate(BaseModel):
     justification: str | None = None
 
 
+class IntakeActions(BaseModel):
+    """The caller's verdict on an intake row's lifecycle actions, each the
+    coded refusal the endpoint would answer with or ``None`` — computed by the
+    endpoints' own gates (``api/intake.intake_action_refusals``, issue #575).
+    Required, not defaulted: a ``None`` nobody computed would read as
+    "allowed". Every intake response carries it, mutations included, so a row
+    the page upserts from a mutation keeps its verdicts."""
+
+    submit: CodedRefusal | None
+    approve: CodedRefusal | None
+    reject: CodedRefusal | None
+    convert: CodedRefusal | None
+    cancel: CodedRefusal | None
+    reopen: CodedRefusal | None
+
+
 class IntakeRequestResponse(BaseModel):
     id: str
     request_number: str
@@ -91,6 +108,7 @@ class IntakeRequestResponse(BaseModel):
     converted_po_id: str | None
     created_at: str
     updated_at: str
+    actions: IntakeActions
 
 
 class IntakeRequestListResponse(PageMeta):

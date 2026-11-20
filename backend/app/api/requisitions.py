@@ -17,7 +17,6 @@ money-moving artifacts). Every mutation is audited. See
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
-from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
@@ -30,9 +29,11 @@ from app.api.deps import (
     ROLE_AP_MANAGER,
     ROLE_CFO,
     get_org_id,
+    holds_any_role,
     require_roles,
 )
 from app.api.pagination import PaginationParams, pagination_params
+from app.api.refusals import role_not_permitted
 from app.models.contract import Contract
 from app.models.procurement import (
     REQUISITION_MATERIAL_EDIT_FIELDS,
@@ -46,6 +47,7 @@ from app.models.user import User
 from app.models.vendor import Vendor
 from app.schemas.requisition import (
     ConvertToPoResponse,
+    RequisitionActions,
     RequisitionCreate,
     RequisitionCurrencyTotal,
     RequisitionDecision,
@@ -55,13 +57,15 @@ from app.schemas.requisition import (
     RequisitionSummaryResponse,
     RequisitionUpdate,
 )
-from app.services.approval_chain import check_segregation
 from app.services.audit_dispatch import dispatch_audit
+from app.services.procurement_controls import (
+    requisition_approve_refusal,
+    requisition_convert_refusal,
+    requisition_transition_refusal,
+)
 from app.services.requisition_service import (
     build_line_items,
     convert_requisition_to_po,
-    guard_transition,
-    implicated_editor_ids,
     line_items_differ,
     recompute_total,
     record_material_editor,
@@ -91,6 +95,52 @@ _UPDATABLE_FIELDS = (
 _UPDATABLE_FK_FIELDS = ("vendor_id", "contract_id", "budget_id")
 
 
+#: Who may raise / edit / submit / cancel / reopen a requisition.
+REQUISITION_AUTHOR_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)
+#: Who decides one: approve, reject.
+REQUISITION_DECIDE_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
+#: Who converts an approved one into a PO — the money step.
+REQUISITION_CONVERT_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER)
+
+
+def requisition_action_refusals(req: PurchaseRequisition, user: User) -> RequisitionActions:
+    """What submit, approve, reject, convert, cancel and reopen would answer
+    ``user`` for this requisition — each a coded refusal or ``None`` (issue
+    #575). Each is the endpoint's role predicate (``holds_any_role``) followed
+    by the gate it raises from (``services/procurement_controls``), so
+    /requisitions reads the verdict instead of restating the status list, the
+    role sets and ``requester_user_id !== me`` (which also hid a Reject the
+    endpoint accepts, and missed the material editors approve refuses)."""
+
+    def verdict(roles, gate):
+        if not holds_any_role(user, roles):
+            return role_not_permitted()
+        refusal = gate()
+        return refusal.verdict() if refusal is not None else None
+
+    def move(target):
+        return lambda: requisition_transition_refusal(req, target)
+
+    return RequisitionActions(
+        submit=verdict(REQUISITION_AUTHOR_ROLES, move(RequisitionStatus.pending_approval)),
+        approve=verdict(
+            REQUISITION_DECIDE_ROLES, lambda: requisition_approve_refusal(req, user.id)
+        ),
+        reject=verdict(REQUISITION_DECIDE_ROLES, move(RequisitionStatus.rejected)),
+        convert=verdict(
+            REQUISITION_CONVERT_ROLES,
+            lambda: requisition_convert_refusal(req, po_exists=req.converted_po_id is not None),
+        ),
+        cancel=verdict(REQUISITION_AUTHOR_ROLES, move(RequisitionStatus.cancelled)),
+        reopen=verdict(REQUISITION_AUTHOR_ROLES, move(RequisitionStatus.draft)),
+    )
+
+
+def _raise_if(refusal) -> None:
+    if refusal is not None:
+        raise refusal.http()
+
+
 # ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
@@ -111,7 +161,9 @@ def _line_to_response(li) -> RequisitionLineItemResponse:
     )
 
 
-def _to_response(r: PurchaseRequisition) -> RequisitionResponse:
+def _to_response(r: PurchaseRequisition, user: User) -> RequisitionResponse:
+    """A row with the caller's verdicts — on every response, mutations
+    included, so a row the page replaces keeps them."""
     return RequisitionResponse(
         id=str(r.id),
         requisition_number=r.requisition_number,
@@ -137,6 +189,7 @@ def _to_response(r: PurchaseRequisition) -> RequisitionResponse:
         ],
         created_at=r.created_at.isoformat() if r.created_at else "",
         updated_at=r.updated_at.isoformat() if r.updated_at else "",
+        actions=requisition_action_refusals(r, user),
     )
 
 
@@ -247,7 +300,7 @@ async def list_requisitions(
     )
     rows = (await db.execute(paged)).scalars().all()
     return RequisitionListResponse(
-        items=[_to_response(r) for r in rows],
+        items=[_to_response(r, user) for r in rows],
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,
@@ -380,7 +433,7 @@ async def create_requisition(
     )
     await db.commit()
     fresh = await _get_or_404(db, req.id, entity_id)
-    return _to_response(fresh)
+    return _to_response(fresh, user)
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +448,7 @@ async def get_requisition(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    return _to_response(await _get_or_404(db, req_id, entity_id))
+    return _to_response(await _get_or_404(db, req_id, entity_id), user)
 
 
 @router.patch("/{req_id}", response_model=RequisitionResponse)
@@ -487,7 +540,7 @@ async def update_requisition(
         )
     await db.commit()
     fresh = await _get_or_404(db, req.id, entity_id)
-    return _to_response(fresh)
+    return _to_response(fresh, user)
 
 
 @router.delete("/{req_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -563,25 +616,25 @@ async def delete_requisition(
 async def submit_requisition(
     req_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
+    user: User = Depends(require_roles(*REQUISITION_AUTHOR_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Submit a draft requisition for approval: ``draft → pending_approval``."""
     req = await _get_or_404(db, req_id, entity_id, for_update=True)
-    guard_transition(req.status, RequisitionStatus.pending_approval)
+    _raise_if(requisition_transition_refusal(req, RequisitionStatus.pending_approval))
     req.status = RequisitionStatus.pending_approval
     req.submitted_at = datetime.now(UTC)
     await _audit_transition(db, req, org_id, user.id, "requisition.submitted")
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id, entity_id))
+    return _to_response(await _get_or_404(db, req.id, entity_id), user)
 
 
 @router.post("/{req_id}/approve", response_model=RequisitionResponse)
 async def approve_requisition(
     req_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*REQUISITION_DECIDE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -591,26 +644,18 @@ async def approve_requisition(
     who materially edited the draft (``material_editor_ids``) — reuses
     ``check_segregation`` → 403. Stamps ``approved_by`` / ``approved_at``."""
     req = await _get_or_404(db, req_id, entity_id, for_update=True)
-    guard_transition(req.status, RequisitionStatus.approved)
-    # SoD — approver ∉ requester ∪ material editors. Reuse the invoice helper
-    # via a tiny attribute shim so the rule + 403 detail stay shared with the
-    # invoice/expense paths. The editor set is what stops an ap_manager who
-    # rewrote someone else's draft (or the intake-converted requisition they
-    # then edited) from approving the spend they wrote.
-    check_segregation(
-        SimpleNamespace(
-            uploaded_by_id=req.requester_user_id,
-            segregation_actor_ids=implicated_editor_ids(req),
-        ),
-        user.id,
-        {"require_segregation": True},
-    )
+    # Status, then SoD — approver ∉ requester ∪ material editors
+    # (``check_segregation``'s coded 403, via the shared gate). The editor set
+    # is what stops an ap_manager who rewrote someone else's draft (or the
+    # intake-converted requisition they then edited) from approving the spend
+    # they wrote.
+    _raise_if(requisition_approve_refusal(req, user.id))
     req.status = RequisitionStatus.approved
     req.approved_at = datetime.now(UTC)
     req.approved_by = user.id
     await _audit_transition(db, req, org_id, user.id, "requisition.approved")
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id, entity_id))
+    return _to_response(await _get_or_404(db, req.id, entity_id), user)
 
 
 @router.post("/{req_id}/reject", response_model=RequisitionResponse)
@@ -618,13 +663,13 @@ async def reject_requisition(
     req_id: uuid.UUID,
     body: RequisitionDecision | None = None,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*REQUISITION_DECIDE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reject a pending requisition: ``pending_approval → rejected``."""
     req = await _get_or_404(db, req_id, entity_id, for_update=True)
-    guard_transition(req.status, RequisitionStatus.rejected)
+    _raise_if(requisition_transition_refusal(req, RequisitionStatus.rejected))
     req.status = RequisitionStatus.rejected
     req.rejection_reason = body.reason if body else None
     await _audit_transition(
@@ -636,7 +681,7 @@ async def reject_requisition(
         extra={"reason": body.reason} if body and body.reason else None,
     )
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id, entity_id))
+    return _to_response(await _get_or_404(db, req.id, entity_id), user)
 
 
 @router.post("/{req_id}/cancel", response_model=RequisitionResponse)
@@ -644,14 +689,14 @@ async def cancel_requisition(
     req_id: uuid.UUID,
     body: RequisitionDecision | None = None,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
+    user: User = Depends(require_roles(*REQUISITION_AUTHOR_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Cancel a requisition (any non-terminal, non-converted state): ``→
     cancelled``. A converted requisition is terminal and cannot be cancelled."""
     req = await _get_or_404(db, req_id, entity_id, for_update=True)
-    guard_transition(req.status, RequisitionStatus.cancelled)
+    _raise_if(requisition_transition_refusal(req, RequisitionStatus.cancelled))
     req.status = RequisitionStatus.cancelled
     await _audit_transition(
         db,
@@ -662,14 +707,14 @@ async def cancel_requisition(
         extra={"reason": body.reason} if body and body.reason else None,
     )
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id, entity_id))
+    return _to_response(await _get_or_404(db, req.id, entity_id), user)
 
 
 @router.post("/{req_id}/reopen", response_model=RequisitionResponse)
 async def reopen_requisition(
     req_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
+    user: User = Depends(require_roles(*REQUISITION_AUTHOR_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -688,14 +733,14 @@ async def reopen_requisition(
     the rework, and a later rejection overwrites it.
     """
     req = await _get_or_404(db, req_id, entity_id, for_update=True)
-    guard_transition(req.status, RequisitionStatus.draft)
+    _raise_if(requisition_transition_refusal(req, RequisitionStatus.draft))
     req.status = RequisitionStatus.draft
     # The prior submission's clock no longer describes this row: it is a draft
     # again, and `submit` re-stamps `submitted_at` when it next leaves draft.
     req.submitted_at = None
     await _audit_transition(db, req, org_id, user.id, "requisition.reopened")
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id, entity_id))
+    return _to_response(await _get_or_404(db, req.id, entity_id), user)
 
 
 # ---------------------------------------------------------------------------
@@ -707,7 +752,7 @@ async def reopen_requisition(
 async def convert_to_po(
     req_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*REQUISITION_CONVERT_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -739,7 +784,9 @@ async def convert_to_po(
                 created=False,
             )
 
-    guard_transition(req.status, RequisitionStatus.converted)
+    # A dangling ``converted_po_id`` (unreachable: the FK refuses deleting a
+    # referenced PO) is refused here, never rebuilt.
+    _raise_if(requisition_convert_refusal(req, po_exists=False))
 
     # Derive the PO number from the requisition number so the link is traceable
     # and a retry that somehow reached here would build the same number.

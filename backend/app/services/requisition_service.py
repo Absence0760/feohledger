@@ -2,7 +2,7 @@
 stay thin.
 
 Holds: requisition-number generation, exact line-total + header-total recompute
-(all ``Decimal`` math, never float), the status-transition guard (a small state
+(all ``Decimal`` math, never float), the status-transition graph (a small state
 machine mirroring the expense-report approval shape), and the requisition→PO
 conversion (creates a ``PurchaseOrder`` + ``POLineItem`` rows from the
 requisition lines). Conversion idempotency is owned by the router (it checks
@@ -15,7 +15,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 
 from app.models.procurement import (
     POLineItem,
@@ -53,15 +53,6 @@ VALID_TRANSITIONS: dict[RequisitionStatus, set[RequisitionStatus]] = {
     RequisitionStatus.converted: set(),  # terminal
     RequisitionStatus.cancelled: set(),  # terminal
 }
-
-
-def guard_transition(current: RequisitionStatus, target: RequisitionStatus) -> None:
-    """Raise 422 if ``current → target`` is not an allowed requisition move."""
-    if target not in VALID_TRANSITIONS.get(current, set()):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Cannot move a requisition from '{current}' to '{target}'.",
-        )
 
 
 #: The precision every requisition / PO money column actually holds
