@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'svelte';
 import { render } from 'svelte/server';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -16,7 +17,7 @@ import LoadMoreFooter from './LoadMoreFooter.svelte';
  * (e.g. `tests-e2e/budgets/pagination.spec.ts`).
  */
 
-const base = {
+const base: ComponentProps<typeof LoadMoreFooter> = {
 	shown: 20,
 	total: 87,
 	hasMore: true,

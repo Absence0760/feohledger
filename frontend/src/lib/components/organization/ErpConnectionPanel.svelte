@@ -768,7 +768,7 @@
 			oncancel={cancelPick}
 		/>
 	{:else if pendingLoading}
-		<p class="card-hint" aria-busy="true">{m('org.erp.oauth.pick.loading', { erp: m('org.erp.oauth.yourErp') })}</p>
+		<LoadingState label={m('org.erp.oauth.pick.loading', { erp: m('org.erp.oauth.yourErp') })} />
 	{:else if userLoaded && !entitled}
 		<!-- Every catalogue entry is a live ERP; the local-first `mock` ERP
 		     needs no configuration. -->
