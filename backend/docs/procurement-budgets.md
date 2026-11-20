@@ -198,6 +198,14 @@ Every list/read is entity-scoped (`X-Entity-ID`) and tenant-isolated
 | PATCH | `/budgets/{id}` | Update changed fields. Audited `budget.updated`. Changing `currency` is a **422** while any non-cancelled linked requisition is in another currency — the mirror of the requisition-side link guard, since the legs never convert and those requisitions would silently drop out of `committed`. |
 | DELETE | `/budgets/{id}` | Delete. Audited `budget.deleted`. **409** while any requisition (any status) still links to it — the FK would otherwise surface as a 500, and the link is the record of what the spend was raised against. |
 
+**The PO-relief join.** The relief leg of `committed`
+(`_invoice_po_attribution`) matches invoices to the budgets' converted POs on
+`po_number` and narrows the invoice side with `po_number IN (<those POs'
+numbers>)`. That column is indexed since `0137_invoice_po_number_index`
+(`ix_invoices_po_number`); `tests/test_invoice_po_number_index.py` shows the
+relief predicate is an `Index Cond` on it. Unlike 0090, nothing was timed for
+0137: the 40k-invoice before/after for the relief leg has not been taken.
+
 ### `GET /budgets/rollup` contract
 
 The CFO's consolidated view. Before it, the only budget-vs-actual surfaces were

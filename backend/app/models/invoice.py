@@ -90,7 +90,9 @@ class Invoice(Base, EntityMixin, TimestampMixin):
         Enum(InvoiceStatus, native_enum=False, length=30),
         default=InvoiceStatus.new,
     )
-    po_number: Mapped[str | None] = mapped_column(String(100))
+    # Indexed (migration 0137): the budget PO-relief join, the PO detail's
+    # invoice list and the portal / re-match "who cites this PO" reads filter it.
+    po_number: Mapped[str | None] = mapped_column(String(100), index=True)
     subtotal: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     tax_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     discount_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
