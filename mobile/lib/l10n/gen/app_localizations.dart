@@ -6853,6 +6853,342 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No invoices match these filters'**
   String get invoicesFilteredEmpty;
+
+  /// Screen-reader announcement for a status pill, e.g. 'Status: Approved'.
+  ///
+  /// In en, this message translates to:
+  /// **'Status: {label}'**
+  String statusPillAnnounce(String label);
+
+  /// Vendor lifecycle status.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get vendorStatusActive;
+
+  /// No description provided for @vendorStatusUnverified.
+  ///
+  /// In en, this message translates to:
+  /// **'Unverified'**
+  String get vendorStatusUnverified;
+
+  /// No description provided for @vendorStatusInactive.
+  ///
+  /// In en, this message translates to:
+  /// **'Inactive'**
+  String get vendorStatusInactive;
+
+  /// No description provided for @vendorStatusRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Rejected'**
+  String get vendorStatusRejected;
+
+  /// Contract lifecycle status.
+  ///
+  /// In en, this message translates to:
+  /// **'Draft'**
+  String get contractStatusDraft;
+
+  /// No description provided for @contractStatusActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get contractStatusActive;
+
+  /// No description provided for @contractStatusExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Expired'**
+  String get contractStatusExpired;
+
+  /// No description provided for @contractStatusTerminated.
+  ///
+  /// In en, this message translates to:
+  /// **'Terminated'**
+  String get contractStatusTerminated;
+
+  /// No description provided for @contractStatusCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get contractStatusCancelled;
+
+  /// Contract type.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase'**
+  String get contractTypePurchase;
+
+  /// No description provided for @contractTypeService.
+  ///
+  /// In en, this message translates to:
+  /// **'Service'**
+  String get contractTypeService;
+
+  /// No description provided for @contractTypeSubscription.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription'**
+  String get contractTypeSubscription;
+
+  /// No description provided for @contractTypeLease.
+  ///
+  /// In en, this message translates to:
+  /// **'Lease'**
+  String get contractTypeLease;
+
+  /// Service-level agreement; keep the acronym where the market uses it.
+  ///
+  /// In en, this message translates to:
+  /// **'SLA'**
+  String get contractTypeSla;
+
+  /// Master services agreement.
+  ///
+  /// In en, this message translates to:
+  /// **'MSA'**
+  String get contractTypeMsa;
+
+  /// Statement of work.
+  ///
+  /// In en, this message translates to:
+  /// **'SOW'**
+  String get contractTypeSow;
+
+  /// No description provided for @contractTypeOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get contractTypeOther;
+
+  /// Exception-queue status.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get exceptionStatusOpen;
+
+  /// No description provided for @exceptionStatusEscalated.
+  ///
+  /// In en, this message translates to:
+  /// **'Escalated'**
+  String get exceptionStatusEscalated;
+
+  /// No description provided for @exceptionStatusResolved.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolved'**
+  String get exceptionStatusResolved;
+
+  /// No description provided for @exceptionStatusDismissed.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismissed'**
+  String get exceptionStatusDismissed;
+
+  /// Exception severity.
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get exceptionSeverityError;
+
+  /// No description provided for @exceptionSeverityWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Warning'**
+  String get exceptionSeverityWarning;
+
+  /// No description provided for @exceptionSeverityInfo.
+  ///
+  /// In en, this message translates to:
+  /// **'Info'**
+  String get exceptionSeverityInfo;
+
+  /// Where a vendor record came from: synced from the ERP.
+  ///
+  /// In en, this message translates to:
+  /// **'ERP'**
+  String get vendorSourceErp;
+
+  /// Vendor record created by AI extraction.
+  ///
+  /// In en, this message translates to:
+  /// **'AI'**
+  String get vendorSourceAi;
+
+  /// Vendor record entered by hand.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual'**
+  String get vendorSourceManual;
+
+  /// Vendor source the app does not recognise.
+  ///
+  /// In en, this message translates to:
+  /// **'Other source'**
+  String get vendorSourceOther;
+
+  /// Notification event type.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice assigned'**
+  String get notificationEventInvoiceAssigned;
+
+  /// No description provided for @notificationEventInvoiceApproved.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice approved'**
+  String get notificationEventInvoiceApproved;
+
+  /// No description provided for @notificationEventInvoiceRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice rejected'**
+  String get notificationEventInvoiceRejected;
+
+  /// No description provided for @notificationEventInvoicePaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice paid'**
+  String get notificationEventInvoicePaid;
+
+  /// No description provided for @notificationEventContractRenewalDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Contract renewal due'**
+  String get notificationEventContractRenewalDue;
+
+  /// No description provided for @notificationEventChatMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'New message'**
+  String get notificationEventChatMessage;
+
+  /// An event type this app version does not know.
+  ///
+  /// In en, this message translates to:
+  /// **'Notification'**
+  String get notificationEventOther;
+
+  /// Announced first on an unread notification row.
+  ///
+  /// In en, this message translates to:
+  /// **'Unread'**
+  String get notificationUnread;
+
+  /// Notification age under a minute.
+  ///
+  /// In en, this message translates to:
+  /// **'just now'**
+  String get relativeTimeJustNow;
+
+  /// Notification age in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} minute ago} other {{count} minutes ago}}'**
+  String relativeTimeMinutesAgo(int count);
+
+  /// Notification age in hours.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} hour ago} other {{count} hours ago}}'**
+  String relativeTimeHoursAgo(int count);
+
+  /// Notification age in days (under a week).
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} day ago} other {{count} days ago}}'**
+  String relativeTimeDaysAgo(int count);
+
+  /// Bell button announcement carrying the live unread count.
+  ///
+  /// In en, this message translates to:
+  /// **'Notifications, {count} unread'**
+  String notificationBellUnread(int count);
+
+  /// App-bar action that opens the cash-flow forecast.
+  ///
+  /// In en, this message translates to:
+  /// **'Cash flow forecast'**
+  String get cashFlowButtonLabel;
+
+  /// Row announcement prefix in multi-select mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected'**
+  String get listRowSelected;
+
+  /// No description provided for @listRowNotSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Not selected'**
+  String get listRowNotSelected;
+
+  /// Row announcement fragment naming an invoice number.
+  ///
+  /// In en, this message translates to:
+  /// **'invoice {number}'**
+  String listRowInvoiceNumber(String number);
+
+  /// Row announcement fragment: due date not yet passed.
+  ///
+  /// In en, this message translates to:
+  /// **'due {date}'**
+  String listRowDue(String date);
+
+  /// Row announcement fragment: due date already passed.
+  ///
+  /// In en, this message translates to:
+  /// **'past due {date}'**
+  String listRowPastDue(String date);
+
+  /// Exception row announcement fragment, e.g. 'Error severity'.
+  ///
+  /// In en, this message translates to:
+  /// **'{severity} severity'**
+  String listRowSeverity(String severity);
+
+  /// Exception row flag: past its SLA.
+  ///
+  /// In en, this message translates to:
+  /// **'Overdue'**
+  String get listRowOverdue;
+
+  /// Contract row announcement fragment.
+  ///
+  /// In en, this message translates to:
+  /// **'contract {number}'**
+  String listRowContractNumber(String number);
+
+  /// Contract row announcement fragment: end date.
+  ///
+  /// In en, this message translates to:
+  /// **'ends {date}'**
+  String listRowEnds(String date);
+
+  /// Vendor row announcement fragment.
+  ///
+  /// In en, this message translates to:
+  /// **'code {code}'**
+  String listRowVendorCode(String code);
+
+  /// Vendor row announcement fragment: where the record came from.
+  ///
+  /// In en, this message translates to:
+  /// **'source {source}'**
+  String listRowVendorSource(String source);
+
+  /// Vendor row announcement: how many invoices it has.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} invoice} other {{count} invoices}}'**
+  String listRowInvoiceCount(int count);
+
+  /// Compact invoice count shown on a vendor row.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} inv} other {{count} inv}}'**
+  String listRowInvoiceCountShort(int count);
 }
 
 class _AppLocalizationsDelegate

@@ -4819,4 +4819,233 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get invoicesFilteredEmpty =>
       'Aucune facture ne correspond à ces filtres';
+
+  @override
+  String statusPillAnnounce(String label) {
+    return 'Statut : $label';
+  }
+
+  @override
+  String get vendorStatusActive => 'Actif';
+
+  @override
+  String get vendorStatusUnverified => 'Non vérifié';
+
+  @override
+  String get vendorStatusInactive => 'Inactif';
+
+  @override
+  String get vendorStatusRejected => 'Rejeté';
+
+  @override
+  String get contractStatusDraft => 'Brouillon';
+
+  @override
+  String get contractStatusActive => 'Actif';
+
+  @override
+  String get contractStatusExpired => 'Expiré';
+
+  @override
+  String get contractStatusTerminated => 'Résilié';
+
+  @override
+  String get contractStatusCancelled => 'Annulé';
+
+  @override
+  String get contractTypePurchase => 'Achat';
+
+  @override
+  String get contractTypeService => 'Service';
+
+  @override
+  String get contractTypeSubscription => 'Abonnement';
+
+  @override
+  String get contractTypeLease => 'Location';
+
+  @override
+  String get contractTypeSla => 'SLA';
+
+  @override
+  String get contractTypeMsa => 'Contrat-cadre';
+
+  @override
+  String get contractTypeSow => 'Énoncé des travaux';
+
+  @override
+  String get contractTypeOther => 'Autre';
+
+  @override
+  String get exceptionStatusOpen => 'Ouverte';
+
+  @override
+  String get exceptionStatusEscalated => 'Escaladée';
+
+  @override
+  String get exceptionStatusResolved => 'Résolue';
+
+  @override
+  String get exceptionStatusDismissed => 'Écartée';
+
+  @override
+  String get exceptionSeverityError => 'Erreur';
+
+  @override
+  String get exceptionSeverityWarning => 'Avertissement';
+
+  @override
+  String get exceptionSeverityInfo => 'Info';
+
+  @override
+  String get vendorSourceErp => 'ERP';
+
+  @override
+  String get vendorSourceAi => 'IA';
+
+  @override
+  String get vendorSourceManual => 'Manuel';
+
+  @override
+  String get vendorSourceOther => 'Autre source';
+
+  @override
+  String get notificationEventInvoiceAssigned => 'Facture attribuée';
+
+  @override
+  String get notificationEventInvoiceApproved => 'Facture approuvée';
+
+  @override
+  String get notificationEventInvoiceRejected => 'Facture rejetée';
+
+  @override
+  String get notificationEventInvoicePaid => 'Facture payée';
+
+  @override
+  String get notificationEventContractRenewalDue =>
+      'Renouvellement de contrat à prévoir';
+
+  @override
+  String get notificationEventChatMessage => 'Nouveau message';
+
+  @override
+  String get notificationEventOther => 'Notification';
+
+  @override
+  String get notificationUnread => 'Non lue';
+
+  @override
+  String get relativeTimeJustNow => 'à l\'instant';
+
+  @override
+  String relativeTimeMinutesAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'il y a $count minutes',
+      one: 'il y a $count minute',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String relativeTimeHoursAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'il y a $count heures',
+      one: 'il y a $count heure',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String relativeTimeDaysAgo(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'il y a $count jours',
+      one: 'il y a $count jour',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String notificationBellUnread(int count) {
+    return 'Notifications, $count non lues';
+  }
+
+  @override
+  String get cashFlowButtonLabel => 'Prévision de trésorerie';
+
+  @override
+  String get listRowSelected => 'Sélectionné';
+
+  @override
+  String get listRowNotSelected => 'Non sélectionné';
+
+  @override
+  String listRowInvoiceNumber(String number) {
+    return 'facture $number';
+  }
+
+  @override
+  String listRowDue(String date) {
+    return 'échéance le $date';
+  }
+
+  @override
+  String listRowPastDue(String date) {
+    return 'en retard depuis le $date';
+  }
+
+  @override
+  String listRowSeverity(String severity) {
+    return 'gravité $severity';
+  }
+
+  @override
+  String get listRowOverdue => 'En retard';
+
+  @override
+  String listRowContractNumber(String number) {
+    return 'contrat $number';
+  }
+
+  @override
+  String listRowEnds(String date) {
+    return 'prend fin le $date';
+  }
+
+  @override
+  String listRowVendorCode(String code) {
+    return 'code $code';
+  }
+
+  @override
+  String listRowVendorSource(String source) {
+    return 'source $source';
+  }
+
+  @override
+  String listRowInvoiceCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count factures',
+      one: '$count facture',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String listRowInvoiceCountShort(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count fact.',
+      one: '$count fact.',
+    );
+    return '$_temp0';
+  }
 }
