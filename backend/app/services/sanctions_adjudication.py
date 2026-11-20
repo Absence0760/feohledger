@@ -13,10 +13,11 @@ is compared to it by :func:`screen_fingerprint`:
   lifts the screening hold only while the stored screen is covered.
 
 A different or new hit has a different fingerprint and holds again, and so does
-the same hit on different screened inputs: every screen records a hash of what
-it sent the provider (:func:`screened_inputs_hash`) and the fingerprint
-includes it, so a name, tax-id, bank-country or owner edit, or any applied bank
-change, owes a fresh judgement. The sticky ``payments_blocked`` flag a
+the same hit on different screened inputs: every stored screen (and a
+pre-payment screen that tests a cover) records a hash of what it sent the
+provider (:func:`screened_inputs_hash`) and the fingerprint includes it, so a
+name, tax-id, bank-country or owner edit, or any applied bank change, owes a
+fresh judgement. The sticky ``payments_blocked`` flag a
 ``match`` set is NOT lifted here: it is ``vendor.block``'s to lift
 (``POST /api/vendors/{id}/unblock``), which refuses the adjudicator
 (:func:`unblock_refusal`), so clearing a ``match`` takes two people.
@@ -200,7 +201,9 @@ async def covering_adjudication(
     ``screening_adjudication_id``): the live pre-payment screen honours only
     the adjudication the stored screen is shown under, never an older active
     row the queue does not lead with."""
-    if result not in ADJUDICABLE_RESULTS:
+    # `result` is provider data: a non-string (dict, list, None) is never
+    # adjudicable, and testing it against the frozenset would raise.
+    if not isinstance(result, str) or result not in ADJUDICABLE_RESULTS:
         return None
     if pointer_only and pointer is None:
         return None
@@ -212,7 +215,21 @@ async def covering_adjudication(
     )
     if pointer_only:
         query = query.where(SanctionsAdjudication.id == pointer)
-    return (await db.execute(query)).scalar_one_or_none()
+    adj = (await db.execute(query)).scalar_one_or_none()
+    # Re-check the row in Python before it can lift a refusal: only a real,
+    # unrevoked adjudication of this vendor's exact result covers it. Anything
+    # else (no row, or a row that does not say what the query asked) is no
+    # cover, and the match / review stands.
+    if (
+        not isinstance(adj, SanctionsAdjudication)
+        or adj.revoked_at is not None
+        or adj.vendor_id != vendor_id
+        or adj.provider != provider
+        or adj.fingerprint != fingerprint
+        or (pointer_only and adj.id != pointer)
+    ):
+        return None
+    return adj
 
 
 async def latest_stored_screen(db: AsyncSession, vendor_id: uuid.UUID) -> SanctionsCheck | None:

@@ -157,7 +157,7 @@ def _mock_db(*, run, payments, invoice_by_id, completing_payment_ids=None):
             if getattr(inv, "vendor_id", None):
                 vendor_status_res = MagicMock()
                 vendor_status_res.all = MagicMock(
-                    return_value=[(inv.vendor_id, "active", False, "clear")]
+                    return_value=[(inv.vendor_id, "active", False, "clear", None)]
                 )
                 per_pay_results.append(vendor_status_res)
             card_claim_res = MagicMock()
