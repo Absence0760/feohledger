@@ -92,7 +92,7 @@ async def _plain_unique(engine, table: str) -> list[str]:
                 await conn.execute(
                     text(
                         "SELECT conname FROM pg_constraint "
-                        "WHERE conrelid = CAST(:t AS regclass) AND contype = 'u'"
+                        "WHERE conrelid = to_regclass(:t) AND contype = 'u'"
                     ),
                     {"t": table},
                 )

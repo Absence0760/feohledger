@@ -70,6 +70,16 @@ NORMALIZED = "lower(btrim(email, E' \\t\\n\\r\\f\\x0B'))"
 #: The index each table ends with. Must match the models' ``__table_args__``.
 INDEXES = {"users": "uq_users_email_lower", "vendor_users": "uq_vendor_users_email_lower"}
 
+#: Spelled out, not interpolated, so ``tests/test_migration_model_index_parity``
+#: scans them and holds the models to declaring both.
+CREATE_INDEX = {
+    "users": "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_lower ON users (lower(email))",
+    "vendor_users": (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_vendor_users_email_lower "
+        "ON vendor_users (lower(email))"
+    ),
+}
+
 
 class EmailCaseCollision(RuntimeError):
     """Two or more rows normalize to one address; an operator must resolve them."""
@@ -128,7 +138,7 @@ def _plain_unique_on_email(table: str) -> tuple[list[str], list[str]]:
             text(
                 "SELECT c.conname FROM pg_constraint c "
                 "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1] "
-                "WHERE c.conrelid = CAST(:t AS regclass) AND c.contype = 'u' "
+                "WHERE c.conrelid = to_regclass(:t) AND c.contype = 'u' "
                 "AND cardinality(c.conkey) = 1 AND a.attname = 'email'"
             ),
             {"t": table},
@@ -140,7 +150,7 @@ def _plain_unique_on_email(table: str) -> tuple[list[str], list[str]]:
                 "SELECT i.relname FROM pg_index x "
                 "JOIN pg_class i ON i.oid = x.indexrelid "
                 "JOIN pg_attribute a ON a.attrelid = x.indrelid AND a.attnum = x.indkey[0] "
-                "WHERE x.indrelid = CAST(:t AS regclass) AND x.indisunique "
+                "WHERE x.indrelid = to_regclass(:t) AND x.indisunique "
                 "AND x.indnatts = 1 AND x.indexprs IS NULL AND x.indpred IS NULL "
                 "AND a.attname = 'email' "
                 "AND NOT EXISTS (SELECT 1 FROM pg_constraint c WHERE c.conindid = x.indexrelid)"
@@ -163,7 +173,7 @@ def upgrade() -> None:
             op.execute(f'ALTER TABLE {table} DROP CONSTRAINT IF EXISTS "{name}"')
         for name in indexes:
             op.execute(f'DROP INDEX IF EXISTS "{name}"')
-        op.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS {INDEXES[table]} ON {table} (lower(email))")
+        op.execute(CREATE_INDEX[table])
 
 
 def downgrade() -> None:
