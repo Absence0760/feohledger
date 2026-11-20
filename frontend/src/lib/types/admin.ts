@@ -30,6 +30,8 @@ export const PERM_PAYMENT_RECORD_EXTERNAL = 'payment.record_external';
 export const PERM_VENDOR_BANK_CHANGE_APPROVE = 'vendor.bank_change.approve';
 export const PERM_VENDOR_BLOCK = 'vendor.block';
 export const PERM_VENDOR_MANAGE = 'vendor.manage';
+/** Record a sanctions screen result as a false positive (decisions §477). */
+export const PERM_VENDOR_SANCTIONS_ADJUDICATE = 'vendor.sanctions.adjudicate';
 export const PERM_USER_MANAGE = 'user.manage';
 
 export interface AdminUser {

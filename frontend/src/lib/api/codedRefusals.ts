@@ -454,6 +454,12 @@ const BUILDERS: Record<string, Builder> = {
 	// `api/vendors.py::change_request_approve_refusal` — the queue's verdict
 	vendor_change_self_requested: fixed('refusal.vendorChangeSelfRequested'),
 	vendor_change_self_provisioned: fixed('refusal.vendorChangeSelfProvisioned'),
+	// `services/sanctions_adjudication.py` — the screening queue's verdicts (decisions §477)
+	sanctions_adjudication_not_flagged: fixed('refusal.sanctionsAdjudicationNotFlagged'),
+	sanctions_adjudication_already_cleared: fixed('refusal.sanctionsAdjudicationAlreadyCleared'),
+	sanctions_adjudication_no_screen: fixed('refusal.sanctionsAdjudicationNoScreen'),
+	sanctions_adjudication_segregation: fixed('refusal.sanctionsAdjudicationSegregation'),
+	sanctions_adjudication_not_active: fixed('refusal.sanctionsAdjudicationNotActive'),
 	// `services/review.py::_enforce_approval_thresholds`
 	approval_max_amount_exceeded: (p, t) => approvalGate(p, t, 'refusal.approvalMaxExceeded', null),
 	approval_max_amount_misconfigured: fixed('refusal.approvalMaxMisconfigured'),

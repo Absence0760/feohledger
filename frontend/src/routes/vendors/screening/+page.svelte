@@ -16,8 +16,11 @@
 		getVendorCounts,
 		blockVendor,
 		unblockVendor,
-		screenVendor
+		screenVendor,
+		adjudicateSanctionsFalsePositive,
+		revokeSanctionsAdjudication
 	} from '#lib/api/vendors.ts';
+	import { isAllowed, isOffered, refusalText } from '#lib/api/actionVerdicts.ts';
 	import type { ScreeningReviewItem, SanctionsCheck } from '#lib/types/vendor.ts';
 	import {
 		screeningStatusLabelKey,
@@ -157,7 +160,13 @@
 	// Keyed to the vendor the action was fired for, not a bare flag. Opening a
 	// second vendor while a block is in flight used to leave ITS buttons
 	// disabled, and the spinner label sat on a row the action never touched.
-	let busy = $state<{ vendorId: string; action: 'block' | 'rescreen' } | null>(null);
+	let busy = $state<{
+		vendorId: string;
+		action: 'block' | 'rescreen' | 'adjudicate';
+	} | null>(null);
+	// The reason for a false-positive adjudication or its revocation (required
+	// by the endpoint; decisions §477).
+	let adjudicationReason = $state('');
 	let blockReason = $state('');
 	// Unblock is armed two-click: it releases payments to a vendor a screen or
 	// a reviewer stopped, on the sanctions path, so one stray click must not do
@@ -349,6 +358,7 @@
 
 	function openDetail(item: ScreeningReviewItem) {
 		selected = item;
+		adjudicationReason = '';
 		blockReason = '';
 		history = [];
 		historyVendorId = null;
@@ -385,6 +395,7 @@
 
 	function closeDetail() {
 		selected = null;
+		adjudicationReason = '';
 		unblockArmedFor = null;
 		history = [];
 		historyVendorId = null;
@@ -467,6 +478,55 @@
 		} finally {
 			if (busy?.vendorId === target.vendor_id) busy = null;
 			if (unblockArmedFor === target.vendor_id) unblockArmedFor = null;
+		}
+	}
+
+	// The adjudicate / revoke responses carry no verdicts, so the row's are
+	// dropped (offering nothing) until the queue is read again — never carried
+	// over a change to what they judged (ui-patterns § Whether to offer an
+	// action).
+	async function applyAdjudication(
+		vendorId: string,
+		adjudication: ScreeningReviewItem['adjudication']
+	) {
+		const patch = (it: ScreeningReviewItem): ScreeningReviewItem =>
+			it.vendor_id === vendorId
+				? {
+						...it,
+						adjudication,
+						adjudicate_refusal: undefined,
+						revoke_adjudication_refusal: undefined
+					}
+				: it;
+		items = items.map(patch);
+		if (selected?.vendor_id === vendorId) selected = patch(selected);
+		await loadQueue();
+		const fresh = items.find((it) => it.vendor_id === vendorId);
+		if (fresh && selected?.vendor_id === vendorId) selected = fresh;
+	}
+
+	async function submitAdjudication(kind: 'adjudicate' | 'revoke') {
+		if (!selected) return;
+		const target = selected;
+		const reason = adjudicationReason.trim();
+		if (reason.length < 3) return;
+		busy = { vendorId: target.vendor_id, action: 'adjudicate' };
+		try {
+			if (kind === 'adjudicate') {
+				const adjudication = await adjudicateSanctionsFalsePositive(target.vendor_id, reason);
+				toast(m('vendors.screening.queue.adjudication.adjudicated'), 'success');
+				if (selected?.vendor_id === target.vendor_id) adjudicationReason = '';
+				await applyAdjudication(target.vendor_id, adjudication);
+			} else {
+				await revokeSanctionsAdjudication(target.vendor_id, reason);
+				toast(m('vendors.screening.queue.adjudication.revoked'), 'success');
+				if (selected?.vendor_id === target.vendor_id) adjudicationReason = '';
+				await applyAdjudication(target.vendor_id, null);
+			}
+		} catch (err) {
+			toast(errorMessage(err, m('vendors.screening.queue.adjudication.failed')), 'error');
+		} finally {
+			if (busy?.vendorId === target.vendor_id) busy = null;
 		}
 	}
 
@@ -725,6 +785,80 @@
 			</div>
 		{:else}
 			<p class="no-perm-note">{m('vendors.screening.queue.noPermissionNote')}</p>
+		{/if}
+
+		<!-- False-positive adjudication (decisions §477). Offered from the
+		     server's verdicts only (`adjudicate_refusal` /
+		     `revoke_adjudication_refusal`): `role_not_permitted` or no verdict
+		     yet hides the control; any other refusal disables it beside its
+		     reason. -->
+		{#if selected.adjudication || isOffered(selected.adjudicate_refusal)}
+			<section class="adjudication" data-testid="screening-adjudication" data-vendor-id={selected.vendor_id}>
+				<h3>{m('vendors.screening.queue.adjudication.title')}</h3>
+				{#if selected.adjudication}
+					<p data-testid="screening-adjudication-cleared">
+						{m('vendors.screening.queue.adjudication.cleared', {
+							date: formatDate(selected.adjudication.adjudicated_at)
+						})}
+					</p>
+					<p class="muted">{selected.adjudication.reason}</p>
+					{#if isOffered(selected.revoke_adjudication_refusal)}
+						<label class="adjudication-reason">
+							<span>{m('vendors.screening.queue.adjudication.revokeReasonLabel')}</span>
+							<textarea
+								rows="2"
+								maxlength="2000"
+								bind:value={adjudicationReason}
+								disabled={!isAllowed(selected.revoke_adjudication_refusal)}
+							></textarea>
+						</label>
+						<button
+							class="btn-secondary"
+							data-testid="screening-adjudication-revoke"
+							onclick={() => submitAdjudication('revoke')}
+							disabled={!isAllowed(selected.revoke_adjudication_refusal) ||
+								selectedBusy !== null ||
+								adjudicationReason.trim().length < 3}
+						>
+							{selectedBusy === 'adjudicate'
+								? m('vendors.screening.queue.action.working')
+								: m('vendors.screening.queue.adjudication.revoke')}
+						</button>
+						{#if !isAllowed(selected.revoke_adjudication_refusal)}
+							<p class="muted">{refusalText(selected.revoke_adjudication_refusal ?? null, m)}</p>
+						{/if}
+					{/if}
+				{:else}
+					<p class="muted">{m('vendors.screening.queue.adjudication.intro')}</p>
+					<label class="adjudication-reason">
+						<span>{m('vendors.screening.queue.adjudication.reasonLabel')}</span>
+						<textarea
+							rows="2"
+							maxlength="2000"
+							placeholder={m('vendors.screening.queue.adjudication.reasonPlaceholder')}
+							bind:value={adjudicationReason}
+							disabled={!isAllowed(selected.adjudicate_refusal)}
+						></textarea>
+					</label>
+					<button
+						class="btn-primary"
+						data-testid="screening-adjudication-submit"
+						onclick={() => submitAdjudication('adjudicate')}
+						disabled={!isAllowed(selected.adjudicate_refusal) ||
+							selectedBusy !== null ||
+							adjudicationReason.trim().length < 3}
+					>
+						{selectedBusy === 'adjudicate'
+							? m('vendors.screening.queue.action.working')
+							: m('vendors.screening.queue.adjudication.adjudicate')}
+					</button>
+					{#if !isAllowed(selected.adjudicate_refusal)}
+						<p class="muted" data-testid="screening-adjudication-refusal">
+							{refusalText(selected.adjudicate_refusal ?? null, m)}
+						</p>
+					{/if}
+				{/if}
+			</section>
 		{/if}
 
 		<h3>{m('vendors.screening.queue.history.title')}</h3>
