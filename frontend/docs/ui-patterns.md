@@ -974,7 +974,7 @@ agree (`tests/test_payment_action_verdicts.py`,
 `tests/test_queue_action_verdicts.py`, `tests/test_review_actions_parity.py`,
 `tests/test_payment_queue_blocked.py`, `tests/test_expense_action_verdicts.py`,
 `tests/test_offer_experiment_suggestion_verdicts.py`,
-`tests/test_procurement_action_verdicts.py`,
+`tests/test_procurement_action_verdicts.py`, `tests/test_sanctions_adjudication_verdicts.py`,
 `tests/test_vendor_erp_manual_link.py`).
 A new verdict ships with one.
 
