@@ -211,7 +211,9 @@ ERP_PRODUCER_MODULES = (
 #: findings for them (compliance hold reasons, settlement discrepancies).
 DIRECT_EXCEPTION_PRODUCER_MODULES = (
     "app/api/positive_pay.py",
-    "app/api/vendors.py",
+    # The payee-change flag, raised for an approved bank change (moved out of
+    # `api/vendors`) and for the void's re-payment.
+    "app/services/vendor_bank_change.py",
     "app/api/payments.py",
     "app/services/compliance.py",
     "app/services/sanctions_categories.py",

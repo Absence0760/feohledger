@@ -83,7 +83,7 @@ def build_invoice_context(invoice: Any) -> dict:
 
     Returns::
 
-        {"amount": Decimal, "currency": str, "vendor_id": str|None,
+        {"amount": Decimal, "currency": str|None, "vendor_id": str|None,
          "gl_account": str|None, "cost_center": str|None, "department": str|None}
 
     Money stays Decimal — never float. ``vendor_id`` is stringified so a UUID and

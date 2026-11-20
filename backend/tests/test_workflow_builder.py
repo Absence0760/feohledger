@@ -66,7 +66,8 @@ def test_build_invoice_context_decimal_from_string_not_float():
 def test_build_invoice_context_defaults():
     ctx = build_invoice_context({})
     assert ctx["amount"] == Decimal("0")
-    assert ctx["currency"] == "USD"
+    # No recorded currency stays None, never a borrowed USD (decisions §473).
+    assert ctx["currency"] is None
     assert ctx["vendor_id"] is None
 
 
