@@ -28,9 +28,8 @@
 # What these checks cannot see: whether the certificate is valid. Route 53
 # completes the TLS handshake but does not validate the certificate, so an
 # expired one still passes. The ACM certificate has its own expiry alarm below;
-# the Let's Encrypt certificates Caddy holds on the VM (api.<domain> since
-# docs/decisions.md §364, plus any vanity host) are a tracked follow-up
-# (docs/followups.md).
+# the Let's Encrypt certificate Caddy holds on the VM for api.<domain> (since
+# docs/decisions.md §364) is watched by the Synthetics canary in canary.tf.
 
 locals {
   # Three is the minimum Route 53 accepts. Price is per health check, not per

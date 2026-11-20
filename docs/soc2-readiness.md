@@ -98,7 +98,7 @@ Things an auditor expects to see *in code or config*, not just in a policy doc. 
 | **Centralized + WORM-compliant audit log shipping** | Done | `backend/app/services/audit_log_shipper.py` + `services/audit_shipping/` adapters — background loop ships tenant `audit_log` rows to CloudWatch Logs + S3 Object Lock. See `backend/docs/audit-log-shipping.md`. |
 | Centralized application logs (stderr) | Done in prod | ECS → CloudWatch Logs |
 | Alerting on 5xx + RBAC-denial spikes | Pending | CloudWatch Alarms or Datadog |
-| Uptime monitoring | Built, not yet applied | `infra/uptime.tf`: Route 53 HTTPS checks on the apex, a tenant host and `api./api/health` from three regions, alarming to SMS + email (`docs/decisions.md` §311). A public status page is still a vendor decision (`founder-runbooks/support-and-status.md`) |
+| Uptime monitoring | Built, not yet applied | `infra/uptime.tf`: Route 53 HTTPS checks on the apex, a tenant host and `api./api/health` from three regions, alarming to SMS + email (`docs/decisions.md` §311); `infra/canary.tf`: an hourly Synthetics canary validating the Let's Encrypt certificate Caddy serves on `api.`, paging under 14 days to expiry (built, not yet applied). A public status page is still a vendor decision (`founder-runbooks/support-and-status.md`) |
 
 ### Vulnerability + dependency management
 

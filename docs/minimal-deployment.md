@@ -72,6 +72,7 @@ when each piece graduates.
 | CloudFront additional metrics on the SPA distribution (feeds the 404 alarm; up to 8 metrics × $0.30) | ~$2.40 |
 | **Total** | **~$45–55** |
 | Plus external uptime checks (3 Route 53 HTTPS checks) and SMS paging (a toll-free number), `infra/uptime.tf` | ~$8–13 |
+| Plus the hourly certificate canary on `api.`'s Let's Encrypt certificate, `infra/canary.tf` | ~$1 |
 
 This is the stack `infra/` defines (`docs/decisions.md` §254). Both instances are
 burstable in unlimited credit mode, so sustained load adds surplus-CPU charges on

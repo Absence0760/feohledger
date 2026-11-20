@@ -268,6 +268,17 @@ variable "uptime_tenant_slug" {
   }
 }
 
+variable "certificate_canary_min_days" {
+  description = "The certificate canary (canary.tf) fails a run when the certificate Caddy serves on api.<domain> has fewer than this many days left. Caddy renews 30 days ahead, so 14 means renewal has been failing for over two weeks and still leaves two weeks to fix it."
+  type        = number
+  default     = 14
+
+  validation {
+    condition     = var.certificate_canary_min_days >= 1 && var.certificate_canary_min_days < 30 && floor(var.certificate_canary_min_days) == var.certificate_canary_min_days
+    error_message = "certificate_canary_min_days must be a whole number from 1 to 29: at 30 or more it would fail during Caddy's normal renewal window."
+  }
+}
+
 variable "frontend_on_cloudfront" {
   description = "Point the apex and the tenant wildcard at the SPA's CloudFront distribution (frontend.tf) instead of the VM. Leave false until a build has been published to the bucket and checked on the distribution's *.cloudfront.net name (issue #582 § Cut-over plan). Production has it true, and since docs/decisions.md §364 it must stay true: the VM's Caddy no longer serves the SPA, so false is an outage, not a rollback. api.<domain> stays on the VM either way."
   type        = bool

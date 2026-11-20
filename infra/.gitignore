@@ -9,6 +9,9 @@
 *.tfplan
 tfplan*
 
+# The certificate canary's zip, built by archive_file at plan time (canary.tf)
+.build/
+
 # Crash logs
 crash.log
 crash.*.log
