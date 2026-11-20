@@ -477,6 +477,17 @@ export interface OnboardingResponse extends OnboardingProgress {
 	organization_has_invoices: boolean;
 }
 
+/**
+ * One currency's share of the dashboard's `overdue_total` / `due_soon_total`:
+ * the FACE sum in `currency`, never converted. `currency` is `null` for
+ * invoices recording no code, rendered without a symbol.
+ */
+export interface DashboardDueByCurrency {
+	currency: string | null;
+	amount: MoneyAmount;
+	count: number;
+}
+
 export interface DashboardData {
 	total_invoices: number;
 	/**
@@ -564,6 +575,18 @@ export interface DashboardData {
 		due_date: string | null;
 		is_overdue: boolean;
 	}>;
+	/**
+	 * Open AP (approved and still owed, plus the in-review pipeline) past its
+	 * effective due date, counted over the whole book by the backend's
+	 * `services/open_ap_due` — never derived from `upcoming_payments`, which
+	 * stops at ten rows. The same set `GET /api/invoices?overdue=true` lists.
+	 */
+	overdue_count: number;
+	/** Per currency at FACE value, never summed across currencies. */
+	overdue_total: DashboardDueByCurrency[];
+	/** The same population, due today through seven days out. */
+	due_soon_count: number;
+	due_soon_total: DashboardDueByCurrency[];
 	/**
 	 * Early-payment discount capture — a three-way captured / missed / PENDING
 	 * fold with its own reporting currency and its own `unconverted_count`.

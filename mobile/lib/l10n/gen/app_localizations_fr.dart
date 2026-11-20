@@ -123,6 +123,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get dashboardOverdue => 'En retard';
 
   @override
+  String get dashboardOverdueOpen => 'Affiche les factures en retard';
+
+  @override
   String get dashboardApproved => 'Approuvées';
 
   @override
@@ -271,6 +274,9 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get invoicesFilterPaid => 'Payées';
+
+  @override
+  String get invoicesFilterOverdue => 'En retard';
 
   @override
   String get invoicesColInvoiceNumber => 'N° de facture';

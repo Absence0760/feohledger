@@ -122,6 +122,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get dashboardOverdue => 'Overdue';
 
   @override
+  String get dashboardOverdueOpen => 'Shows the overdue invoices';
+
+  @override
   String get dashboardApproved => 'Approved';
 
   @override
@@ -269,6 +272,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get invoicesFilterPaid => 'Paid';
+
+  @override
+  String get invoicesFilterOverdue => 'Overdue';
 
   @override
   String get invoicesColInvoiceNumber => 'Invoice #';
