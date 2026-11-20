@@ -167,17 +167,18 @@ def test_signup_complete_request_schema():
     assert body.token == "x" * 32
 
 
-def test_change_password_request_schema_enforces_minimum():
+def test_change_password_request_schema_bounds_length():
     from app.schemas.auth import ChangePasswordRequest
 
     ChangePasswordRequest(current_password="old", new_password="x" * 12)
 
-    # pydantic enforces Field(..., min_length=12) on new_password
+    # The schema bounds only the upper length; the minimum is the complexity
+    # validator's coded `password_too_short` refusal, not a pydantic error.
     import pytest as _pytest
     from pydantic import ValidationError
 
     with _pytest.raises(ValidationError):
-        ChangePasswordRequest(current_password="old", new_password="short")
+        ChangePasswordRequest(current_password="old", new_password="x" * 129)
 
 
 def test_token_response_exposes_must_change_password():

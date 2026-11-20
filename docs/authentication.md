@@ -976,6 +976,13 @@ a caller more than the step it failed at. `tests/test_no_exception_text_in_detai
 keeps the auth routers clean and ratchets the remaining sites elsewhere in
 `app/api` (a per-file count that may only shrink).
 
+The password request schemas (`ChangePasswordRequest`, `ResetPasswordRequest`,
+`UpdateProfileRequest`) carry only a `max_length`: a schema `min_length`
+answered a short password with pydantic's English error list before the
+handler ran, so `password_too_short` was unreachable on the employee routes.
+The length rule is `utils/passwords.MIN_LENGTH`, applied by
+`validate_password_complexity` on every route (`tests/test_password_security.py`).
+
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
 `api/auth._org_closes_password_sign_in`, which is `is_sso_only`: the function
