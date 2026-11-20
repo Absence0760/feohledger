@@ -121,7 +121,7 @@
 	const COLUMNS = $derived([
 		{ label: m('requisitions.col.requisitionNumber'), class: 'col-number' },
 		{ label: m('requisitions.col.title') },
-		{ label: m('requisitions.col.department') },
+		{ label: m('requisitions.col.department'), class: 'col-department' },
 		{ label: m('requisitions.col.neededBy'), class: 'col-date' },
 		{ label: m('requisitions.col.total'), class: 'right col-amount' },
 		{ label: m('requisitions.col.status'), class: 'col-status' },
@@ -597,8 +597,11 @@
 	   `<th>` from `columns`, so the selectors go through `:global` under a
 	   page-owned wrapper (the /gl-accounts pattern). */
 	.req-table { min-width: 0; }
-	.req-table :global(table) { min-width: 1180px; }
+	.req-table :global(table) { min-width: 1240px; }
 	.req-table :global(th.col-number) { width: 140px; }
+	/* "Departamento" (es, pt-BR) is a single word: it cannot wrap, so the
+	   column is sized to it rather than left to share the remainder. */
+	.req-table :global(th.col-department) { width: 150px; }
 	.req-table :global(th.col-date) { width: 120px; }
 	.req-table :global(th.col-amount) { width: 150px; }
 	.req-table :global(th.col-status) { width: 230px; }

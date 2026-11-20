@@ -114,6 +114,23 @@ Future<void> _pumpUntil(WidgetTester tester, Finder finder) async {
   }
 }
 
+/// Scrolls the horizontal status-chip row until [chip] is built and on
+/// screen. The row is a lazy ListView, so a chip past the window's right
+/// edge does not exist until the row scrolls to it.
+Future<void> _scrollChipRowTo(WidgetTester tester, Finder chip) async {
+  await tester.scrollUntilVisible(
+    chip,
+    150,
+    scrollable: find
+        .ancestor(
+          of: find.byType(FilterChip).first,
+          matching: find.byType(Scrollable),
+        )
+        .first,
+  );
+  await tester.pump();
+}
+
 void main() {
   final store = InvoiceStore.instance;
 
@@ -227,11 +244,11 @@ void main() {
     await tester.pumpWidget(_localized(const InvoicesScreen()));
     await _pumpUntil(tester, find.byType(InvoiceListTile));
 
-    // The chips are a horizontal scroll row; at the test window's width
-    // "Paid" sits past the right edge, so scroll to it as a user would.
+    // The chips are a lazy horizontal list; at the test window's width
+    // "Paid" sits past the right edge (and is not built), so scroll the row
+    // to it as a user would.
     final paid = find.widgetWithText(FilterChip, 'Paid');
-    await tester.ensureVisible(paid);
-    await tester.pump();
+    await _scrollChipRowTo(tester, paid);
     await tester.tap(paid);
     await _pumpUntil(tester, find.text('No invoices match these filters'));
 
@@ -317,7 +334,13 @@ void main() {
     expect(find.byType(SearchBar), findsOneWidget);
     expect(find.widgetWithText(FilterChip, 'All'), findsOneWidget);
     expect(find.widgetWithText(FilterChip, 'Pending'), findsOneWidget);
+    expect(find.widgetWithText(FilterChip, 'Overdue'), findsOneWidget);
+    // The row is a lazy horizontal list: the chips past the window's right
+    // edge are built only once it scrolls to them.
+    await _scrollChipRowTo(
+        tester, find.widgetWithText(FilterChip, 'Approved'));
     expect(find.widgetWithText(FilterChip, 'Approved'), findsOneWidget);
+    await _scrollChipRowTo(tester, find.widgetWithText(FilterChip, 'Paid'));
     expect(find.widgetWithText(FilterChip, 'Paid'), findsOneWidget);
     expect(find.byIcon(Icons.camera_alt), findsOneWidget);
     // Advanced search action is present.
