@@ -103,6 +103,8 @@ export const messages = {
 	'toast.region': "Mensajes de estado",
 	'toast.dismiss': "Descartar",
 	'common.loadFailed': 'No se pudo cargar esta lista. Actualiza para volver a intentarlo.',
+	'common.empty': 'No hay elementos.',
+	'common.emptyFiltered': 'Nada coincide con estos filtros.',
 	'common.amountInvalid': 'Introduce el importe como un número simple, p. ej. 1200 o 1200.50',
 	'common.reportingCurrencyUnresolved': 'moneda de informe',
 	'common.currencyCode.required': 'Indique la moneda con un código ISO 4217 de tres letras, como USD o PLN.',
@@ -923,7 +925,6 @@ export const messages = {
 	'payments.cards.projectedAnnual': 'Proyección anual',
 	'payments.cards.atRunRate': 'al ritmo actual',
 	'payments.cards.activeCards': 'Tarjetas activas',
-	'payments.cards.loading': 'Cargando tarjetas…',
 	'payments.cards.empty': 'Aún no se han emitido tarjetas virtuales.',
 	'payments.cards.errored': 'No se pudieron cargar las tarjetas virtuales.',
 	'payments.cards.revealFailed': "No se pudieron mostrar los datos de la tarjeta.",
@@ -951,7 +952,6 @@ export const messages = {
 	'payments.rebates.subtitle':
 		'Reembolsos del procesador obtenidos con sus tarjetas virtuales. Avanzar uno registra lo que el procesador ya hizo en su propio extracto: no solicita ningún pago ni mueve dinero.',
 	'payments.rebates.cardsTitle': 'Tarjetas',
-	'payments.rebates.loading': 'Cargando reembolsos…',
 	'payments.rebates.empty': 'Aún no hay reembolsos registrados.',
 	'payments.rebates.errored': 'No se pudieron cargar los reembolsos.',
 	'payments.rebates.col.period': 'Periodo',
@@ -1512,7 +1512,6 @@ export const messages = {
 	'exceptions.agents.run.refreshing': 'Actualizando…',
 	'exceptions.agents.run.note':
 		'Ejecutar un agente evalúa una excepción y, cuando su confianza supera el umbral de autonomía de esta organización, aplica la corrección por la misma vía auditada que usaría una persona. Por debajo de ese umbral la escala a una persona. En cualquier caso registra una decisión en el registro de abajo.',
-	'exceptions.agents.run.empty.loading': 'Cargando las excepciones abiertas…',
 	'exceptions.agents.run.empty.errored':
 		'No se pudieron cargar las excepciones abiertas. Pruebe «Actualizar».',
 	'exceptions.agents.run.empty.none':
@@ -2118,7 +2117,6 @@ export const messages = {
 	'expenses.kpi.pending': 'Pendiente',
 	'expenses.search.placeholder': 'Buscar gastos...',
 	'expenses.search.aria': 'Buscar gastos',
-	'expenses.loading': 'Cargando…',
 	'expenses.empty': 'Ningún gasto coincide con sus filtros.',
 	'expenses.empty.errored': 'No se pudieron cargar los gastos. Inténtalo de nuevo.',
 	'expenses.col.date': 'Fecha',
@@ -4253,7 +4251,6 @@ export const messages = {
 	'discounts.status.expired': 'Caducado',
 	'discounts.status.offered': 'Ofrecido',
 	'discounts.table.empty': 'Ninguna oferta de descuento coincide con este filtro.',
-	'discounts.table.loading': 'Cargando ofertas…',
 	'discounts.title': 'Descuentos',
 	'discounts.toast.acceptFailed': 'No se pudo aceptar la oferta',
 	'discounts.toast.accepted': 'Oferta de descuento aceptada',

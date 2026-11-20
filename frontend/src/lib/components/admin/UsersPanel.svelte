@@ -378,11 +378,9 @@
      retry, on the page an admin opens precisely when access is misbehaving. -->
 <DataTable
 	isEmpty={adminStore.users.length === 0}
-	empty={adminStore.loading
-		? m('common.loading')
-		: adminStore.errored
-			? m('common.loadFailed')
-			: m('admin.users.empty')}
+	loading={adminStore.loading}
+	errored={adminStore.errored}
+	empty={m('admin.users.empty')}
 	colspan={7}
 >
 	{#snippet header()}

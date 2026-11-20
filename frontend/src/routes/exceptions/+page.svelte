@@ -1062,13 +1062,6 @@
 	// finding none read as an all-clear on the whole queue. Only the
 	// unfiltered Open view has earned that sentence — a type or severity chip,
 	// or a search term, falls back to the neutral "No exceptions found."
-	let emptyMessage = $derived(
-		loading
-			? m('common.loading')
-			: statusFilter === 'open' && !typeFilter && severityFilter === 'all' && !appliedSearch
-					? m('exceptions.empty.open')
-					: m('exceptions.empty.other')
-	);
 </script>
 
 <PageHeader title={m('exceptions.title')}>
@@ -1177,7 +1170,16 @@
 		/>
 	{:else}
 	<div class="exc-table">
-	<DataTable columns={COLUMNS} isEmpty={exceptions.length === 0} empty={emptyMessage} colspan={11} fixed>
+	<DataTable
+		columns={COLUMNS}
+		isEmpty={exceptions.length === 0}
+		{loading}
+		filtered={!(statusFilter === 'open' && !typeFilter && severityFilter === 'all' && !appliedSearch)}
+		emptyFiltered={m('exceptions.empty.other')}
+		empty={m('exceptions.empty.open')}
+		colspan={11}
+		fixed
+	>
 		{#snippet header()}
 			<tr>
 				<!-- This page passes its own `header` snippet, so it owns `scope`

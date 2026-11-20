@@ -645,9 +645,6 @@
 	// matched nothing. Only the unfiltered case points at the CSV import — "import
 	// a CSV" is a non-sequitur when the filter is just narrow.
 	let noActiveFilters = $derived(!search.trim() && statusFilter === 'all');
-	let emptyMessage = $derived(
-		loading ? m('common.loading') : noActiveFilters ? m('vendors.empty.fresh') : m('vendors.empty')
-	);
 	// A brand-new tenant with zero vendors and no active filter gets the rich
 	// onboarding CTA (mirrors the dashboard / `/invoices` EmptyState) instead of
 	// the bare "no vendors" cell — gated on `loaded` (not mid-load) and no error.
@@ -769,7 +766,15 @@
 		/>
 	{:else}
 	<div class="vendor-table">
-	<DataTable isEmpty={vendors.length === 0} empty={emptyMessage} colspan={10} fixed>
+	<DataTable
+		isEmpty={vendors.length === 0}
+		{loading}
+		filtered={!noActiveFilters}
+		emptyFiltered={m('vendors.empty')}
+		empty={m('vendors.empty.fresh')}
+		colspan={10}
+		fixed
+	>
 		{#snippet header()}
 			<tr>
 				<th class="checkbox-col">

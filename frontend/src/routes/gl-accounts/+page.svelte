@@ -126,13 +126,6 @@
 	// loading, a filter that matched nothing, a genuinely empty chart (the
 	// EmptyState block below), and a failed load — which replaces the table
 	// with `LoadError` and its Retry rather than sitting in an empty cell.
-	const emptyMessage = $derived(
-		loading
-			? m('common.loading')
-			: filtersActive
-				? m('glAccounts.empty.filtered')
-				: m('glAccounts.empty')
-	);
 
 	const showOnboarding = $derived(
 		loaded && !errored && accounts.length === 0 && !filtersActive
@@ -215,7 +208,7 @@
 			if (!fetchSequence.isCurrentRequest(token)) return;
 			errored = true;
 			// **Clear the rows.** `errored` only reaches the reader through
-			// `emptyMessage`, which `DataTable` renders on `isEmpty` alone — so
+			// the table's empty row, which `DataTable` renders on `isEmpty` alone — so
 			// a SECOND failed load (a chip click or a search after one good
 			// fetch) would otherwise leave the previous filter's rows on screen
 			// with nothing but a toast that fades, and the count footer below
@@ -424,7 +417,15 @@
 		<LoadError message={m('glAccounts.empty.errored')} onretry={load} testId="gl-accounts-error" />
 	{:else}
 		<div class="gl-table">
-		<DataTable fixed columns={COLUMNS} isEmpty={accounts.length === 0} empty={emptyMessage}>
+		<DataTable
+			fixed
+			columns={COLUMNS}
+			isEmpty={accounts.length === 0}
+			{loading}
+			filtered={filtersActive}
+			emptyFiltered={m('glAccounts.empty.filtered')}
+			empty={m('glAccounts.empty')}
+		>
 			{#snippet body()}
 				{#each accounts as acct (acct.id)}
 					<!-- `.row-muted` (not opacity) de-emphasises a retired account —

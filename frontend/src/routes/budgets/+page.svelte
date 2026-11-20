@@ -332,7 +332,8 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={visibleBudgets.length === 0}
-		empty={loading ? m('common.loading') : m('budgets.empty')}
+		{loading}
+		empty={m('budgets.empty')}
 	>
 		{#snippet body()}
 			{#each visibleBudgets as b (b.id)}

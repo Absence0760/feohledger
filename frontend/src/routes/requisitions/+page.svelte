@@ -140,7 +140,6 @@
 	// it; the empty state had to say so. Now the server searches the whole
 	// filtered set, so the plain empty message is true again and `total` /
 	// Load more describe the MATCHES rather than the unfiltered list.
-	const emptyMessage = $derived(loading ? m('common.loading') : m('requisitions.empty'));
 
 	// KPIs from `GET /api/requisitions/summary` — the WHOLE filtered set, over
 	// the SAME status/search filters. They used to reduce over `requisitions`,
@@ -481,7 +480,8 @@
 	<DataTable
 		columns={COLUMNS}
 		isEmpty={requisitions.length === 0}
-		empty={emptyMessage}
+		{loading}
+		empty={m('requisitions.empty')}
 	>
 		{#snippet body()}
 			{#each requisitions as r (r.id)}

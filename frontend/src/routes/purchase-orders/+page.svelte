@@ -382,7 +382,8 @@
 		fixed
 		columns={COLUMNS}
 		isEmpty={pos.length === 0}
-		empty={loading ? m('common.loading') : m('purchaseOrders.empty')}
+		{loading}
+		empty={m('purchaseOrders.empty')}
 	>
 		{#snippet body()}
 			{#each pos as po (po.id)}

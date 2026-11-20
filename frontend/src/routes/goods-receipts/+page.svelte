@@ -616,7 +616,8 @@
 			<DataTable
 				columns={COLUMNS}
 				isEmpty={grs.length === 0}
-				empty={loading ? m('common.loading') : m('goodsReceipts.empty')}
+				{loading}
+				empty={m('goodsReceipts.empty')}
 				colspan={6}
 			>
 				{#snippet body()}
@@ -676,7 +677,8 @@
 			<DataTable
 				columns={INSPECTION_COLUMNS}
 				isEmpty={inspections.length === 0}
-				empty={inspectionsLoading ? m('common.loading') : m('goodsReceipts.inspections.empty')}
+				loading={inspectionsLoading}
+				empty={m('goodsReceipts.inspections.empty')}
 				colspan={7}
 			>
 				{#snippet body()}

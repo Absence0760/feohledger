@@ -692,7 +692,8 @@
 			<DataTable
 				columns={OFFER_COLUMNS}
 				isEmpty={!loading && offers.length === 0}
-				empty={loading ? m('discounts.table.loading') : m('discounts.table.empty')}
+				{loading}
+				empty={m('discounts.table.empty')}
 				colspan={8}
 			>
 				{#snippet body()}

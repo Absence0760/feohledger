@@ -1343,13 +1343,6 @@
 	// first visit blamed filters nobody had set. A failed load renders
 	// `<LoadError>` instead of the table (see the template).
 	let historyFiltered = $derived(search.trim() !== '' || activeStatus !== 'all');
-	let historyEmptyMessage = $derived(
-		paymentStore.loading
-			? m('common.loading')
-			: historyFiltered
-				? m('payments.history.empty')
-				: m('payments.history.empty.fresh')
-	);
 
 	function retryHistory() {
 		paymentStore.fetch(buildParams()).catch(() => {}); // noqa: raw-fetch-in-component — store method; routes through api.get
@@ -2422,7 +2415,8 @@
 		<DataTable
 			fixed
 			isEmpty={queue.length === 0}
-			empty={queueLoading ? m('common.loading') : m('payments.queue.empty')}
+			loading={queueLoading}
+			empty={m('payments.queue.empty')}
 			colspan={8 + (canCompareRoutes() ? 1 : 0) + (canRecordOutside() ? 1 : 0)}
 		>
 			{#snippet header()}
@@ -2622,7 +2616,10 @@
 		<DataTable
 			fixed
 			isEmpty={paymentStore.all.length === 0}
-			empty={historyEmptyMessage}
+			loading={paymentStore.loading}
+			filtered={historyFiltered}
+			emptyFiltered={m('payments.history.empty')}
+			empty={m('payments.history.empty.fresh')}
 			colspan={8}
 		>
 			{#snippet header()}
@@ -2771,7 +2768,8 @@
 			fixed
 			columns={RUNS_COLUMNS}
 			isEmpty={runs.length === 0}
-			empty={runsLoading ? m('common.loading') : m('payments.runs.empty')}
+			loading={runsLoading}
+			empty={m('payments.runs.empty')}
 			colspan={7}
 		>
 			{#snippet body()}
@@ -2889,7 +2887,8 @@
 			fixed
 			columns={REBATES_COLUMNS}
 			isEmpty={rebates.length === 0}
-			empty={loadingRebates ? m('payments.rebates.loading') : m('payments.rebates.empty')}
+			loading={loadingRebates}
+			empty={m('payments.rebates.empty')}
 			colspan={6}
 		>
 			{#snippet body()}
@@ -2995,7 +2994,8 @@
 			fixed
 			columns={CARDS_COLUMNS}
 			isEmpty={cards.length === 0}
-			empty={loadingCards ? m('payments.cards.loading') : m('payments.cards.empty')}
+			loading={loadingCards}
+			empty={m('payments.cards.empty')}
 			colspan={8}
 		>
 			{#snippet body()}

@@ -489,9 +489,9 @@
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={filteredRows.length === 0}
-			empty={report.rows.length === 0
-				? m('tax.empty.noVendors')
-				: m('tax.empty.noMatch')}
+			filtered={report.rows.length > 0}
+			emptyFiltered={m('tax.empty.noMatch')}
+			empty={m('tax.empty.noVendors')}
 		>
 			{#snippet body()}
 				{#each filteredRows as r (r.vendor_id)}

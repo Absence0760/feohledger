@@ -280,7 +280,8 @@
 	{:else}
 	<DataTable
 		isEmpty={workflowStore.all.length === 0}
-		empty={workflowStore.loading ? m('common.loading') : m('workflows.list.empty')}
+		loading={workflowStore.loading}
+		empty={m('workflows.list.empty')}
 		colspan={6}
 	>
 		{#snippet header()}

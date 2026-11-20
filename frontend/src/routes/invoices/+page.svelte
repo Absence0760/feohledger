@@ -640,15 +640,6 @@
 			!invoiceStore.errored &&
 			noActiveFilters
 	);
-	let emptyMessage = $derived(
-		invoiceStore.loading
-			? m('common.loading')
-			: invoiceStore.errored
-				? m('invoices.empty.errored')
-				: noActiveFilters
-					? m('invoices.empty.fresh')
-					: m('invoices.empty')
-	);
 
 	function statusCount(status: InvoiceStatus): number {
 		return invoiceStore.statusCounts[status] ?? 0;
@@ -1175,7 +1166,18 @@
 			testId="invoices-load-error"
 		/>
 	{:else}
-	<DataTable isEmpty={invoiceStore.all.length === 0} empty={emptyMessage} colspan={10} fixed stickyHeader>
+	<DataTable
+		isEmpty={invoiceStore.all.length === 0}
+		loading={invoiceStore.loading}
+		errored={invoiceStore.errored}
+		emptyErrored={m('invoices.empty.errored')}
+		filtered={!noActiveFilters}
+		emptyFiltered={m('invoices.empty')}
+		empty={m('invoices.empty.fresh')}
+		colspan={10}
+		fixed
+		stickyHeader
+	>
 		{#snippet header()}
 			<tr>
 				<th class="checkbox-col"><input type="checkbox" aria-label={m('invoices.selectAllAria')} checked={allSelected} onchange={toggleSelectAll} /></th>

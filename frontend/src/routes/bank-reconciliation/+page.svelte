@@ -585,7 +585,9 @@
 					<DataTable
 						columns={UNCLEARED_COLUMNS}
 						isEmpty={unclearedRows.length === 0}
-						empty={term ? m('bankRecon.empty.filtered') : m('bankRecon.empty.uncleared')}
+						filtered={!!term}
+						emptyFiltered={m('bankRecon.empty.filtered')}
+						empty={m('bankRecon.empty.uncleared')}
 						colspan={7}
 					>
 						{#snippet body()}
@@ -631,7 +633,9 @@
 					<DataTable
 						columns={UNMATCHED_COLUMNS}
 						isEmpty={unmatchedRows.length === 0}
-						empty={term ? m('bankRecon.empty.filtered') : m('bankRecon.empty.unmatched')}
+						filtered={!!term}
+						emptyFiltered={m('bankRecon.empty.filtered')}
+						empty={m('bankRecon.empty.unmatched')}
 						colspan={5}
 					>
 						{#snippet body()}
@@ -685,7 +689,9 @@
 					<DataTable
 						columns={DISCREPANCY_COLUMNS}
 						isEmpty={discrepancyRows.length === 0}
-						empty={term ? m('bankRecon.empty.filtered') : m('bankRecon.empty.discrepancies')}
+						filtered={!!term}
+						emptyFiltered={m('bankRecon.empty.filtered')}
+						empty={m('bankRecon.empty.discrepancies')}
 						colspan={7}
 					>
 						{#snippet body()}
@@ -778,9 +784,8 @@
 				<DataTable
 					columns={STATEMENT_COLUMNS}
 					isEmpty={statements.length === 0}
-					empty={statementsLoading
-						? m('common.loading')
-						: m('bankRecon.empty.statementsFiltered')}
+					loading={statementsLoading}
+					empty={m('bankRecon.empty.statementsFiltered')}
 					colspan={7}
 				>
 					{#snippet body()}

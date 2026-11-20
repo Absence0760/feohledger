@@ -104,6 +104,8 @@ export const messages = {
 	'toast.region': "Messages d’état",
 	'toast.dismiss': "Fermer",
 	'common.loadFailed': 'Impossible de charger cette liste. Actualisez pour réessayer.',
+	'common.empty': 'Aucun élément.',
+	'common.emptyFiltered': 'Aucun résultat pour ces filtres.',
 	'common.amountInvalid': 'Saisissez le montant sous forme de nombre simple, p. ex. 1200 ou 1200.50',
 	'common.reportingCurrencyUnresolved': 'devise de reporting',
 	'common.currencyCode.required': 'Saisissez la devise sous forme de code ISO 4217 à trois lettres, par exemple USD ou PLN.',
@@ -924,7 +926,6 @@ export const messages = {
 	'payments.cards.projectedAnnual': 'Projection annuelle',
 	'payments.cards.atRunRate': 'au rythme actuel',
 	'payments.cards.activeCards': 'Cartes actives',
-	'payments.cards.loading': 'Chargement des cartes…',
 	'payments.cards.empty': 'Aucune carte virtuelle émise pour le moment.',
 	'payments.cards.errored': 'Impossible de charger les cartes virtuelles.',
 	'payments.cards.revealFailed': "Les données de la carte n’ont pas pu être affichées.",
@@ -952,7 +953,6 @@ export const messages = {
 	'payments.rebates.subtitle':
 		"Remises du processeur de cartes obtenues sur vos cartes virtuelles. Faire avancer une remise enregistre ce que le processeur a déjà fait sur son propre relevé — cela ne demande aucun versement et ne déplace aucun fonds.",
 	'payments.rebates.cardsTitle': 'Cartes',
-	'payments.rebates.loading': 'Chargement des remises…',
 	'payments.rebates.empty': 'Aucune remise enregistrée pour le moment.',
 	'payments.rebates.errored': 'Impossible de charger les remises.',
 	'payments.rebates.col.period': 'Période',
@@ -1515,7 +1515,6 @@ export const messages = {
 	'exceptions.agents.run.refreshing': 'Actualisation…',
 	'exceptions.agents.run.note':
 		'Exécuter un agent évalue une exception et, lorsque sa confiance atteint le seuil d’autonomie de cette organisation, applique le correctif par le même chemin audité qu’une personne emprunterait. En dessous de ce seuil, il escalade vers un humain. Dans les deux cas, il enregistre une décision dans le journal ci-dessous.',
-	'exceptions.agents.run.empty.loading': 'Chargement des exceptions ouvertes…',
 	'exceptions.agents.run.empty.errored':
 		'Impossible de charger les exceptions ouvertes. Essayez « Actualiser ».',
 	'exceptions.agents.run.empty.none':
@@ -2120,7 +2119,6 @@ export const messages = {
 	'expenses.kpi.pending': 'En attente',
 	'expenses.search.placeholder': 'Rechercher des dépenses...',
 	'expenses.search.aria': 'Rechercher des dépenses',
-	'expenses.loading': 'Chargement…',
 	'expenses.empty': 'Aucune dépense ne correspond à vos filtres.',
 	'expenses.empty.errored': 'Impossible de charger les dépenses. Réessayez.',
 	'expenses.col.date': 'Date',
@@ -4262,7 +4260,6 @@ export const messages = {
 	'discounts.status.expired': 'Expiré',
 	'discounts.status.offered': 'Proposé',
 	'discounts.table.empty': 'Aucune offre d\'escompte ne correspond à ce filtre.',
-	'discounts.table.loading': 'Chargement des offres…',
 	'discounts.title': 'Escomptes',
 	'discounts.toast.acceptFailed': 'Impossible d\'accepter l\'offre',
 	'discounts.toast.accepted': 'Offre d\'escompte acceptée',

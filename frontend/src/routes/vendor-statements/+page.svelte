@@ -383,11 +383,10 @@
 		<DataTable
 			columns={COLUMNS}
 			isEmpty={!loading && recons.length === 0}
-			empty={loading
-				? m('common.loading')
-				: statusFilter !== 'all' || appliedSearch
-					? m('vendorStatements.empty')
-					: m('vendorStatements.emptyNone')}
+			{loading}
+			filtered={statusFilter !== 'all' || !!appliedSearch}
+			emptyFiltered={m('vendorStatements.empty')}
+			empty={m('vendorStatements.emptyNone')}
 			colspan={8}
 		>
 			{#snippet body()}
