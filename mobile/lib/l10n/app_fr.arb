@@ -350,6 +350,7 @@
   "payRunActionExecute": "Exécuter",
   "payRunActionCancel": "Annuler",
   "payRunActionApprove": "Approuver en tant que directeur financier",
+  "payRunVerdictUnchecked": "Impossible de vérifier si vous pouvez effectuer cette action. Tirez pour actualiser.",
   "payRunApproveTitle": "Approuver le lot de paiement ?",
   "payRunApproveBody": "Validation du lot créé le {date} — {count, plural, one {{count} paiement} other {{count} paiements}} pour un total de {amount}. Cela autorise l’exécution ; aucun fonds n’est déplacé.",
   "payRunApproveConfirm": "Approuver",

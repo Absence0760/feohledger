@@ -5,7 +5,13 @@
 /// backend ORM model does the same dodge (`Exception as APException`).
 library;
 
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
+
+/// The `decision_refusals` codes that hide a control rather than explain it:
+/// a terminal row (`exception_not_actionable`) is nothing the reader can act
+/// on, like a role refusal ([ActionVerdict.isOffered] hides that one).
+const kExceptionHiddenRefusals = {'exception_not_actionable'};
 
 enum ApExceptionStatus {
   open('open'),
@@ -23,8 +29,10 @@ enum ApExceptionStatus {
     );
   }
 
-  /// Only open / escalated exceptions can be acted on — resolved and dismissed
-  /// are terminal (the backend 409s a resolve from any other status).
+  /// Open or escalated — resolved and dismissed are terminal. Read for the
+  /// SLA countdown and the assignee picker only; whether THIS reader may
+  /// resolve / dismiss / escalate is the row's `decision_refusals`
+  /// ([ApException.resolveVerdict] …), never this.
   bool get isActionable =>
       this == ApExceptionStatus.open || this == ApExceptionStatus.escalated;
 }
@@ -126,6 +134,29 @@ class ApException {
   /// (`erp_report.kind == "paid_not_recorded"`, decisions §319). Null otherwise.
   final ErpReportedPayment? erpPayment;
 
+  /// `decision_refusals` as served on the list and the detail
+  /// (`api/exceptions.py::decision_refusals` — the role dependency, the
+  /// status gate, then `exception_lifecycle.segregation_refusal`, the gates
+  /// `POST /{id}/resolve` raises from): `{resolve, dismiss, escalate}`, each
+  /// `null` (accepted) or a coded refusal. Kept raw so the offline cache
+  /// round-trips it; read through [resolveVerdict] / [dismissVerdict] /
+  /// [escalateVerdict]. `null` on a read that carries none, which offers
+  /// nothing.
+  final Map<String, dynamic>? decisionRefusals;
+
+  ActionVerdict _decision(String action) => decisionRefusals == null
+      ? ActionVerdict.unanswered
+      : ActionVerdict.fromVerdicts(decisionRefusals!, action);
+
+  /// The caller's verdict on resolving this exception.
+  ActionVerdict get resolveVerdict => _decision('resolve');
+
+  /// The caller's verdict on dismissing this exception.
+  ActionVerdict get dismissVerdict => _decision('dismiss');
+
+  /// The caller's verdict on escalating this exception.
+  ActionVerdict get escalateVerdict => _decision('escalate');
+
   ApException({
     required this.id,
     this.invoiceId,
@@ -155,6 +186,7 @@ class ApException {
     this.erpReportKind,
     this.erpRefusal,
     this.erpPayment,
+    this.decisionRefusals,
   });
 
   static DateTime? _parseDate(Object? raw) {
@@ -199,6 +231,9 @@ class ApException {
       erpReportKind: _erpReportKind(json['erp_report']),
       erpRefusal: _erpRefusal(json['erp_report']),
       erpPayment: ErpReportedPayment.fromErpReport(json['erp_report']),
+      decisionRefusals: json['decision_refusals'] is Map
+          ? Map<String, dynamic>.from(json['decision_refusals'] as Map)
+          : null,
     );
   }
 

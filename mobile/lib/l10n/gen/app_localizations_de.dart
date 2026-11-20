@@ -1397,6 +1397,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String get payRunActionApprove => 'Als CFO freigeben';
 
   @override
+  String get payRunVerdictUnchecked =>
+      'Konnte nicht prüfen, ob Sie dies tun dürfen. Zum Aktualisieren nach unten ziehen.';
+
+  @override
   String get payRunApproveTitle => 'Zahlungslauf freigeben?';
 
   @override

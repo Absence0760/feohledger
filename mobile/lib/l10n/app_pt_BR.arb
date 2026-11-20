@@ -350,6 +350,7 @@
   "payRunActionExecute": "Executar",
   "payRunActionCancel": "Cancelar",
   "payRunActionApprove": "Aprovar como CFO",
+  "payRunVerdictUnchecked": "Não foi possível verificar se você pode fazer isso. Puxe para atualizar.",
   "payRunApproveTitle": "Aprovar o lote de pagamento?",
   "payRunApproveBody": "Aprovação do lote criado em {date} — {count, plural, one {{count} pagamento} other {{count} pagamentos}} num total de {amount}. Isto autoriza a execução; não movimenta dinheiro.",
   "payRunApproveConfirm": "Aprovar",

@@ -2220,6 +2220,12 @@ abstract class AppLocalizations {
   /// **'Approve as CFO'**
   String get payRunActionApprove;
 
+  /// Reason under a disabled payment-run action when the app could not read whether the signed-in user may take it (the run detail read failed).
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t check whether you can do this. Pull to refresh.'**
+  String get payRunVerdictUnchecked;
+
   /// No description provided for @payRunApproveTitle.
   ///
   /// In en, this message translates to:

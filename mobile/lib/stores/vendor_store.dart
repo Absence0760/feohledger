@@ -178,6 +178,9 @@ class VendorStore extends ChangeNotifier with SequencedFetch {
     'verified_by': v.verifiedBy,
     'erp_vendor_id': v.erpVendorId,
     'invoice_count': v.invoiceCount,
+    // The caller's Verify / Reject verdicts, so a cached list offers the
+    // same controls the live one did.
+    'status_actions': v.statusActions,
   };
 }
 

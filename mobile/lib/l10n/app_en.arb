@@ -963,6 +963,10 @@
   "payRunActionExecute": "Execute",
   "payRunActionCancel": "Cancel",
   "payRunActionApprove": "Approve as CFO",
+  "payRunVerdictUnchecked": "Couldn't check whether you can do this. Pull to refresh.",
+  "@payRunVerdictUnchecked": {
+    "description": "Reason under a disabled payment-run action when the app could not read whether the signed-in user may take it (the run detail read failed)."
+  },
   "payRunApproveTitle": "Approve payment run?",
   "payRunApproveBody": "Sign off the run created {date} — {count, plural, one {{count} payment} other {{count} payments}} totalling {amount}. This authorizes execution; it moves no money.",
   "@payRunApproveBody": {

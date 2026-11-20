@@ -1407,6 +1407,10 @@ class AppLocalizationsFr extends AppLocalizations {
   String get payRunActionApprove => 'Approuver en tant que directeur financier';
 
   @override
+  String get payRunVerdictUnchecked =>
+      'Impossible de vérifier si vous pouvez effectuer cette action. Tirez pour actualiser.';
+
+  @override
   String get payRunApproveTitle => 'Approuver le lot de paiement ?';
 
   @override

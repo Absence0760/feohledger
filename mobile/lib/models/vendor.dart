@@ -1,3 +1,5 @@
+import 'package:feohledger_mobile/models/action_verdict.dart';
+
 /// Vendor lifecycle status. Mirrors the backend `Vendor.status` column
 /// (`active` / `unverified` / `inactive` / `rejected`).
 enum VendorStatus {
@@ -15,12 +17,6 @@ enum VendorStatus {
       orElse: () => VendorStatus.unverified,
     );
   }
-
-  /// Verify/reject are only offered while the vendor is awaiting review —
-  /// the backend `verify` endpoint 409s from any status other than
-  /// `unverified`. (Reject also accepts `active` server-side, but the
-  /// mobile review flow only surfaces actions on the unverified queue.)
-  bool get isUnverified => this == VendorStatus.unverified;
 }
 
 class Vendor {
@@ -45,6 +41,25 @@ class Vendor {
   final int cardsNotClosed;
   final int cardsRequireVoid;
 
+  /// The list row's `status_actions` as served (`api/vendors.py::
+  /// vendor_status_actions` — `vendor.manage`, then the one status table
+  /// `POST /{id}/verify` and `/reject` refuse from): `{verify, reject}`, each
+  /// `null` (accepted) or a coded refusal. Kept raw so the offline cache
+  /// round-trips it; read through [verifyVerdict] / [rejectVerdict]. `null`
+  /// on a read that carries none (a single-vendor read, an older backend),
+  /// which offers nothing.
+  final Map<String, dynamic>? statusActions;
+
+  /// The caller's verdict on `POST /api/vendors/{id}/verify`.
+  ActionVerdict get verifyVerdict => statusActions == null
+      ? ActionVerdict.unanswered
+      : ActionVerdict.fromVerdicts(statusActions!, 'verify');
+
+  /// The caller's verdict on `POST /api/vendors/{id}/reject`.
+  ActionVerdict get rejectVerdict => statusActions == null
+      ? ActionVerdict.unanswered
+      : ActionVerdict.fromVerdicts(statusActions!, 'reject');
+
   Vendor({
     required this.id,
     required this.name,
@@ -59,6 +74,7 @@ class Vendor {
     this.invoiceCount = 0,
     this.cardsNotClosed = 0,
     this.cardsRequireVoid = 0,
+    this.statusActions,
   });
 
   factory Vendor.fromJson(Map<String, dynamic> json) {
@@ -81,6 +97,9 @@ class Vendor {
         json['card_revocation'],
         'requires_payment_void',
       ),
+      statusActions: json['status_actions'] is Map
+          ? Map<String, dynamic>.from(json['status_actions'] as Map)
+          : null,
     );
   }
 

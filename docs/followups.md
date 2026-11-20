@@ -1344,25 +1344,19 @@ scope (§260) — do not fold them into any of these.
       start, adaptive-suggestion dismiss. Still restating (each a status list
       and/or role / permission / self check): intake approve / reject / convert;
       requisition submit / convert / cancel; experiment stop / conclude /
-      delete. **Mobile** reads the verdicts for the
-      invoice detail's approve / reject / recall and the approvals swipe
-      (`GET /api/invoices/{id}/review-actions`), the payment queue's record
-      outside, and the Runs tab's "Approve as CFO" (the run detail's
-      `actions.approve`, read per pending run because the runs list carries
-      only `actions.sync_erp`; maker-checker now shows disabled with its
-      reason). Still restating on mobile: the run menu's Execute / Cancel
-      (`canManagePayments` + `isDraft`, and a client-side CFO pre-flight —
-      `actions.execute` / `.cancel` on the same detail read), vendor verify /
-      reject (`canManageVendors` + `isUnverified` — the list's
-      `status_actions.{verify,reject}`), and exception resolve (status + role
-      — the list's `decision_refusals`), and adaptive-suggestion dismiss
-      (`canDismissSuggestion` + status — the row's `actions.dismiss`).
+      delete. **Mobile** reads the verdicts for the invoice detail's approve /
+      reject / recall and the approvals swipe (`GET /api/invoices/{id}/
+      review-actions`), the payment queue's record outside, the Runs tab's
+      Approve as CFO / Execute / Cancel (the run detail's `actions`, read per
+      draft run), vendor verify / reject (the list's `status_actions`) and
+      exception resolve / dismiss / escalate (`decision_refusals`). Still
+      restating on mobile: adaptive-suggestion dismiss (`canDismissSuggestion`
+      + status — the row's `actions.dismiss`).
       **Durable fix:** the same shape as the
       converted ones — a gate function the endpoint raises from, a `*_refusal`
       verdict on the row built from it, a parity test per role × row state, and
       the page reading `#lib/api/actionVerdicts.ts`
-      (`frontend/docs/ui-patterns.md` § Whether to offer an action). Mobile's
-      run Execute next (it moves money).
+      (`frontend/docs/ui-patterns.md` § Whether to offer an action).
       **Trigger:** the next change to any of those controls, or a report of a
       button that 403s / 409s.
 

@@ -67,6 +67,9 @@ Map<String, dynamic> _exceptionJson(
   String status = 'open',
   String type = 'duplicate',
   String typeLabel = 'Duplicate Invoice',
+  // The caller's `decision_refusals`; defaults to a manager's (see
+  // [_managerDecisions]). `null` models a row that carries none.
+  Object? decisions = _managerDefault,
 }) =>
     {
       'id': id,
@@ -80,7 +83,29 @@ Map<String, dynamic> _exceptionJson(
       'status': status,
       'is_overdue': false,
       'created_at': '2026-01-01T12:00:00',
+      'decision_refusals': identical(decisions, _managerDefault)
+          ? _managerDecisions(status)
+          : decisions,
     };
+
+const _managerDefault = Object();
+
+const _notActionable = {
+  'code': 'exception_not_actionable',
+  'message': "Cannot resolve from 'resolved' status",
+  'params': <String, dynamic>{},
+};
+
+/// `decision_refusals` as `api/exceptions.py::decision_refusals` builds them
+/// for a reader holding the queue's role with no segregation conflict: every
+/// action accepted on an open or escalated row, the status refusal otherwise.
+Map<String, dynamic> _managerDecisions(String status) {
+  final actionable = status == 'open' || status == 'escalated';
+  return {
+    for (final a in ['resolve', 'dismiss', 'escalate'])
+      a: actionable ? null : _notActionable,
+  };
+}
 
 /// Pumps fixed bounded frames until [finder] is present (or the budget is
 /// exhausted). Never pumpAndSettle — a pending fetch leaves a spinner
@@ -250,6 +275,71 @@ void main() {
     await _pumpUntilTrue(tester, () => sentAction != null);
 
     expect(sentAction, 'resolve');
+  });
+
+  // The queue swipes only in a direction `decision_refusals` accepts.
+  group('decision verdicts on the queue', () {
+    Future<void> pumpRow(WidgetTester tester, Object? decisions) async {
+      await _loginThen(
+        ['ap_manager'],
+        MockClient(
+          (req) async => _list([_exceptionJson('1', decisions: decisions)]),
+        ),
+      );
+      addTearDown(AuthStore.instance.logout);
+      await tester.pumpWidget(_localized(const ExceptionsScreen()));
+      await _pumpUntil(tester, find.byType(ExceptionListTile));
+    }
+
+    testWidgets('an accepted row swipes both ways', (tester) async {
+      await pumpRow(
+        tester,
+        {'resolve': null, 'dismiss': null, 'escalate': null},
+      );
+      expect(
+        tester.widget<Dismissible>(find.byType(Dismissible)).direction,
+        DismissDirection.horizontal,
+      );
+    });
+
+    testWidgets('a segregation refusal leaves no swipe, but the row can still '
+        'be selected and opened', (tester) async {
+      const sod = {
+        'code': 'segregation_implicated',
+        'message': 'm',
+        'params': <String, dynamic>{},
+      };
+      await pumpRow(tester, {'resolve': sod, 'dismiss': sod, 'escalate': null});
+      expect(find.byType(Dismissible), findsNothing);
+      expect(
+        tester.widget<ExceptionListTile>(find.byType(ExceptionListTile))
+            .onLongPress,
+        isNotNull,
+      );
+    });
+
+    for (final (name, decisions) in <(String, Object?)>[
+      (
+        'a role refusal',
+        {
+          'resolve': {'code': 'role_not_permitted', 'message': 'm'},
+          'dismiss': {'code': 'role_not_permitted', 'message': 'm'},
+          'escalate': {'code': 'role_not_permitted', 'message': 'm'},
+        },
+      ),
+      ('no verdict', null),
+    ]) {
+      testWidgets('$name leaves a read-only row', (tester) async {
+        await pumpRow(tester, decisions);
+        expect(find.byType(Dismissible), findsNothing);
+        expect(
+          tester
+              .widget<ExceptionListTile>(find.byType(ExceptionListTile))
+              .onLongPress,
+          isNull,
+        );
+      });
+    }
   });
 
   testWidgets('swiping a row right resolves the exception', (tester) async {

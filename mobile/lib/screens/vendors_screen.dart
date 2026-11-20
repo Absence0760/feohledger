@@ -1,8 +1,11 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
+import 'package:feohledger_mobile/l10n/enum_labels.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/load_error_messages.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/vendor.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/vendor_store.dart';
@@ -11,10 +14,13 @@ import 'package:feohledger_mobile/utils/debouncer.dart';
 import 'package:feohledger_mobile/widgets/async_list_body.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 
-/// Vendor management — list with status filters + search, verify / reject an
-/// unverified vendor, and pull vendors from the connected ERP. Mutations are
-/// gated to admin / ap_manager (mirrors the backend `require_roles`); for
-/// read-only roles (CFO) the actions are simply not offered.
+/// Vendor management — list with status filters + search, verify / reject a
+/// vendor, and pull vendors from the connected ERP. Verify / Reject are
+/// offered from each row's `status_actions` verdict (the server's
+/// `vendor.manage` check and status table), never a role or status check
+/// here: a role or status refusal hides the action, any other refusal shows
+/// it disabled with its reason, and a row with no verdict offers nothing. The
+/// ERP sync is gated to admin / ap_manager (the backend `require_roles`).
 class VendorsScreen extends StatefulWidget {
   const VendorsScreen({super.key});
 
@@ -151,23 +157,39 @@ class _VendorsScreenState extends State<VendorsScreen> {
     );
   }
 
+  /// A status refusal (`vendor_status_not_allowed`: verifying an active
+  /// vendor, anything on a rejected one) is about the row, not something the
+  /// reader can act on, so it hides the action like a role refusal does.
+  static const _hiddenRefusals = {'vendor_status_not_allowed'};
+
   Widget _buildRow(Vendor vendor) {
     final l = AppLocalizations.of(context);
+    final verify = vendor.verifyVerdict;
+    final reject = vendor.rejectVerdict;
+    final offered =
+        verify.isOffered(hiddenCodes: _hiddenRefusals) ||
+        reject.isOffered(hiddenCodes: _hiddenRefusals);
     final tile = VendorListTile(
       vendor: vendor,
-      onTap: _canManage && vendor.status.isUnverified
-          ? () => _showActions(vendor)
-          : null,
+      onTap: offered ? () => _showActions(vendor) : null,
     );
 
-    // Swipe verify/reject only for unverified vendors, and only for roles that
-    // may act. Everything else is a read-only row.
-    if (!_canManage || !vendor.status.isUnverified) {
+    // Swipe only in the directions the server would accept now; a refused
+    // action is explained in the sheet, never swiped into a 403 / 409.
+    final direction = verify.allowed && reject.allowed
+        ? DismissDirection.horizontal
+        : verify.allowed
+        ? DismissDirection.startToEnd
+        : reject.allowed
+        ? DismissDirection.endToStart
+        : null;
+    if (direction == null) {
       return tile;
     }
 
     return Dismissible(
       key: ValueKey(vendor.id),
+      direction: direction,
       background: _swipeBackground(
         Colors.green.shade700,
         Colors.green.shade900,
@@ -240,6 +262,22 @@ class _VendorsScreenState extends State<VendorsScreen> {
 
   void _showActions(Vendor vendor) {
     final l = AppLocalizations.of(context);
+    final verify = _sheetAction(
+      vendor,
+      vendor.verifyVerdict,
+      verify: true,
+      icon: const Icon(Icons.check, color: Colors.green),
+      label: l.vendorActionVerify,
+      hint: l.vendorVerifyHint,
+    );
+    final reject = _sheetAction(
+      vendor,
+      vendor.rejectVerdict,
+      verify: false,
+      icon: Icon(Icons.block, color: Colors.red.shade700),
+      label: l.vendorActionReject,
+      hint: l.vendorRejectHint,
+    );
     showModalBottomSheet<void>(
       context: context,
       builder: (sheetContext) {
@@ -252,25 +290,42 @@ class _VendorsScreenState extends State<VendorsScreen> {
                   vendor.name,
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-                subtitle: Text(l.vendorUnverifiedLabel),
+                subtitle: Text(vendorStatusLabel(l, vendor.status)),
               ),
               const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.check, color: Colors.green),
-                title: Text(l.vendorActionVerify),
-                subtitle: Text(l.vendorVerifyHint),
-                onTap: () => _runAction(sheetContext, vendor, verify: true),
-              ),
-              ListTile(
-                leading: Icon(Icons.block, color: Colors.red.shade700),
-                title: Text(l.vendorActionReject),
-                subtitle: Text(l.vendorRejectHint),
-                onTap: () => _runAction(sheetContext, vendor, verify: false),
-              ),
+              ?verify?.call(sheetContext),
+              ?reject?.call(sheetContext),
             ],
           ),
         );
       },
+    );
+  }
+
+  /// One sheet action from its [verdict]: absent when not offered, enabled
+  /// when accepted, else disabled with the refusal in the reader's language.
+  Widget Function(BuildContext sheetContext)? _sheetAction(
+    Vendor vendor,
+    ActionVerdict verdict, {
+    required bool verify,
+    required Widget icon,
+    required String label,
+    required String hint,
+  }) {
+    if (!verdict.isOffered(hiddenCodes: _hiddenRefusals)) return null;
+    final l = AppLocalizations.of(context);
+    final reason = verdict.allowed
+        ? null
+        : localizeCodedRefusal(l, verdict.refusal) ??
+              (verdict.refusal?['message'] as String? ?? '');
+    return (sheetContext) => ListTile(
+      leading: icon,
+      title: Text(label),
+      subtitle: Text(reason ?? hint),
+      enabled: verdict.allowed,
+      onTap: verdict.allowed
+          ? () => _runAction(sheetContext, vendor, verify: verify)
+          : null,
     );
   }
 
