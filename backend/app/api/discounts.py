@@ -310,11 +310,28 @@ async def _offer_responses(
 
 
 async def _get_offer_scoped(
-    db: AsyncSession, offer_id: uuid.UUID, entity_id: uuid.UUID | None
+    db: AsyncSession,
+    offer_id: uuid.UUID,
+    entity_id: uuid.UUID | None,
+    *,
+    for_update: bool = False,
 ) -> DiscountOffer:
+    """The offer in the caller's entity scope, else 404.
+
+    ``for_update=True`` is for the status writers (accept / decline): the row is
+    locked BEFORE the refusal check reads its status, so of two racing
+    decisions the second waits, re-reads the first's committed result
+    (``populate_existing``) and answers the refusal's 409 instead of passing
+    the same check, overwriting the first and writing a second audit row. Every
+    other writer of an offer's status takes the same lock
+    (``offers_svc.lock_offer``; ``backend/docs/dynamic-discounting.md``
+    § Concurrency).
+    """
     q = apply_entity_scope(
         select(DiscountOffer).where(DiscountOffer.id == offer_id), DiscountOffer, entity_id
     )
+    if for_update:
+        q = offers_svc.lock_offer(q)
     offer = (await db.execute(q)).scalar_one_or_none()
     if offer is None:
         raise HTTPException(status_code=404, detail="Discount offer not found")
@@ -503,9 +520,13 @@ async def accept_offer(
     user: User = Depends(require_roles(*_ACCEPT_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    offer = await _get_offer_scoped(db, offer_id, entity_id)
+    offer = await _get_offer_scoped(db, offer_id, entity_id, for_update=True)
     today = utc_today()
-    # One gate, shared with the row's `actions.accept` verdict.
+    # One gate, shared with the row's `actions.accept` verdict. It reads the
+    # LOCKED row, so a concurrent accept or decline that committed first is
+    # seen here and refused (`discount_offer_not_open`, 409). That status guard
+    # is also the replay story: a re-sent accept — same tier or another — finds
+    # the offer `accepted` and is refused, with no second write or audit row.
     settled = (await settled_invoice_statuses(db, [offer])).get(offer.id)
     refusal = accept_refusal(offer, settled_status=settled, today=today, tier_days=body.tier_days)
     if refusal is not None:
@@ -543,9 +564,10 @@ async def decline_offer(
     user: User = Depends(require_roles(*_ACCEPT_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    offer = await _get_offer_scoped(db, offer_id, entity_id)
+    offer = await _get_offer_scoped(db, offer_id, entity_id, for_update=True)
     today = utc_today()
-    # One gate, shared with the row's `actions.decline` verdict.
+    # One gate, shared with the row's `actions.decline` verdict, read under the
+    # row lock (see `accept_offer`).
     refusal = decline_refusal(offer, today=today)
     if refusal is not None:
         raise refusal.http()

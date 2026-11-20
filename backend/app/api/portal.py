@@ -1970,17 +1970,21 @@ def _vendor_offer_filter(vu: VendorUser):
 
 
 async def _portal_offer_or_404(
-    db: AsyncSession, offer_id: uuid.UUID, vu: VendorUser
+    db: AsyncSession, offer_id: uuid.UUID, vu: VendorUser, *, for_update: bool = False
 ) -> DiscountOffer:
-    """Fetch an offer the calling vendor owns, else 404 (never 403)."""
-    offer = (
-        await db.execute(
-            select(DiscountOffer).where(
-                DiscountOffer.id == offer_id,
-                _vendor_offer_filter(vu),
-            )
-        )
-    ).scalar_one_or_none()
+    """Fetch an offer the calling vendor owns, else 404 (never 403).
+
+    ``for_update=True`` (accept / decline) locks the row before the status
+    check, the same lock the AP side takes (``discount_offers.lock_offer``), so
+    a supplier and an AP user deciding at once serialize: the second sees the
+    first's decision and gets the 409."""
+    q = select(DiscountOffer).where(
+        DiscountOffer.id == offer_id,
+        _vendor_offer_filter(vu),
+    )
+    if for_update:
+        q = offers_svc.lock_offer(q)
+    offer = (await db.execute(q)).scalar_one_or_none()
     if offer is None:
         raise HTTPException(status_code=404, detail="Discount offer not found")
     return offer
@@ -2058,7 +2062,7 @@ async def accept_my_discount_offer(
     payment run still funds the early payment. Idempotency: re-accepting a
     non-`offered` offer raises `409` (the status guard is the dedupe), so a
     double-click can't double-count savings."""
-    offer = await _portal_offer_or_404(db, offer_id, vu)
+    offer = await _portal_offer_or_404(db, offer_id, vu, for_update=True)
     today = utc_today()
 
     # Same gate as the AP accept: an invoice already paid / done has no payment
@@ -2137,7 +2141,7 @@ async def decline_my_discount_offer(
     `discount_offers.decline_offer`; `409` if the offer is no longer `offered`
     — including when its window has already closed, which the supplier now sees
     as `expired` rather than as a live offer with a Decline button."""
-    offer = await _portal_offer_or_404(db, offer_id, vu)
+    offer = await _portal_offer_or_404(db, offer_id, vu, for_update=True)
     today = utc_today()
     try:
         offers_svc.decline_offer(offer, now=datetime.now(UTC), as_of=today)

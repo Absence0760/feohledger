@@ -24193,3 +24193,25 @@ Light; it is then shown unchanged there. Also rejected: CSS `light-dark()` in
 the inline value, which also needs two colours and would put a non-hex string
 in the cache and the boot script, which validate hex; and refusing a failing
 colour, which §28 already rejected for the strong accent.
+
+## 479. An offer's status writers lock its row before checking it, and the wait is not bounded (round 33, 2026-11-20)
+
+`POST /api/discounts/offers/{id}/accept` and `/decline` (and the supplier
+portal's pair) loaded the offer with a plain `SELECT`, so two concurrent
+decisions both passed the `offered` check, the last commit won and two audit
+rows recorded two decisions. They now read the row `FOR UPDATE` with
+`populate_existing` (`discount_offers.lock_offer`) before the refusal check, the
+lock the auto-capture sweep (`_claim_if_still_offered`), the copilot enact and
+settlement capture already took. The second request waits and gets the 409.
+
+The wait is plain, not `bounded_lock_wait` (§233). §233 bounds a lock a holder
+may keep across a processor call; no holder of an offer's lock does, and
+settlement capture, the one writer reached from a payment path, runs after the
+processor call in a transaction committed per payment. A bound would add a
+named refusal and a savepoint for a wait that is one short transaction.
+
+A re-sent accept stays a 409 (`discount_offer_not_open`) rather than becoming a
+200 replay of the same tier. Accepting moves no money, so there is no second
+effect to suppress, and a 200 for "same tier" would need the endpoint to
+distinguish a retry from a second person choosing the same tier.
+`backend/docs/dynamic-discounting.md` § Concurrency.
