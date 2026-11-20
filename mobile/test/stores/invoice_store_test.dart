@@ -236,6 +236,110 @@ void main() {
       expect(params.containsKey('vendor'), isFalse);
       expect(params.containsKey('amount_min'), isFalse);
       expect(params.containsKey('due_date_from'), isFalse);
+      // Overdue is opt-in: the plain list never sends it.
+      expect(params.containsKey('overdue'), isFalse);
+    });
+  });
+
+  group('overdue quick view', () {
+    /// Records every list request's query parameters, in order.
+    List<Map<String, String>> recordRequests() {
+      final sent = <Map<String, String>>[];
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          sent.add(req.url.queryParameters);
+          return _list([]);
+        }),
+      );
+      return sent;
+    }
+
+    test('showOverdue asks the server for the overdue set and clears every '
+        'other filter, so the list matches the dashboard figure', () async {
+      final sent = recordRequests();
+      store.setStatusFilter('approved');
+      store.setSearch('acme');
+      store.setFilters(const InvoiceSearchFilters(vendor: 'Acme'));
+      await _waitUntil(() => sent.length == 3);
+      final clearsBefore = store.searchClearedExternally;
+
+      store.showOverdue();
+      await _waitUntil(() => sent.length == 4);
+
+      expect(store.overdueOnly, isTrue);
+      expect(store.statusFilter, isNull);
+      expect(store.searchQuery, isNull);
+      expect(store.filters.isEmpty, isTrue);
+      expect(store.isFiltered, isTrue);
+      // The screen's search box clears once, on this signal.
+      expect(store.searchClearedExternally, clearsBefore + 1);
+      final params = sent.last;
+      expect(params['overdue'], 'true');
+      expect(params.containsKey('status'), isFalse);
+      expect(params.containsKey('search'), isFalse);
+      expect(params.containsKey('vendor'), isFalse);
+    });
+
+    test(
+      'the Overdue chip keeps the search; a status chip leaves the view',
+      () async {
+        final sent = recordRequests();
+        store.setSearch('acme');
+        await _waitUntil(() => sent.length == 1);
+        final clearsBefore = store.searchClearedExternally;
+
+        store.setOverdueOnly();
+        await _waitUntil(() => sent.length == 2);
+        expect(sent.last['overdue'], 'true');
+        expect(sent.last['search'], 'acme');
+        expect(store.searchClearedExternally, clearsBefore);
+
+        store.setStatusFilter('paid');
+        await _waitUntil(() => sent.length == 3);
+        expect(store.overdueOnly, isFalse);
+        expect(sent.last['status'], 'paid');
+        expect(sent.last.containsKey('overdue'), isFalse);
+      },
+    );
+
+    test('clearAllFilters and reset leave the overdue view', () async {
+      final sent = recordRequests();
+      store.showOverdue();
+      await _waitUntil(() => sent.length == 1);
+
+      store.clearAllFilters();
+      await _waitUntil(() => sent.length == 2);
+      expect(store.overdueOnly, isFalse);
+      expect(sent.last.containsKey('overdue'), isFalse);
+
+      store.showOverdue();
+      await _waitUntil(() => sent.length == 3);
+      store.reset();
+      expect(store.overdueOnly, isFalse);
+      expect(store.isFiltered, isFalse);
+    });
+
+    test('the overdue view caches apart from the unfiltered list', () async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => req.url.queryParameters['overdue'] == 'true'
+              ? _list([_invoiceJson('late', status: 'approved')])
+              : _list([_invoiceJson('1'), _invoiceJson('2')]),
+        ),
+      );
+      await store.fetch();
+      store.showOverdue();
+      // Awaited, so the overdue page's cache write has landed.
+      await store.fetch();
+      expect(store.invoices.map((i) => i.id), ['late']);
+
+      // Offline: the overdue view must not fall back to the all-invoices page.
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => throw Exception('offline')),
+      );
+      await store.fetch();
+      expect(store.fromCache, isTrue);
+      expect(store.invoices.map((i) => i.id), ['late']);
     });
   });
 

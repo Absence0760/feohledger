@@ -122,6 +122,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get dashboardOverdue => 'Vencidas';
 
   @override
+  String get dashboardOverdueOpen => 'Muestra las facturas vencidas';
+
+  @override
   String get dashboardApproved => 'Aprobadas';
 
   @override
@@ -270,6 +273,9 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get invoicesFilterPaid => 'Pagadas';
+
+  @override
+  String get invoicesFilterOverdue => 'Vencidas';
 
   @override
   String get invoicesColInvoiceNumber => 'N.º de factura';

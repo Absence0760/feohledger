@@ -13,7 +13,12 @@ import 'package:feohledger_mobile/widgets/notification_bell.dart';
 import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  /// Opens the Invoices tab on its Overdue quick view, the rows the Overdue
+  /// card counts (`GET /api/invoices?overdue=true`). The home shell owns the
+  /// tabs, so it supplies this; without it the card is not tappable.
+  final VoidCallback? onShowOverdue;
+
+  const DashboardScreen({super.key, this.onShowOverdue});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -177,6 +182,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           subtitle: _perCurrency(overdue),
           icon: Icons.warning_amber_rounded,
           color: Colors.red.shade700,
+          // The list behind the figure: the same predicate over the whole
+          // book, so it holds exactly the invoices counted here.
+          onTap: widget.onShowOverdue,
+          semanticHint: l.dashboardOverdueOpen,
         ),
       ],
       // The legacy Upcoming figure is a reporting-currency rollup that keeps

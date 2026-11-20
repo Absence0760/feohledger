@@ -123,6 +123,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get dashboardOverdue => 'Vencidas';
 
   @override
+  String get dashboardOverdueOpen => 'Mostra as faturas vencidas';
+
+  @override
   String get dashboardApproved => 'Aprovadas';
 
   @override
@@ -271,6 +274,9 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get invoicesFilterPaid => 'Pagas';
+
+  @override
+  String get invoicesFilterOverdue => 'Vencidas';
 
   @override
   String get invoicesColInvoiceNumber => 'N.º da fatura';
@@ -5153,6 +5159,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get dashboardOverdue => 'Vencidas';
 
   @override
+  String get dashboardOverdueOpen => 'Mostra as faturas vencidas';
+
+  @override
   String get dashboardApproved => 'Aprovadas';
 
   @override
@@ -5301,6 +5310,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get invoicesFilterPaid => 'Pagas';
+
+  @override
+  String get invoicesFilterOverdue => 'Vencidas';
 
   @override
   String get invoicesColInvoiceNumber => 'N.º da fatura';

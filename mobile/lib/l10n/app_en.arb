@@ -38,6 +38,10 @@
   "@dashboardOverdue": {
     "description": "Dashboard KPI title: open invoices past their due date, counted over the whole book."
   },
+  "dashboardOverdueOpen": "Shows the overdue invoices",
+  "@dashboardOverdueOpen": {
+    "description": "Screen-reader hint on the dashboard Overdue card: tapping it opens the Invoices tab filtered to overdue invoices."
+  },
   "dashboardApproved": "Approved",
   "dashboardAging": "Invoice Aging",
   "dashboardTopVendors": "Top Vendors",
@@ -120,6 +124,10 @@
   "invoicesFilterApproved": "Approved",
   "invoicesFilterRejected": "Rejected",
   "invoicesFilterPaid": "Paid",
+  "invoicesFilterOverdue": "Overdue",
+  "@invoicesFilterOverdue": {
+    "description": "Invoices list quick-view chip: owed and past due, across statuses (the set the dashboard Overdue figure counts)."
+  },
   "invoicesColInvoiceNumber": "Invoice #",
   "invoicesColVendor": "Vendor",
   "invoicesColAmount": "Amount",

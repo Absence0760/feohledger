@@ -324,6 +324,12 @@ abstract class AppLocalizations {
   /// **'Overdue'**
   String get dashboardOverdue;
 
+  /// Screen-reader hint on the dashboard Overdue card: tapping it opens the Invoices tab filtered to overdue invoices.
+  ///
+  /// In en, this message translates to:
+  /// **'Shows the overdue invoices'**
+  String get dashboardOverdueOpen;
+
   /// No description provided for @dashboardApproved.
   ///
   /// In en, this message translates to:
@@ -533,6 +539,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Paid'**
   String get invoicesFilterPaid;
+
+  /// Invoices list quick-view chip: owed and past due, across statuses (the set the dashboard Overdue figure counts).
+  ///
+  /// In en, this message translates to:
+  /// **'Overdue'**
+  String get invoicesFilterOverdue;
 
   /// No description provided for @invoicesColInvoiceNumber.
   ///
