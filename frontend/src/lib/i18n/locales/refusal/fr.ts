@@ -81,6 +81,8 @@ export const messages = {
 	'refusal.cardTxnNotMatched': "Cette transaction par carte n'est rapprochée d'aucune dépense.",
 	'refusal.cardTxnMatchedNotIgnorable': "Cette transaction par carte est rapprochée. Annulez le rapprochement avant de l'ignorer.",
 	'refusal.cardTxnAlreadyIgnored': "Cette transaction par carte est déjà ignorée.",
+	'refusal.intakeStatusRefused': "Impossible tant que cette réception est au statut {status}.",
+	'refusal.requisitionStatusRefused': "Impossible tant que cette demande d’achat est au statut {status}.",
 	'refusal.expenseReportLocked': "Le total de cette note de frais est verrouillé (statut : {status}) : ses lignes ne peuvent pas être modifiées.",
 	'refusal.expenseFxSourceMissing': "Aucune source de taux de change n’est configurée : cette ligne ne peut pas être convertie dans la devise de la note de frais.",
 	'refusal.expenseFxRateUnavailable': "Aucun taux de change n’est disponible pour convertir {source} dans la devise de la note de frais {target}.",

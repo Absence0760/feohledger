@@ -9,6 +9,7 @@
 		intakeTypeLabelKey
 	} from '#lib/types/intake.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { isAllowed } from '#lib/api/actionVerdicts.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listIntake,
@@ -44,15 +45,14 @@
 
 	const PAGE_SIZE = 50;
 
-	// Intake is broad-access — anyone in the org can raise / read / cancel.
-	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk', 'cfo'));
-	// approve / reject / convert = admin | ap_manager (the reviewers).
-	const canReview = $derived(auth.isManager);
-	// `POST /api/intake/{id}/reopen` is gated
-	// `require_roles(ADMIN, AP_MANAGER, AP_CLERK, CFO)` — the broad set, NOT the
-	// reviewer set. Reopening is the requester redoing their own ask, so it
-	// reuses `canCreate`; gating it on `canReview` would hide the rework loop
-	// from the clerk who actually has to redo the request.
+	// Intake is broad-access — anyone in the org can raise / read / delete.
+	// Whether a row offers Submit / Approve / Reject / Convert / Reopen /
+	// Cancel is NOT decided here: each row carries the server's verdict
+	// (`i.actions`, built from the gates the endpoints raise from — backend
+	// `api/intake.intake_action_refusals`), read through `isAllowed`. Every
+	// refusal those gates give is about the row's status or the reader's role,
+	// so a refused control is hidden rather than explained
+	// (`frontend/docs/ui-patterns.md` § Whether to offer an action).
 
 	let items = $state<IntakeRequest[]>([]);
 	let total = $state(0);
@@ -437,11 +437,13 @@
 						</Badge>
 					</td>
 					<td class="actions">
-						{#if canCreate && i.status === 'open'}
+						{#if isAllowed(i.actions?.submit)}
 							<RowAction variant="default" disabled={busyId === i.id} onclick={() => onSubmit(i)}>{m('intake.row.submit')}</RowAction>
 						{/if}
-						{#if canReview && i.status === 'in_review'}
+						{#if isAllowed(i.actions?.approve)}
 							<RowAction variant="success" disabled={busyId === i.id} onclick={() => onApprove(i)}>{m('intake.row.approve')}</RowAction>
+						{/if}
+						{#if isAllowed(i.actions?.reject)}
 							<RowAction
 								variant="danger"
 								armed={rejectArmedId === i.id}
@@ -455,10 +457,10 @@
 								{rejectArmedId === i.id ? m('intake.row.confirm') : m('intake.row.reject')}
 							</RowAction>
 						{/if}
-						{#if canReview && i.status === 'approved'}
+						{#if isAllowed(i.actions?.convert) && !i.converted_requisition_id}
 							<RowAction variant="default" disabled={busyId === i.id} onclick={() => onConvert(i)}>{m('intake.row.convertToRequisition')}</RowAction>
 						{/if}
-						{#if canCreate && i.status === 'rejected'}
+						{#if isAllowed(i.actions?.reopen)}
 							<RowAction
 								variant="default"
 								armed={reopenArmedId === i.id}
@@ -476,7 +478,7 @@
 						{#if i.status === 'converted' && i.converted_requisition_id}
 							<a class="req-link" href={`/requisitions?id=${i.converted_requisition_id}`}>{m('intake.row.viewRequisition')}</a>
 						{/if}
-						{#if canCreate && (i.status === 'open' || i.status === 'in_review' || i.status === 'approved')}
+						{#if isAllowed(i.actions?.cancel)}
 							<RowAction variant="default" disabled={busyId === i.id} onclick={() => onCancel(i)}>{m('intake.row.cancel')}</RowAction>
 						{/if}
 						{#if canCreate}

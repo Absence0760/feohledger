@@ -38,8 +38,23 @@ open ──submit──▶ in_review ──approve──▶ approved ──conve
 - `cancelled` — withdrawn (terminal).
 
 The allowed source → target moves live in `intake_service.VALID_TRANSITIONS`; an
-invalid move is a `422` at the route boundary (never a silent no-op). Each
+invalid move is a `422` at the route boundary (never a silent no-op), with the
+coded detail `intake_status_refused` (`params.status`, `params.target`). Each
 transition writes a `dispatch_audit` row.
+
+### Action verdicts
+
+Every `/api/intake` response row carries the caller's
+`actions.{submit,approve,reject,convert,cancel,reopen}` — `null` when that
+route would accept the caller, else the coded refusal it would answer with.
+`api/intake.intake_action_refusals` builds them from the route's role tuple
+(`INTAKE_AUTHOR_ROLES` / `INTAKE_REVIEW_ROLES`, the same tuples `require_roles`
+takes) and then the gate the route raises from
+(`services/procurement_controls.intake_transition_refusal` /
+`.intake_convert_refusal`), so the /intake page offers a control exactly when
+the route accepts it (`frontend/docs/ui-patterns.md` § Whether to offer an
+action). Mutation responses carry them too, so a row the page upserts keeps its
+controls. Parity: `tests/test_procurement_action_verdicts.py`.
 
 ## Flexible `form_data` model
 

@@ -385,6 +385,19 @@ describe('codedRefusalText', () => {
 		expect(codedRefusalText('expense_report_not_submitted', {}, enT)).toBeNull();
 	});
 
+	it("names an intake's or a requisition's status by its label, and refuses without one", () => {
+		expect(codedRefusalText('intake_status_refused', { status: 'in_review' }, enT)).toContain(
+			EN_ALL['intake.status.inReview']
+		);
+		expect(
+			codedRefusalText('requisition_status_refused', { status: 'converted' }, enT)
+		).toContain(EN_ALL['requisitions.status.converted']);
+		expect(codedRefusalText('requisition_status_refused', { status: 'mystery' }, enT)).toContain(
+			'mystery'
+		);
+		expect(codedRefusalText('intake_status_refused', {}, enT)).toBeNull();
+	});
+
 	it('states the remaining balance with its currency, or bare without one', () => {
 		setActiveFormatLocale('en-US');
 		expect(

@@ -72,6 +72,8 @@ import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types
 import { refusalBlockers } from '#lib/types/workspaceClosureRefusal.ts';
 import { vendorStatusLabelKey } from '#lib/types/vendor.ts';
 import { expenseReportStatusLabelKey } from '#lib/types/expense.ts';
+import { intakeStatusLabelKey } from '#lib/types/intake.ts';
+import { requisitionStatusLabelKey } from '#lib/types/requisition.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 type Params = Record<string, unknown>;
@@ -510,6 +512,25 @@ const BUILDERS: Record<string, Builder> = {
 	card_txn_not_matched: fixed('refusal.cardTxnNotMatched'),
 	card_txn_matched_not_ignorable: fixed('refusal.cardTxnMatchedNotIgnorable'),
 	card_txn_already_ignored: fixed('refusal.cardTxnAlreadyIgnored'),
+	// `services/procurement_controls.py` — an intake / requisition lifecycle
+	// action its status does not allow (the /intake and /requisitions rows'
+	// `actions` verdicts are read from the same gates)
+	intake_status_refused: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.intakeStatusRefused', {
+					status: statusLabel(status, intakeStatusLabelKey, t)
+				});
+	},
+	requisition_status_refused: (p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.requisitionStatusRefused', {
+					status: statusLabel(status, requisitionStatusLabelKey, t)
+				});
+	},
 	// …and the endpoints' own refusals that are not in a row's verdict
 	// (decisions §361): a line on a locked report, an attached line with no
 	// rate into the report currency, deleting a reconciled expense, and

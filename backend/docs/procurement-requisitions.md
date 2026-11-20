@@ -25,9 +25,22 @@ draft ─submit─▶ pending_approval ─approve─▶ approved ─convert─�
 
 Authoritative transition table:
 `backend/app/services/requisition_service.py::VALID_TRANSITIONS`. An invalid
-source → target move is a **422** (never a silent no-op), enforced by
-`guard_transition`. `converted` and `cancelled` are terminal; `rejected` can be
-re-opened back to `draft`.
+source → target move is a **422** (never a silent no-op) with the coded detail
+`requisition_status_refused` (`params.status`, `params.target`), raised from
+`services/procurement_controls.requisition_transition_refusal`. `converted` and
+`cancelled` are terminal; `rejected` can be re-opened back to `draft`.
+
+**Action verdicts.** Every `/api/requisitions` response row carries the
+caller's `actions.{submit,approve,reject,convert,cancel,reopen}` — `null` when
+that route would accept the caller, else its coded refusal — built by
+`api/requisitions.requisition_action_refusals` from the route's role tuple and
+the gate it raises from (`procurement_controls.requisition_transition_refusal`,
+`.requisition_approve_refusal` — status, then the segregation 403 below —
+and `.requisition_convert_refusal`). The /requisitions page reads them instead
+of restating the rules; the requester sees Reject (the route never refused
+them — segregation guards approval, not withdrawal) and a material editor
+sees Approve disabled beside the segregation sentence. Parity:
+`tests/test_procurement_action_verdicts.py`.
 
 - **submit** (`draft → pending_approval`) — stamps `submitted_at`.
 - **approve** (`pending_approval → approved`) — stamps `approved_by` /

@@ -945,6 +945,8 @@ Where each verdict lives (backend gate → field):
 | Bank-change queue | `approve_refusal` | `api/vendors.change_request_approve_refusal` |
 | Expense reports (list + detail) | `actions.{submit,approve,reject,compose}` | `services/expense_controls.report_{submit,approve,reject,compose}_refusal` |
 | Expense card transactions | `actions.{match,create_expense,unmatch,ignore}` | `services/expense_controls.card_txn_{link,unmatch,ignore}_refusal` |
+| Intake | `actions.{submit,approve,reject,convert,cancel,reopen}` | `services/procurement_controls.intake_transition_refusal` / `.intake_convert_refusal`. Every refusal hides the control; a row that already names its requisition shows the link instead of Convert (which would only replay it) |
+| Requisitions | `actions.{submit,approve,reject,convert,cancel,reopen}` | `services/procurement_controls.requisition_{transition,approve,convert}_refusal`. `approval_segregation` shows Approve disabled beside its reason (`approve-refusal-<id>`); every other refusal hides the control; a converted row with its PO hides Convert |
 
 Each is pinned by a backend parity test that, for every seeded role and row
 state, asks both sides — the verdict and the real POST — and fails unless they
@@ -952,6 +954,7 @@ agree (`tests/test_payment_action_verdicts.py`,
 `tests/test_queue_action_verdicts.py`, `tests/test_review_actions_parity.py`,
 `tests/test_payment_queue_blocked.py`, `tests/test_expense_action_verdicts.py`,
 `tests/test_offer_experiment_suggestion_verdicts.py`,
+`tests/test_procurement_action_verdicts.py`,
 `tests/test_vendor_erp_manual_link.py`).
 A new verdict ships with one.
 

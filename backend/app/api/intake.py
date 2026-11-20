@@ -27,12 +27,15 @@ from app.api.deps import (
     ROLE_AP_MANAGER,
     ROLE_CFO,
     get_org_id,
+    holds_any_role,
     require_roles,
 )
 from app.api.pagination import PaginationParams, pagination_params
+from app.api.refusals import role_not_permitted
 from app.models.procurement import IntakeRequest, IntakeStatus, PurchaseRequisition
 from app.models.user import User
 from app.schemas.intake import (
+    IntakeActions,
     IntakeConvertRequest,
     IntakeConvertResponse,
     IntakeDecision,
@@ -46,7 +49,10 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.intake_service import (
     convert_intake_to_requisition,
     generate_request_number,
-    guard_transition,
+)
+from app.services.procurement_controls import (
+    intake_convert_refusal,
+    intake_transition_refusal,
 )
 from app.services.vendor_matching import get_vendor_in_scope
 from app.tenant import (
@@ -74,12 +80,52 @@ _INTAKE_UPDATABLE_FIELDS = (
 )
 
 
+#: Who may raise / submit / cancel / reopen an intake (broad access).
+INTAKE_AUTHOR_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)
+#: Who reviews one: approve, reject, convert-to-requisition.
+INTAKE_REVIEW_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER)
+
+
+def intake_action_refusals(intake: IntakeRequest, user: User) -> IntakeActions:
+    """What submit, approve, reject, convert, cancel and reopen would answer
+    ``user`` for this intake — each a coded refusal or ``None`` (issue #575).
+    Each is the endpoint's role predicate (``holds_any_role``, what
+    ``require_roles`` enforces) followed by the gate it raises from
+    (``services/procurement_controls``), so /intake reads the verdict instead
+    of restating the status list and ``auth.isManager``."""
+
+    def verdict(roles, gate):
+        if not holds_any_role(user, roles):
+            return role_not_permitted()
+        refusal = gate()
+        return refusal.verdict() if refusal is not None else None
+
+    def move(target):
+        return lambda: intake_transition_refusal(intake, target)
+
+    return IntakeActions(
+        submit=verdict(INTAKE_AUTHOR_ROLES, move(IntakeStatus.in_review)),
+        approve=verdict(INTAKE_REVIEW_ROLES, move(IntakeStatus.approved)),
+        reject=verdict(INTAKE_REVIEW_ROLES, move(IntakeStatus.rejected)),
+        convert=verdict(INTAKE_REVIEW_ROLES, lambda: intake_convert_refusal(intake)),
+        cancel=verdict(INTAKE_AUTHOR_ROLES, move(IntakeStatus.cancelled)),
+        reopen=verdict(INTAKE_AUTHOR_ROLES, move(IntakeStatus.open)),
+    )
+
+
+def _raise_if(refusal) -> None:
+    if refusal is not None:
+        raise refusal.http()
+
+
 # ---------------------------------------------------------------------------
 # Serialization
 # ---------------------------------------------------------------------------
 
 
-def _to_response(r: IntakeRequest) -> IntakeRequestResponse:
+def _to_response(r: IntakeRequest, user: User) -> IntakeRequestResponse:
+    """A row with the caller's verdicts — on every response, mutations
+    included, so a row the page upserts keeps them."""
     return IntakeRequestResponse(
         id=str(r.id),
         request_number=r.request_number,
@@ -101,6 +147,7 @@ def _to_response(r: IntakeRequest) -> IntakeRequestResponse:
         converted_po_id=str(r.converted_po_id) if r.converted_po_id else None,
         created_at=r.created_at.isoformat() if r.created_at else "",
         updated_at=r.updated_at.isoformat() if r.updated_at else "",
+        actions=intake_action_refusals(r, user),
     )
 
 
@@ -232,7 +279,7 @@ async def list_intake(
     )
     rows = (await db.execute(paged)).scalars().all()
     return IntakeRequestListResponse(
-        items=[_to_response(r) for r in rows],
+        items=[_to_response(r, user) for r in rows],
         total=total,
         page=pagination.page,
         page_size=pagination.page_size,
@@ -329,7 +376,7 @@ async def create_intake(
     )
     await db.commit()
     fresh = await _get_intake_or_404(db, intake.id, entity_id)
-    return _to_response(fresh)
+    return _to_response(fresh, user)
 
 
 # ---------------------------------------------------------------------------
@@ -344,7 +391,7 @@ async def get_intake(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    return _to_response(await _get_intake_or_404(db, intake_id, entity_id))
+    return _to_response(await _get_intake_or_404(db, intake_id, entity_id), user)
 
 
 @router.patch("/{intake_id}", response_model=IntakeRequestResponse)
@@ -401,7 +448,7 @@ async def update_intake(
         )
     await db.commit()
     fresh = await _get_intake_or_404(db, intake.id, entity_id)
-    return _to_response(fresh)
+    return _to_response(fresh, user)
 
 
 @router.delete("/{intake_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -463,13 +510,13 @@ async def delete_intake(
 async def submit_intake(
     intake_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    user: User = Depends(require_roles(*INTAKE_AUTHOR_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Submit an open intake for review: ``open → in_review``."""
     intake = await _get_intake_or_404(db, intake_id, entity_id)
-    guard_transition(intake.status, IntakeStatus.in_review)
+    _raise_if(intake_transition_refusal(intake, IntakeStatus.in_review))
     intake.status = IntakeStatus.in_review
     await dispatch_audit(
         db,
@@ -483,7 +530,7 @@ async def submit_intake(
     )
     await db.commit()
     fresh = await _get_intake_or_404(db, intake.id, entity_id)
-    return _to_response(fresh)
+    return _to_response(fresh, user)
 
 
 @router.post("/{intake_id}/approve", response_model=IntakeRequestResponse)
@@ -491,13 +538,13 @@ async def approve_intake(
     intake_id: uuid.UUID,
     body: IntakeDecision | None = None,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*INTAKE_REVIEW_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Approve an intake under review: ``in_review → approved``."""
     intake = await _get_intake_or_404(db, intake_id, entity_id)
-    guard_transition(intake.status, IntakeStatus.approved)
+    _raise_if(intake_transition_refusal(intake, IntakeStatus.approved))
     intake.status = IntakeStatus.approved
     await dispatch_audit(
         db,
@@ -511,7 +558,7 @@ async def approve_intake(
     )
     await db.commit()
     fresh = await _get_intake_or_404(db, intake.id, entity_id)
-    return _to_response(fresh)
+    return _to_response(fresh, user)
 
 
 @router.post("/{intake_id}/reject", response_model=IntakeRequestResponse)
@@ -519,7 +566,7 @@ async def reject_intake(
     intake_id: uuid.UUID,
     body: IntakeDecision | None = None,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*INTAKE_REVIEW_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -528,7 +575,7 @@ async def reject_intake(
     The rejection reason (when present) is stamped into ``form_data`` under
     ``review_reason`` so it survives on the row, and recorded in the audit."""
     intake = await _get_intake_or_404(db, intake_id, entity_id)
-    guard_transition(intake.status, IntakeStatus.rejected)
+    _raise_if(intake_transition_refusal(intake, IntakeStatus.rejected))
     intake.status = IntakeStatus.rejected
     if body and body.reason:
         merged = dict(intake.form_data or {})
@@ -546,7 +593,7 @@ async def reject_intake(
     )
     await db.commit()
     fresh = await _get_intake_or_404(db, intake.id, entity_id)
-    return _to_response(fresh)
+    return _to_response(fresh, user)
 
 
 @router.post("/{intake_id}/cancel", response_model=IntakeRequestResponse)
@@ -554,13 +601,13 @@ async def cancel_intake(
     intake_id: uuid.UUID,
     body: IntakeDecision | None = None,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    user: User = Depends(require_roles(*INTAKE_AUTHOR_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Cancel an intake: ``open | in_review | approved → cancelled``."""
     intake = await _get_intake_or_404(db, intake_id, entity_id)
-    guard_transition(intake.status, IntakeStatus.cancelled)
+    _raise_if(intake_transition_refusal(intake, IntakeStatus.cancelled))
     intake.status = IntakeStatus.cancelled
     await dispatch_audit(
         db,
@@ -574,14 +621,14 @@ async def cancel_intake(
     )
     await db.commit()
     fresh = await _get_intake_or_404(db, intake.id, entity_id)
-    return _to_response(fresh)
+    return _to_response(fresh, user)
 
 
 @router.post("/{intake_id}/reopen", response_model=IntakeRequestResponse)
 async def reopen_intake(
     intake_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    user: User = Depends(require_roles(*INTAKE_AUTHOR_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -600,7 +647,7 @@ async def reopen_intake(
     brief for the rework, and a later rejection overwrites it.
     """
     intake = await _get_intake_or_404(db, intake_id, entity_id)
-    guard_transition(intake.status, IntakeStatus.open)
+    _raise_if(intake_transition_refusal(intake, IntakeStatus.open))
     intake.status = IntakeStatus.open
     await dispatch_audit(
         db,
@@ -614,7 +661,7 @@ async def reopen_intake(
     )
     await db.commit()
     fresh = await _get_intake_or_404(db, intake.id, entity_id)
-    return _to_response(fresh)
+    return _to_response(fresh, user)
 
 
 # ---------------------------------------------------------------------------
@@ -627,7 +674,7 @@ async def convert_to_requisition(
     intake_id: uuid.UUID,
     body: IntakeConvertRequest | None = None,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*INTAKE_REVIEW_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -651,18 +698,14 @@ async def convert_to_requisition(
         ).scalar_one_or_none()
         if existing is not None:
             return IntakeConvertResponse(
-                intake=_to_response(intake),
+                intake=_to_response(intake, user),
                 requisition_id=str(existing.id),
                 requisition_number=existing.requisition_number,
                 created=False,
             )
         # The link is dangling (requisition deleted) — fall through and rebuild.
 
-    if intake.status not in (IntakeStatus.approved, IntakeStatus.converted):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Only an approved intake can be converted (status: '{intake.status}').",
-        )
+    _raise_if(intake_convert_refusal(intake))
 
     # Reuse the intake's own number to seed a stable, related requisition number.
     requisition_number = f"REQ-{intake.request_number}"
@@ -695,7 +738,7 @@ async def convert_to_requisition(
     await db.commit()
     fresh = await _get_intake_or_404(db, intake.id, entity_id)
     return IntakeConvertResponse(
-        intake=_to_response(fresh),
+        intake=_to_response(fresh, user),
         requisition_id=str(requisition.id),
         requisition_number=requisition.requisition_number,
         created=True,

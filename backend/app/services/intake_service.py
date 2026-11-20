@@ -1,6 +1,6 @@
 """Intake-form helpers — kept out of the router so the route handlers stay thin.
 
-Holds: intake request-number generation, the status-transition guard (a small
+Holds: intake request-number generation, the status-transition graph (a small
 state machine mirroring the expense-report / requisition approval shape), and
 the convert-to-requisition logic (creates a ``PurchaseRequisition`` + a single
 ``RequisitionLineItem`` from the intake). All money math is ``Decimal`` (never
@@ -14,7 +14,6 @@ import uuid
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,15 +48,6 @@ VALID_TRANSITIONS: dict[IntakeStatus, set[IntakeStatus]] = {
     IntakeStatus.converted: set(),  # terminal
     IntakeStatus.cancelled: set(),  # terminal
 }
-
-
-def guard_transition(current: IntakeStatus, target: IntakeStatus) -> None:
-    """Raise 422 if ``current → target`` is not an allowed intake move."""
-    if target not in VALID_TRANSITIONS.get(current, set()):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"Cannot move an intake request from '{current}' to '{target}'.",
-        )
 
 
 async def generate_request_number(db: AsyncSession) -> str:
