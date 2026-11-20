@@ -37,6 +37,9 @@ Map<String, dynamic> _detailJson({
   Object? currency = 'USD',
   Map<String, dynamic>? erpReport,
   String? erpName,
+  // The caller's `decision_refusals`; defaults to a manager's (see
+  // [_managerDecisions]). `null` models a read that carries none.
+  Object? decisions = _managerDefault,
 }) =>
     {
       'id': '1',
@@ -57,7 +60,29 @@ Map<String, dynamic> _detailJson({
       'created_at': '2026-01-01T12:00:00',
       'erp_report': ?erpReport,
       'erp_name': ?erpName,
+      'decision_refusals': identical(decisions, _managerDefault)
+          ? _managerDecisions(status)
+          : decisions,
     };
+
+const _managerDefault = Object();
+
+const _notActionable = {
+  'code': 'exception_not_actionable',
+  'message': "Cannot resolve from 'resolved' status",
+  'params': <String, dynamic>{},
+};
+
+/// `decision_refusals` as `api/exceptions.py::decision_refusals` builds them
+/// for a reader holding the queue's role with no segregation conflict: every
+/// action accepted on an open or escalated row, the status refusal otherwise.
+Map<String, dynamic> _managerDecisions(String status) {
+  final actionable = status == 'open' || status == 'escalated';
+  return {
+    for (final a in ['resolve', 'dismiss', 'escalate'])
+      a: actionable ? null : _notActionable,
+  };
+}
 
 Map<String, dynamic> _me(List<String> roles) => {
       'id': 'u1',
@@ -434,6 +459,83 @@ void main() {
       ExceptionStore.instance.actionErrorDetail,
       isA<Map<String, dynamic>>(),
     );
+  });
+
+  group('decision verdicts', () {
+    Future<void> pumpDetail(
+      WidgetTester tester, {
+      Object? decisions = _managerDefault,
+      String status = 'open',
+    }) async {
+      setTallSurface(tester);
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (req.method == 'GET' &&
+              RegExp(r'/exceptions/[^/]+$').hasMatch(req.url.path)) {
+            return _json(_detailJson(status: status, decisions: decisions));
+          }
+          return _json({'items': [], 'total': 0, 'page': 1});
+        }),
+      );
+      await tester.pumpWidget(
+        _host(const ExceptionDetailScreen(exceptionId: '1')),
+      );
+      await _pumpUntil(tester, find.text('PO Mismatch'));
+    }
+
+    testWidgets('an implicated manager sees Resolve and Dismiss disabled with '
+        'the reason, and Escalate enabled', (tester) async {
+      const sod = {
+        'code': 'segregation_implicated',
+        'message': 'server english',
+        'params': <String, dynamic>{},
+      };
+      await pumpDetail(
+        tester,
+        decisions: {'resolve': sod, 'dismiss': sod, 'escalate': null},
+      );
+
+      final resolve = tester.widget<ButtonStyleButton>(
+        find.ancestor(
+          of: find.text('Resolve'),
+          matching: find.bySubtype<ButtonStyleButton>(),
+        ),
+      );
+      expect(resolve.onPressed, isNull);
+      final escalate = tester.widget<ButtonStyleButton>(
+        find.ancestor(
+          of: find.text('Escalate'),
+          matching: find.bySubtype<ButtonStyleButton>(),
+        ),
+      );
+      expect(escalate.onPressed, isNotNull);
+      expect(find.textContaining('Segregation of duties'), findsNWidgets(2));
+      expect(find.text('server english'), findsNothing);
+    });
+
+    testWidgets('a reader whose role may not decide sees no actions',
+        (tester) async {
+      const role = {'code': 'role_not_permitted', 'message': 'm'};
+      await pumpDetail(
+        tester,
+        decisions: {'resolve': role, 'dismiss': role, 'escalate': role},
+      );
+      expect(find.text('Resolve'), findsNothing);
+      expect(find.text('Escalate'), findsNothing);
+      expect(find.text('Dismiss'), findsNothing);
+    });
+
+    testWidgets('a resolved row offers no actions', (tester) async {
+      await pumpDetail(tester, status: 'resolved');
+      expect(find.text('Escalate'), findsNothing);
+    });
+
+    testWidgets('no verdict offers nothing (fail closed)', (tester) async {
+      await pumpDetail(tester, decisions: null);
+      expect(find.text('Resolve'), findsNothing);
+      expect(find.text('Escalate'), findsNothing);
+      expect(find.text('Dismiss'), findsNothing);
+    });
   });
 
   testWidgets('admin can open the assignee picker and assign a user',

@@ -7,6 +7,7 @@ import 'package:feohledger_mobile/l10n/enum_labels.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/invoice_warning_messages.dart';
 import 'package:feohledger_mobile/l10n/load_error_messages.dart';
+import 'package:feohledger_mobile/models/action_verdict.dart';
 import 'package:feohledger_mobile/models/admin_user.dart';
 import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -93,7 +94,13 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
     }
 
     final exc = _exception!;
-    final canAct = exc.status.isActionable && !_submitting;
+    // Resolve / Escalate / Dismiss from the server's verdicts
+    // (`decision_refusals`): the section renders when any is offered.
+    final offersAction = [
+      exc.resolveVerdict,
+      exc.escalateVerdict,
+      exc.dismissVerdict,
+    ].any((v) => v.isOffered(hiddenCodes: kExceptionHiddenRefusals));
     // Localized off the row's description code — the invoice's own warning
     // wording — with the server's English as the fallback.
     final description = exceptionDescriptionText(l, exc);
@@ -144,7 +151,7 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
             _resolutionPanel(l, exc),
           ],
           const SizedBox(height: 24),
-          if (canAct) _actionButtons(l, exc),
+          if (offersAction) _actionButtons(l, exc),
         ],
       ),
     );
@@ -368,37 +375,85 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
     );
   }
 
+  /// The three decisions, each from its verdict: absent when refused for the
+  /// reader's role or a terminal status, enabled when accepted, else disabled
+  /// with the refusal in the reader's language (a segregation-of-duties
+  /// refusal names who may act instead) — never a button that can only 403.
   Widget _actionButtons(AppLocalizations l, ApException exc) {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: () => _runAction('resolve'),
-                icon: const Icon(Icons.check),
-                label: Text(l.exceptionActionResolve),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => _runAction('escalate'),
-                icon: const Icon(Icons.arrow_upward),
-                label: Text(l.exceptionActionEscalate),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: () => _runAction('dismiss'),
-            icon: const Icon(Icons.block),
-            label: Text(l.exceptionActionDismiss),
+    Widget? action(
+      ActionVerdict verdict,
+      String action,
+      Widget Function(VoidCallback? onPressed) button,
+    ) {
+      if (!verdict.isOffered(hiddenCodes: kExceptionHiddenRefusals)) {
+        return null;
+      }
+      final reason = verdict.allowed
+          ? null
+          : localizeCodedRefusal(l, verdict.refusal) ??
+                (verdict.refusal?['message'] as String? ?? '');
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          button(
+            verdict.allowed && !_submitting ? () => _runAction(action) : null,
           ),
-        ),
+          if (reason != null && reason.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                reason,
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+              ),
+            ),
+        ],
+      );
+    }
+
+    final resolve = action(
+      exc.resolveVerdict,
+      'resolve',
+      (onPressed) => FilledButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(Icons.check),
+        label: Text(l.exceptionActionResolve),
+      ),
+    );
+    final escalate = action(
+      exc.escalateVerdict,
+      'escalate',
+      (onPressed) => OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(Icons.arrow_upward),
+        label: Text(l.exceptionActionEscalate),
+      ),
+    );
+    final dismiss = action(
+      exc.dismissVerdict,
+      'dismiss',
+      (onPressed) => OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(Icons.block),
+        label: Text(l.exceptionActionDismiss),
+      ),
+    );
+    // Resolve and Escalate side by side, Dismiss full width beneath.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (resolve != null || escalate != null)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (resolve != null) Expanded(child: resolve),
+              if (resolve != null && escalate != null)
+                const SizedBox(width: 8),
+              if (escalate != null) Expanded(child: escalate),
+            ],
+          ),
+        if ((resolve != null || escalate != null) && dismiss != null)
+          const SizedBox(height: 8),
+        ?dismiss,
       ],
     );
   }
