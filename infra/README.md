@@ -521,11 +521,13 @@ only `node:https`, so a runtime bump needs no code change.
 price this was sized on; check the CloudWatch pricing page), one alarm $0.10,
 a few KB of S3 artifacts and logs, Lambda time inside the free tier.
 
-**Operator step: apply it** (not yet applied). Plan and apply as in
-§ Workload stack step 3; it needs no new variable. The plan should add the
-canary, its alarm, its role and inline policy, the artifacts bucket and its
-six settings resources, and change only `access_logs_delivery`'s bucket policy
-(its source list gains the artifacts bucket); it destroys nothing. Then, in the
+**Applied 2026-11-21**, first run **Passed**. To re-apply after a change, plan and
+apply as in § Workload stack step 3, which needs `db_master_password` like any
+plan of this stack. The first apply also brought up everything else on `main`
+that had not been applied yet: the uptime health checks and their pager topic
+(§ Uptime checks and paging, still without a phone), the `frontend-404` alarm
+replacing `frontend-4xx` with the CloudFront metrics subscription it needs, and
+the platform certificate expiry alarm. It destroyed only the old 4xx alarm. After any apply, in the
 CloudWatch console (us-east-1) → Application Signals → Synthetics Canaries,
 the first run should be **Passed**, its log naming the certificate's issuer and
 days left. To see the failure path without touching production, run the
