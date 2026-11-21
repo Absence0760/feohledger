@@ -78,16 +78,17 @@ and cannibalize willingness to pay.
 4. Enable **Stripe Tax** if selling across multiple states —
    automatic sales tax calculation is worth the 0.5% fee.
 
-## Step 2 — Create products + prices
+## Step 2 — Products + prices: none by hand
 
-In Stripe Dashboard → Products:
-
-1. Create a product for each pricing tier (e.g. "Starter", "Growth",
-   "Business").
-2. For each, create a recurring Price (e.g. $500/mo).
-3. If metered: create a metered price + set aggregation (`sum` or
-   `last_during_period`).
-4. Copy the `price_id`s — you'll reference these in code.
+**Corrected 2026-11-21.** This step used to say to create a product and
+price per tier in the Dashboard and copy the `price_id`s into code. Don't:
+the app creates the prices it uses itself (one per plan and amount, found
+again account-wide by its `lookup_key`), the `ai_invoice_overage` meter and
+its metered overage prices, each org's customer, and — on a move onto a paid
+plan — the customer's subscription (decisions §480). A hand-made product
+would never be referenced. Your pricing decision lives in
+`backend/app/services/billing/plan_catalog.py` (which also generates the
+public pricing page).
 
 ## Step 3 — Wire the live account into the shipped code
 
@@ -112,24 +113,20 @@ The adapter interface, if you need to read it, is `billing_adapters/base.py`:
 `list_invoices`, `report_usage`, `create_setup_intent`, `list_payment_methods`,
 `parse_webhook`, `test_connection`.
 
-What the operator actually does here:
+What the operator actually does here — the authoritative, current list
+(restricted-key permissions, webhook URL + the five events, the publishable
+key, the env switches, the test-mode run) is `backend/docs/billing.md`
+§ What the operator configures in Stripe. In short:
 
-1. **Copy the price ids** from Step 2 into the plan catalog. The code
-   self-heals if you don't: `services/billing/provisioning.py` calls
-   `ensure_price` and caches the result at
-   `Organization.settings.billing.plan_price_ids[<plan_code>]`, alongside
-   the `stripe_customer_id` it creates on first use. Seeding them
-   explicitly is still better — it keeps the ids you see in the Stripe
-   dashboard the ones the app uses.
-2. **Put the secrets in sops**, in the private `infra-secrets` repo under
-   `feohledger/` — never in this repo, and never in a `.env`.
-   `FEOH_BILLING_STRIPE_API_KEY` is the one that matters;
-   `stripe_billing` fails closed without it rather than falling back to
-   mock.
-3. **Enable the webhook** with `FEOH_BILLING_WEBHOOK_ENABLED` and register
-   the endpoint URL in the Stripe dashboard.
-4. **Leave the provider on `mock` until all three are done.** That is the
-   local-first default and it is the safe state.
+1. **A restricted key** (`rk_…`) with only the permissions that section
+   lists, in sops (`infra-secrets/feohledger/`) as
+   `FEOH_BILLING_STRIPE_API_KEY` — never in this repo or a `.env`.
+2. **The webhook endpoint** registered in Stripe, its signing secret in sops
+   as `FEOH_BILLING_STRIPE_WEBHOOK_SECRET`, `FEOH_BILLING_WEBHOOK_ENABLED` on.
+3. **The publishable key** (`pk_…`, not secret) as the repository variable
+   `STRIPE_PUBLISHABLE_KEY`, so `/billing` can take a card.
+4. **Flip `FEOH_BILLING_PROVIDER` to `stripe_billing`** last. Until then a
+   deployed API refuses every move onto a paid plan — the safe state.
 
 See `backend/docs/billing.md` for the engineering detail.
 
@@ -140,17 +137,13 @@ told you to push aggregates through `billing.SubscriptionItem.create_usage_recor
 which is Stripe's legacy usage-record API. `stripe_billing.py` uses
 **Billing Meter Events**, one event per meter, which is the current one.
 
-What ships: `services/billing/usage_rollup.py` folds the per-tenant
-`extraction_usage` and `card_rebates` tables into a `UsageRollup` per
-org/period — read-only, no side effects, every amount an exact `Decimal` —
-and the adapter's `report_usage` iterates that map generically, so adding
-a meter needs no adapter change. The `extractions` meter is the billable
-one today; card rebates are surfaced but not billed.
-
-The operator decision here is only **which meters your pricing charges
-on**, and creating the matching metered Prices in Step 2. If you picked a
-flat monthly bundle for pilot #1 — the recommendation above — you can skip
-this section entirely.
+**Corrected 2026-11-21.** What ships is the AI-read invoice meter
+(decisions §253, §255; `backend/docs/billing.md` § AI-read invoice
+metering): one `ai_invoice_overage` meter event per AI-read invoice past
+the plan's allowance, billed by a per-unit metered price the app creates
+and puts on each paid customer's subscription. There is nothing to create
+by hand; the pricing decision is each plan's `usage_components` in
+`plan_catalog.py`.
 
 ## Step 5 — Invoice + dunning
 
@@ -167,10 +160,10 @@ All engineering boxes here are already closed; what remains is operator work.
 
 - [ ] Pricing model decided + documented
 - [ ] Stripe account activated
-- [ ] Products + prices created
-- [ ] Price ids seeded into the plan catalog (or left to `ensure_price`)
+- [x] ~~Products + prices created~~ — the app creates them (Step 2)
 - [ ] `FEOH_BILLING_STRIPE_API_KEY` in sops (`infra-secrets/feohledger/`)
 - [ ] `FEOH_BILLING_WEBHOOK_ENABLED` on, endpoint registered in Stripe
+- [ ] `STRIPE_PUBLISHABLE_KEY` repository variable set
 - [ ] Provider flipped off `mock`
 - [ ] First test charge works end-to-end (use a
       [Stripe test card](https://stripe.com/docs/testing))

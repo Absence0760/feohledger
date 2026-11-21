@@ -1,5 +1,11 @@
 <script lang="ts">
+	import { tick, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page as appPage } from '$app/state';
+	import { ApiError } from '#lib/api.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import CardSetupPanel from '#lib/components/billing/CardSetupPanel.svelte';
+	import { takePendingPlan } from '#lib/utils/pendingPlanChange.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
@@ -17,7 +23,7 @@
 		getBillingPaymentMethods,
 		getBillingPlans,
 		getBillingSubscription,
-		startBillingSetupIntent
+		setDefaultBillingPaymentMethod
 	} from '#lib/api/billing.ts';
 	import { formatMoney } from '#lib/utils/money.ts';
 	import { formatCount } from '#lib/utils/count.ts';
@@ -38,11 +44,12 @@
 		BillingInvoice,
 		BillingInvoiceStatus,
 		BillingPaymentMethod,
+		BillingPaymentMethodsResponse,
 		BillingPlan,
 		BillingPlanChangeResponse,
 		BillingSubscriptionResponse
 	} from '#lib/types/billing.ts';
-	import { rebateMeterGroups } from '#lib/types/billing.ts';
+	import { planChangeCardAction, rebateMeterGroups } from '#lib/types/billing.ts';
 	import { formatDate, formatMonth } from '#lib/utils/time.ts';
 	import { errorMessage } from '#lib/utils/apiError.ts';
 	import { PLAN_FEATURES, isPlanFeature, planFeatureLabelKey } from '#lib/types/planFeatures.ts';
@@ -105,16 +112,12 @@
 	let pmLoading = $state(true);
 	let pmError = $state<string | null>(null);
 
-	// Add / replace card flow. The deployed flow confirms `client_secret` against
-	// the provider's JS SDK (Stripe Elements); the local-first stack has no real
-	// Stripe and the frontend must not call secret-bearing services directly, so
-	// the secret is surfaced as a clearly-marked "next step" seam, never used to
-	// charge or to mount real Elements here.
-	let addingCard = $state(false);
-	let cardSetup = $state<{
-		state: 'idle' | 'starting' | 'ready' | 'not_configured' | 'error';
-		message: string | null;
-	}>({ state: 'idle', message: null });
+	// Add / replace card flow — `components/billing/CardSetupPanel.svelte`
+	// (Stripe Elements when the backend runs Stripe and the build has a
+	// publishable key; a "save test card" step on the local mock provider).
+	// Keyed by `cardFlowNonce`, so every attempt is a fresh SetupIntent.
+	let cardFlowOpen = $state(false);
+	let cardFlowNonce = $state(0);
 
 	async function loadPaymentMethods() {
 		pmLoading = true;
@@ -128,41 +131,85 @@
 		}
 	}
 
-	async function startAddCard() {
-		addingCard = true;
-		cardSetup = { state: 'starting', message: null };
-		try {
-			const res = await startBillingSetupIntent();
-			if (!res.configured || !res.client_secret) {
-				// Org never provisioned with the provider, or the provider isn't
-				// configured (the live adapter fails closed without a key). Not an
-				// error — a clear "billing not configured" affordance.
-				cardSetup = {
-					state: 'not_configured',
-					message: m('billing.card.notConfigured')
-				};
-				return;
-			}
-			// A real SetupIntent secret came back. Mounting the provider's card form
-			// (Stripe Elements) is a deployed-only piece — see the placeholder below.
-			// Re-list cards so a card attached out-of-band shows up.
-			cardSetup = {
-				state: 'ready',
-				message: m('billing.card.ready')
-			};
-			await loadPaymentMethods();
-		} catch (e) {
-			cardSetup = {
-				state: 'error',
-				message: errorMessage(e, m('billing.card.startError'))
-			};
-		} finally {
-			addingCard = false;
-		}
+	function startAddCard() {
+		cardFlowNonce += 1;
+		cardFlowOpen = true;
+	}
+
+	// The section's "Add or replace card" button: where focus goes back to
+	// when the card panel closes (WCAG 2.4.3) — unless the plan dialog reopens
+	// for the retry, which takes focus itself.
+	let addCardButton = $state<HTMLButtonElement | undefined>();
+
+	async function returnFocusToAddCard() {
+		// The button is disabled while the panel is open; it is enabled (and
+		// focusable) only once the close has rendered.
+		await tick();
+		addCardButton?.focus();
 	}
 
 	function closeAddCard() {
-		cardSetup = { state: 'idle', message: null };
+		cardFlowOpen = false;
+		// Walking away from the card form abandons the upgrade it was for.
+		pendingPlanCode = null;
+		pendingPlanName = null;
+		returnFocusToAddCard();
+	}
+
+	async function onCardSaved(res: BillingPaymentMethodsResponse) {
+		paymentMethods = res.payment_methods;
+		pmError = null;
+		cardFlowOpen = false;
+		toast(m('billing.card.saved'), 'success');
+		const pending = pendingPlanCode;
+		pendingPlanCode = null;
+		pendingPlanName = null;
+		if (pending) await retryPlanChange(pending);
+		else await returnFocusToAddCard();
+	}
+
+	/**
+	 * Finish a SetupIntent Stripe confirmed through a REDIRECT. A card confirms
+	 * in place (`redirect: 'if_required'`), so this only runs for a
+	 * redirect-based method: Stripe returns to `/billing?setup_intent=…&
+	 * redirect_status=…&setup_intent_client_secret=…`. The query is dropped
+	 * first, so the single-use secret does not linger in the address bar or
+	 * history, and a reload cannot repeat the call. (Should the session have
+	 * expired meanwhile, the auth wall's `next` drops the secret too —
+	 * `utils/postLoginRedirect.ts::SECRET_QUERY_PARAMS`.)
+	 *
+	 * Resolves to the plan code a card-refused upgrade stashed for THIS intent
+	 * before leaving (`utils/pendingPlanChange.ts`), once the card is saved —
+	 * the caller retries that change — else `null`.
+	 */
+	async function finishRedirectedSetup(): Promise<string | null> {
+		const { id, status } = untrack(() => {
+			const params = appPage.url.searchParams;
+			return { id: params.get('setup_intent'), status: params.get('redirect_status') };
+		});
+		if (!id) return null;
+		// A shallow replace: drops the query without a navigation or a history entry.
+		const path = untrack(() => appPage.url.pathname);
+		await goto(path, { state: {}, shallow: true, replace: true });
+		// Read and clear in every outcome, so no later return can pick it up.
+		const pending = takePendingPlan(id);
+		if (status === 'processing') {
+			// Not a failure: the bank has not settled it yet.
+			toast(m('billing.card.redirectProcessing'), 'info');
+			return null;
+		}
+		if (status !== 'succeeded') {
+			toast(m('billing.card.confirmFailed'), 'error');
+			return null;
+		}
+		try {
+			await setDefaultBillingPaymentMethod(id);
+			toast(m('billing.card.saved'), 'success');
+			return pending;
+		} catch (e) {
+			toast(errorMessage(e, m('billing.card.saveFailed')), 'error');
+			return null;
+		}
 	}
 
 	// Plan-change flow. `POST /api/billing/change-plan` APPLIES the change on
@@ -178,6 +225,13 @@
 	let selectedPlanCode = $state<string | null>(null);
 	let changingPlan = $state(false);
 	let changeError = $state<string | null>(null);
+	// What the dialog offers beside a refusal: add a card (none on file) or
+	// update it (the upgrade charge was declined). Keyed on the refusal code.
+	let changeErrorAction = $state<'add_card' | 'update_card' | null>(null);
+	// The plan a card-refused upgrade is waiting on: once a card is saved the
+	// change is retried for the reader, and the dialog reopens on its result.
+	let pendingPlanCode = $state<string | null>(null);
+	let pendingPlanName = $state<string | null>(null);
 	let changeResult = $state<BillingPlanChangeResponse | null>(null);
 
 	async function loadAvailablePlans() {
@@ -196,6 +250,7 @@
 		showChangePlan = true;
 		selectedPlanCode = null;
 		changeError = null;
+		changeErrorAction = null;
 		changeResult = null;
 		loadAvailablePlans();
 	}
@@ -208,6 +263,7 @@
 		if (!selectedPlanCode) return;
 		changingPlan = true;
 		changeError = null;
+		changeErrorAction = null;
 		try {
 			changeResult = await changeBillingPlan(selectedPlanCode);
 			// Refresh the plan/usage surface behind the modal so it reflects the
@@ -215,9 +271,33 @@
 			await load();
 		} catch (e) {
 			changeError = errorMessage(e, m('billing.plan.changeModal.changeFailed'));
+			changeErrorAction = planChangeCardAction(e instanceof ApiError ? e.code : null);
 		} finally {
 			changingPlan = false;
 		}
+	}
+
+	/** "Add a card" / "Update card" from the dialog: remember the chosen plan,
+	 *  close the dialog and open the card form in the payment-methods section
+	 *  (the panel takes focus and scrolls itself into view). */
+	function addCardForPlan() {
+		if (!selectedPlanCode) return;
+		pendingPlanCode = selectedPlanCode;
+		pendingPlanName = planName(selectedPlanCode);
+		showChangePlan = false;
+		startAddCard();
+	}
+
+	/** Re-run the refused change once a card is on file, in the reopened dialog
+	 *  — so the reader sees its result (or its next refusal) where they left it. */
+	async function retryPlanChange(code: string) {
+		selectedPlanCode = code;
+		changeResult = null;
+		changeError = null;
+		changeErrorAction = null;
+		showChangePlan = true;
+		if (availablePlans.length === 0) await loadAvailablePlans();
+		await confirmPlanChange();
 	}
 
 	/** Display name for a plan code the picker already fetched, falling back to
@@ -232,7 +312,13 @@
 		if (userLoaded && allowed) {
 			load();
 			loadInvoices();
-			loadPaymentMethods();
+			// A Stripe redirect return is finished before the list loads, so
+			// the list it shows already holds the new default card.
+			// A pending upgrade the redirect interrupted is retried after that.
+			finishRedirectedSetup().then(async (pending) => {
+				await loadPaymentMethods();
+				if (pending) await retryPlanChange(pending);
+			});
 		}
 	});
 
@@ -553,48 +639,18 @@
 					type="button"
 					class="btn-cancel"
 					onclick={startAddCard}
-					disabled={addingCard}
+					disabled={cardFlowOpen}
+					bind:this={addCardButton}
 					data-testid="billing-add-card"
 				>
-					{addingCard ? m('billing.pm.starting') : m('billing.pm.addReplace')}
+					{m('billing.pm.addReplace')}
 				</button>
 			</div>
 
-			{#if cardSetup.state !== 'idle'}
-				<!-- Add-card flow affordance. The real card-collection form (the
-				     provider's Stripe Elements) is a deployed-only piece — it can't run
-				     in the local-first stack and the frontend must never call a
-				     secret-bearing service directly. So we surface the right next-step
-				     state here and leave a clearly-marked seam for Elements. -->
-				<div
-					class="card-setup state-{cardSetup.state}"
-					data-testid="billing-card-setup"
-					role={cardSetup.state === 'error' ? 'alert' : 'status'}
-				>
-					{#if cardSetup.state === 'starting'}
-						<p>{m('billing.card.starting')}</p>
-					{:else if cardSetup.state === 'not_configured'}
-						<p>{cardSetup.message}</p>
-						<!-- The payment provider is not configured — an operational
-						     fault on our side, not a purchase question, so: support. -->
-						<a class="link" href="mailto:{CONTACT.support}">{m('billing.card.contactUs')}</a>
-					{:else if cardSetup.state === 'error'}
-						<p>{cardSetup.message}</p>
-						<button type="button" class="btn-cancel" onclick={startAddCard}>{m('common.retry')}</button>
-					{:else if cardSetup.state === 'ready'}
-						<p>{cardSetup.message}</p>
-						<!-- DEPLOYED-ONLY SEAM: mount the provider's card form (Stripe
-						     Elements) here, confirm the SetupIntent client_secret against
-						     it, then re-list cards. No Stripe keys are hardcoded in the
-						     static frontend; the secret never leaves this boundary. -->
-						<p class="card-setup-placeholder" data-testid="billing-card-elements-placeholder">
-							{m('billing.card.elementsPlaceholder')}
-						</p>
-					{/if}
-					<button type="button" class="link card-setup-dismiss" onclick={closeAddCard}>
-						{m('billing.card.dismiss')}
-					</button>
-				</div>
+			{#if cardFlowOpen}
+				{#key cardFlowNonce}
+					<CardSetupPanel {pendingPlanName} {pendingPlanCode} onsaved={onCardSaved} onclose={closeAddCard} />
+				{/key}
 			{/if}
 
 			{#if pmLoading}
@@ -773,7 +829,23 @@
 				</fieldset>
 
 				{#if changeError}
-					<div class="state error" role="alert">{changeError}</div>
+					<div class="state error change-error" role="alert" data-testid="billing-plan-change-error">
+						<p>{changeError}</p>
+						{#if changeErrorAction}
+							<!-- No card on file / the card was declined: go straight to
+							     the card form; the change is retried once it is saved. -->
+							<button
+								type="button"
+								class="btn-primary"
+								onclick={addCardForPlan}
+								data-testid="billing-plan-change-add-card"
+							>
+								{changeErrorAction === 'add_card'
+									? m('billing.plan.changeModal.addCard')
+									: m('billing.plan.changeModal.updateCard')}
+							</button>
+						{/if}
+					</div>
 				{/if}
 
 				<p class="apply-notice">{m('billing.plan.changeModal.applyNotice')}</p>
@@ -853,6 +925,18 @@
 
 	.state.error {
 		color: var(--danger);
+	}
+
+	.change-error {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
+	.change-error p {
+		margin: 0;
+		flex: 1 1 16rem;
 	}
 
 	/* --- Status callout (past due) --- */
@@ -1082,46 +1166,6 @@
 	}
 
 	/* --- Payment methods --- */
-	.card-setup {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.75rem;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		padding: 0.75rem 1rem;
-		font-size: 0.9rem;
-	}
-
-	.card-setup p {
-		margin: 0;
-		color: var(--text);
-	}
-
-	.card-setup.state-error {
-		border-color: var(--danger);
-	}
-
-	.card-setup.state-error p {
-		color: var(--danger);
-	}
-
-	.card-setup-placeholder {
-		color: var(--text-muted) !important;
-		font-style: italic;
-		flex-basis: 100%;
-	}
-
-	.card-setup-dismiss {
-		margin-left: auto;
-		background: none;
-		border: none;
-		cursor: pointer;
-		padding: 0;
-		min-height: 24px;
-	}
-
 	.card-label {
 		font-weight: 600;
 		font-variant-numeric: tabular-nums;

@@ -592,6 +592,19 @@ const BUILDERS: Record<string, Builder> = {
 	segregation_approver: fixed('refusal.exceptionSegregationApprover'),
 	// `api/billing.py` — a configured billing provider's read failed (502).
 	billing_provider_unavailable: fixed('refusal.billingProviderUnavailable'),
+	// `api/billing.py::change_plan` — moving onto a paid plan. The billing page
+	// branches on the first two codes to offer the add / update-card flow
+	// (`types/billing.ts::planChangeCardAction`). The decline is a 402 that
+	// is NOT the plan-feature gate's 402 (`plan_feature_required` above): the
+	// registry keys on the code, never the status, so each states its own.
+	payment_method_required: fixed('refusal.paymentMethodRequired'),
+	billing_payment_declined: fixed('refusal.billingPaymentDeclined'),
+	billing_not_configured: fixed('refusal.billingNotConfigured'),
+	plan_change_in_progress: fixed('refusal.planChangeInProgress'),
+	// `api/billing.py` — `POST /payment-method/default` for a SetupIntent that
+	// is not this org's (404) or has not succeeded yet (409).
+	setup_intent_not_found: fixed('refusal.setupIntentNotFound'),
+	setup_intent_incomplete: fixed('refusal.setupIntentIncomplete'),
 	// `api/credit_memos.py`
 	credit_memo_vendor_mismatch: fixed('refusal.creditMemoVendorMismatch'),
 	credit_memo_vendor_unresolved: fixed('refusal.creditMemoVendorUnresolved'),

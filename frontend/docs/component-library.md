@@ -263,6 +263,26 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
   — the typed string is checked by `parseSpendCapInput` and sent unchanged,
   never through a float. Testids: `billing-ai-usage`, `billing-ai-used`,
   `billing-ai-paused`, `billing-ai-cap-input`, `-save`, `-remove`.
+- `CardSetupPanel.svelte` — the add / replace-card flow. `<CardSetupPanel
+  pendingPlanName={…} onsaved={(list) => …} onclose={…} />`, mounted inside a
+  `{#key}` so each attempt is a fresh SetupIntent. On mount it focuses its own
+  heading, starts `POST /payment-method/setup-intent`, and picks its form with
+  `types/billing.ts::cardFormMode`: the Stripe Payment Element (Stripe.js
+  dynamically imported from `@stripe/stripe-js/pure` with
+  `PUBLIC_STRIPE_PUBLISHABLE_KEY`, `confirmSetup({ redirect: 'if_required' })`),
+  a "Save test card" button for the local `mock` provider, or a
+  not-configured / key-missing message. Success posts the SetupIntent id to
+  `/payment-method/default` and hands the returned list to `onsaved`. The
+  `client_secret` and SDK handles live in plain variables, never `$state`, and
+  the Element is destroyed on save, retry and unmount. A confirmed intent's id
+  is kept, so Save after a failed default-post re-posts it instead of calling
+  `confirmSetup` again; a `processing` intent shows a neutral notice
+  (`billing-card-save-notice`). `pendingPlanCode` is stashed for the intent
+  just before `confirmSetup` (`utils/pendingPlanChange.ts`) so a redirect
+  return can still retry the upgrade. Testids:
+  `billing-card-setup` (`data-mode`), `billing-card-mock`,
+  `billing-card-save-test`, `billing-card-element`, `billing-card-save`,
+  `billing-card-not-configured`, `billing-card-pending-plan`.
 
 **`workflow-builder/`** — the no-code builder canvas for the
 `/workflows/[id]` editor (step palette, canvas nodes, SVG connectors; no

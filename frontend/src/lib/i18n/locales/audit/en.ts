@@ -39,6 +39,7 @@ export const enAudit = {
 	'audit.action.bank_reconciliation.deleted': "Bank reconciliation deleted",
 	'audit.action.bank_reconciliation.imported': "Bank statement imported",
 	'audit.action.bank_reconciliation.transaction_resolved': "Bank transaction resolved",
+	'audit.action.billing.payment_method_updated': "Payment method updated",
 	'audit.action.billing.plan_changed': "Plan changed",
 	'audit.action.billing.spending_cap_updated': "Spending cap updated",
 	'audit.action.billing.subscription_canceled': "Subscription canceled",

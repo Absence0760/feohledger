@@ -24245,3 +24245,108 @@ A re-sent accept stays a 409 (`discount_offer_not_open`) rather than becoming a
 effect to suppress, and a 200 for "same tier" would need the endpoint to
 distinguish a retry from a second person choosing the same tier.
 `backend/docs/dynamic-discounting.md` § Concurrency.
+
+## 480. A plan change makes the provider's subscription match the plan, immediately in both directions, and a deployed environment refuses a paid plan nobody can charge for (closes the live-Stripe followup; issue #746, 2026-11-21)
+
+`change_plan` only repointed our `Subscription` row: the org's features
+unlocked and nothing was charged, and the AI-overage meter events the platform
+already reported had no subscription to land on. With a live provider a plan
+change now runs a provider leg (`services/billing/provider_sync.py`) between
+provisioning and the locked write: onto a paid plan it requires a default card
+and creates the Stripe subscription (base + metered overage price), paid → paid
+amends its items, paid → free cancels it. Six choices, each with the
+alternative it beat:
+
+1. **A card is required before the subscription, not collected by it.** The
+   create sends `payment_behavior=error_if_incomplete`, so a declined first
+   charge creates nothing and the API answers 402 `billing_payment_declined`
+   with our row untouched. `allow_incomplete` (Stripe's default) would have
+   created an `incomplete` subscription we would either have to unlock features
+   for (free again) or track through a second state machine. The price is that
+   a card demanding 3-D Secure on every charge cannot upgrade; the SetupIntent
+   is created with `usage=off_session`, which authenticates up front, and that is
+   what normally lets the later off-session charge through. Without a card the
+   refusal is 409 `payment_method_required` and the SPA routes the user to the
+   card form, then retries the change.
+2. **Downgrades are immediate, not at period end.** The plan change already
+   applied at once and prorated, and entitlements drop at once on our side;
+   `cancel_at_period_end` would bill the rest of the month for features the org
+   no longer has, or need a pending-plan state our row does not model. The
+   cancel sends `prorate=true` (unused time credited to the customer's Stripe
+   balance — a cash refund stays a dashboard action) and `invoice_now=true`
+   (without it the period's metered overage, already reported, would never be
+   invoiced). The row's provider id is cleared so the cancel's own
+   `customer.subscription.deleted` webhook cannot cancel the now-free row.
+   Paid → paid uses `always_invoice` for the same reason: "applies immediately"
+   is what the picker promises.
+3. **Anchored on the 1st (UTC) by an explicit `billing_cycle_anchor`
+   timestamp**, not `billing_cycle_anchor_config[day_of_month]`: the timestamp
+   leaves no reading of time zone to Stripe, and §255's reason for the anchor —
+   an overage event lands on the invoice of the month it was counted in — is a
+   UTC calendar-month rule. The first invoice prorates now → the 1st. Our
+   recorded proration is computed over that same calendar month, as a
+   day-granular estimate; Stripe's invoice is the charge of record. A self-serve
+   upgrade from Free gets no trial: the customer chose to pay.
+4. **The provider calls stay outside the row lock, serialised by a lease.**
+   `backend/docs/billing.md` § Concurrency moved provisioning out of the
+   locked window so a webhook or the dunning sweep is never parked behind a
+   Stripe round trip; the
+   provider leg follows the same rule. Two live changes for one org would then
+   interleave their Stripe calls, so a ten-minute lease (sized to the slowest
+   change, which the locked write re-checks it still holds) on
+   `settings.billing.plan_change_lease`, written under `lock_organization` and
+   committed before the first call, refuses the second
+   (`plan_change_in_progress`). A Postgres advisory lock was the alternative; an
+   `AsyncSession` does not keep one connection across the provisioning commit,
+   so a session-level lock could be taken and released on different
+   connections. The `mock` path takes no lease — it has no external effect.
+5. **Idempotency is a key per change plus adoption.** Keys are
+   `<row id>-<row updated_at>-<target plan>-<default card>`: a retry of one
+   change replays, the next change of the same row does not, and neither does a
+   retry with a new card after a decline (Stripe replays a stored 402 for 24 h,
+   and a decline leaves our row untouched, so a key without the card would
+   refuse the replacement card too) (a key per org and plan would have
+   replayed a canceled subscription on Free → Growth → Free → Growth inside 24
+   h). Because Stripe's idempotency only lasts 24 h and a crash can land between
+   Stripe's create and our commit, the create first looks for a live
+   subscription on the customer and adopts it — the only guard that holds past
+   the window. For the same 24-h reason prices are now found account-wide by
+   `lookup_key` before being created: the per-org cache alone minted a new
+   product and price for every org provisioned on a later day.
+6. **A deployed environment on `mock` refuses paid plans**
+   (`billing_not_configured`), read off the RESOLVED adapter so an unregistered
+   `FEOH_BILLING_PROVIDER` that falls back to `mock` is refused too, and keyed
+   on `settings.is_deployed` — the discriminator `payment_execution_mode`
+   already uses to refuse the `mock` payment processor, not a second mechanism.
+   Without it, production handed out every paid feature for one click. Moving
+   down to a free plan is never refused, and local dev keeps `mock` end to end
+   (guard rail 7).
+
+The webhook keeps the row in sync rather than driving it: the status comes only
+from `customer.subscription.*` events (an invoice event's object is the
+invoice, whose id and status were being read as the subscription's), invoice
+events move status along two narrow edges (`invoice.paid` past_due → active,
+`invoice.payment_failed` active → past_due), the provider's billing window is
+copied onto the row, and `canceled` is terminal. Every request pins
+`Stripe-Version` (`FEOH_BILLING_STRIPE_API_VERSION`) because those shapes —
+the window per subscription item, the invoice's subscription under `parent` —
+are exactly what changed in Stripe's 2025 versions.
+
+Where Stripe and our row could part ways, the review closed the gaps rather
+than trusting one webhook: the cancel to Free detaches the provider id in its
+own committed write BEFORE the DELETE, and the webhook reads its row
+`FOR UPDATE`, so the cancel's own `customer.subscription.deleted` cannot cancel
+the now-free row; leaving a paid plan whose row lost its id finds the customer's
+live subscription and cancels it; an org whose provider resolves to `mock` while
+its row carries a provider id cannot be moved (Stripe would keep billing); and
+the dunning sweep cancels a live-billed row only once the provider has canceled
+it, since canceling ours alone revoked the plan while Stripe kept charging. One
+gap is left, tracked in `docs/followups.md`: a subscription a crashed change
+created and never recorded is healed only by the org's next plan change.
+
+Left to verify in Stripe test mode, recorded here when seen: whether swapping a
+meter-backed price mid-period with `always_invoice` invoices the usage already
+accrued at the old price or bills the whole period at the new one at its end.
+Either way the reported units are right; only which price they meet differs.
+`backend/docs/billing.md` § The provider leg, § What the operator configures in
+Stripe; `backend/tests/test_billing_stripe_subscriptions.py`.

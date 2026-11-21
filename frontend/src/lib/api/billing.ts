@@ -8,6 +8,7 @@ import type {
 	BillingPaymentMethodsResponse,
 	BillingPlanChangeResponse,
 	BillingPlansResponse,
+	BillingSetDefaultPaymentMethodRequest,
 	BillingSetupIntentResponse,
 	BillingSpendCapResponse,
 	BillingSubscriptionResponse
@@ -60,7 +61,24 @@ export function getBillingPlans(): Promise<BillingPlansResponse> {
 /** Move the org's live subscription to `planCode`, prorated mid-period.
  *  admin/cfo only. This APPLIES the change immediately — there is no preview —
  *  and is idempotent: changing to the plan the org is already on succeeds with
- *  `changed: false` and a zero proration rather than an error. */
+ *  `changed: false` and a zero proration rather than an error. Coded refusals
+ *  the page branches on (`types/billing.ts::planChangeCardAction`): 409
+ *  `payment_method_required` (no saved card for a paid plan), 402
+ *  `billing_payment_declined` (the upgrade charge was declined; nothing
+ *  changed); also 409 `billing_not_configured` / `plan_change_in_progress`. */
 export function changeBillingPlan(planCode: string): Promise<BillingPlanChangeResponse> {
 	return api.post<BillingPlanChangeResponse>('/api/billing/change-plan', { plan_code: planCode });
+}
+
+/** Make the card a confirmed SetupIntent saved the org's DEFAULT — the one the
+ *  subscription charges. admin/cfo only. The backend checks the SetupIntent
+ *  belongs to this org's customer and succeeded; refusals are coded
+ *  (`setup_intent_not_found` 404, `setup_intent_incomplete` /
+ *  `billing_not_configured` 409, `billing_provider_unavailable` 502). Returns
+ *  the refreshed card list, so the caller need not re-fetch. */
+export function setDefaultBillingPaymentMethod(
+	setupIntentId: string
+): Promise<BillingPaymentMethodsResponse> {
+	const body: BillingSetDefaultPaymentMethodRequest = { setup_intent_id: setupIntentId };
+	return api.post<BillingPaymentMethodsResponse>('/api/billing/payment-method/default', body);
 }

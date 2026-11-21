@@ -36,6 +36,7 @@ export const messages = {
 	'audit.action.bank_reconciliation.deleted': "銀行照合を削除",
 	'audit.action.bank_reconciliation.imported': "銀行明細をインポート",
 	'audit.action.bank_reconciliation.transaction_resolved': "銀行取引を解決",
+	'audit.action.billing.payment_method_updated': "支払い方法を更新",
 	'audit.action.billing.plan_changed': "プラン変更",
 	'audit.action.billing.spending_cap_updated': "利用上限を更新",
 	'audit.action.billing.subscription_canceled': "サブスクリプション解約",

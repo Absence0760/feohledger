@@ -20,7 +20,7 @@ type Translate = (key: MessageKey, params?: Record<string, string | number>) => 
 /** The backend f-string templates, each with the rule that labels it. The
  *  roster test fails on a template that is not listed here. */
 export const DYNAMIC_ACTION_TEMPLATES = [
-	'billing.subscription_{event.status}',
+	'billing.subscription_{target}',
 	'commerce_inventory.{row.status}',
 	'contract.{target}',
 	'expense_preapproval.{new_status}',

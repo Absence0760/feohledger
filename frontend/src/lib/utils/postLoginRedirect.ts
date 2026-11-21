@@ -34,6 +34,20 @@ const UNSAFE_CHARS = /[\\\u0000-\u001f\u007f]/;
 const PROBE_ORIGIN = 'https://next.invalid';
 
 /**
+ * Query parameters a destination never carries through sign-in. Stripe returns
+ * from a redirect-based confirmation to `/billing?setup_intent=…&
+ * setup_intent_client_secret=…`; if the session has expired by then, the auth
+ * wall would copy that single-use secret into `/login?next=…` and on through
+ * every sign-in step and the SSO stash. The secret is dropped here, in the one
+ * gate every reader and writer of `next` goes through; the rest of the path
+ * (the intent id, the redirect status) survives.
+ */
+export const SECRET_QUERY_PARAMS = [
+	'setup_intent_client_secret',
+	'payment_intent_client_secret'
+] as const;
+
+/**
  * `raw` when it is a same-origin path that is safe to navigate to after
  * sign-in, otherwise `null`.
  *
@@ -65,8 +79,13 @@ export function safeNextPath(raw: unknown): string | null {
 		return null;
 	}
 	if (decoded === '/login' || decoded.startsWith('/login/')) return null;
+	let kept = raw;
+	if (SECRET_QUERY_PARAMS.some((name) => url.searchParams.has(name))) {
+		for (const name of SECRET_QUERY_PARAMS) url.searchParams.delete(name);
+		kept = `${url.pathname}${url.search}${url.hash}`;
+	}
 	if (url.pathname === '/' && !url.search && !url.hash) return null;
-	return raw;
+	return kept;
 }
 
 /** The validated destination a page's own URL carries, or `null`. */

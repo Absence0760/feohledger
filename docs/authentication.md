@@ -1239,7 +1239,11 @@ path and query they were opening travel as `?next=`:
   resolved path does not begin `//` (dot segments can collapse to one). It
   refuses anything under `/login` (a loop) and `/` itself (the default). Refused
   values are dropped, never rewritten — the user lands on the dashboard. The
-  value read back from `sessionStorage` is re-validated. Tests:
+  value read back from `sessionStorage` is re-validated. It also strips the
+  Stripe redirect secrets (`SECRET_QUERY_PARAMS`: `setup_intent_client_secret`,
+  `payment_intent_client_secret`) from an accepted path, so a card setup that
+  returns to `/billing` on an expired session does not carry its secret through
+  the login URL and history (decisions §480). Tests:
   `postLoginRedirect.test.ts` (every refused shape), `sessionRejection.test.ts`,
   and end to end `tests-e2e/auth/post-login-redirect.spec.ts`.
 

@@ -67,7 +67,9 @@ def _sign(body: bytes, secret: str = _WEBHOOK_SECRET, *, timestamp: str | None =
     return f"t={timestamp},v1={digest}"
 
 
-def _stripe_event(*, event_id: str, sub_id: str, raw_status: str, event_type="x") -> bytes:
+def _stripe_event(
+    *, event_id: str, sub_id: str, raw_status: str, event_type="customer.subscription.updated"
+) -> bytes:
     return json.dumps(
         {
             "id": event_id,

@@ -36,6 +36,7 @@ export const messages = {
 	'audit.action.bank_reconciliation.deleted': "Conciliação bancária excluída",
 	'audit.action.bank_reconciliation.imported': "Extrato bancário importado",
 	'audit.action.bank_reconciliation.transaction_resolved': "Transação bancária resolvida",
+	'audit.action.billing.payment_method_updated': "Forma de pagamento atualizada",
 	'audit.action.billing.plan_changed': "Plano alterado",
 	'audit.action.billing.spending_cap_updated': "Limite de gastos atualizado",
 	'audit.action.billing.subscription_canceled': "Assinatura cancelada",

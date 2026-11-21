@@ -168,9 +168,29 @@ describe('codedRefusalText', () => {
 		['card_txn_already_ignored', 'refusal.cardTxnAlreadyIgnored'],
 		['status_sync_off', 'refusal.statusSyncOff'],
 		['status_sync_unsupported', 'refusal.statusSyncUnsupported'],
-		['status_sync_needs_reconnect', 'refusal.statusSyncNeedsReconnect']
+		['status_sync_needs_reconnect', 'refusal.statusSyncNeedsReconnect'],
+		['billing_provider_unavailable', 'refusal.billingProviderUnavailable'],
+		['payment_method_required', 'refusal.paymentMethodRequired'],
+		['billing_payment_declined', 'refusal.billingPaymentDeclined'],
+		['billing_not_configured', 'refusal.billingNotConfigured'],
+		['plan_change_in_progress', 'refusal.planChangeInProgress'],
+		['setup_intent_not_found', 'refusal.setupIntentNotFound'],
+		['setup_intent_incomplete', 'refusal.setupIntentIncomplete']
 	] as [string, RefusalTestKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
+	});
+
+	it('states the upgrade decline (a 402) as its own sentence, not the plan-feature gate', () => {
+		// Both refusals are 402s; the registry keys on the code, so a declined
+		// card never reads as "your plan does not include this feature".
+		const declined = localizeApiDetail(
+			detail('billing_payment_declined', {}, 'Your card was declined.'),
+			deT
+		);
+		expect(declined).toBe(de['refusal.billingPaymentDeclined']);
+		expect(declined).not.toBe(
+			localizeApiDetail(detail(PLAN_FEATURE_REQUIRED, { feature: 'public_api' }), deT)
+		);
 	});
 
 	it('states a too-short password with its minimum, and only with one', () => {

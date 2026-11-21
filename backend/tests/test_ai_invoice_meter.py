@@ -384,15 +384,19 @@ async def test_stripe_overage_price_is_per_unit_metered_on_the_overage_meter():
         plan_code="scale", unit_price=Decimal("0.07")
     )
     assert price_id == "price_over"
-    meter_create = seen[1]
+    # The account-wide lookup comes first (none found), then the meter.
+    assert (seen[0].method, seen[0].url.path) == ("GET", "/v1/prices")
+    assert seen[0].url.params["lookup_keys[]"] == "feohledger_ai_overage_scale_7_usd"
+    meter_create = seen[2]
     meter_form = {k: v[0] for k, v in parse_qs(meter_create.content.decode()).items()}
     assert meter_form["event_name"] == AI_INVOICE_OVERAGE_EVENT
     assert meter_form["default_aggregation[formula]"] == "sum"
     assert meter_form["customer_mapping[event_payload_key]"] == "stripe_customer_id"
     assert meter_create.headers["Idempotency-Key"]
 
-    price_req = seen[2]
+    price_req = seen[3]
     form = {k: v[0] for k, v in parse_qs(price_req.content.decode()).items()}
+    assert form["lookup_key"] == "feohledger_ai_overage_scale_7_usd"
     assert form["recurring[usage_type]"] == "metered"
     assert form["recurring[meter]"] == "mtr_1"
     # $0.07 → 7 minor units, exact; per-unit (no graduated tiers — the allowance
@@ -406,6 +410,8 @@ async def test_stripe_overage_price_reuses_an_existing_meter():
     posts = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/v1/prices":
+            return httpx.Response(200, json={"data": []})
         if request.method == "GET":
             return httpx.Response(
                 200,
@@ -416,6 +422,23 @@ async def test_stripe_overage_price_reuses_an_existing_meter():
 
     await _stripe(handler).ensure_overage_price(plan_code="growth", unit_price=Decimal("0.10"))
     assert posts == ["/v1/prices"]
+
+
+async def test_stripe_overage_price_is_shared_across_orgs_by_lookup_key():
+    """A price already carrying the lookup key is reused — no meter call, no
+    new price — so an org provisioned after Stripe's 24 h idempotency window
+    does not mint a duplicate."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        return httpx.Response(200, json={"data": [{"id": "price_shared"}]})
+
+    price_id = await _stripe(handler).ensure_overage_price(
+        plan_code="growth", unit_price=Decimal("0.10")
+    )
+    assert price_id == "price_shared"
+    assert calls == [("GET", "/v1/prices")]
 
 
 async def test_stripe_subscription_carries_the_overage_item_when_resolved():
