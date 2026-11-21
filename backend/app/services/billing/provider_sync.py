@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 #: ``settings.billing`` key holding an in-flight live plan change's lease.
 LEASE_KEY = "plan_change_lease"
 #: How long a lease holds before another change may take over. Comfortably
-#: longer than the provider calls of one change (four at most, each with a 15 s
+#: longer than the provider calls of one change (five at most, each with a 15 s
 #: client timeout); short enough that a crashed request blocks nobody for long.
 LEASE_TTL = timedelta(minutes=2)
 
@@ -194,8 +194,10 @@ async def apply_plan_at_provider(
     """Make the live provider's subscription match ``new_plan``.
 
     ``change_key`` identifies this change of our row (the row id, its last
-    update and the target plan), so a retry of the same change reuses the same
-    ``Idempotency-Key``s while a later change of the same row does not.
+    update and the target plan); the default card is appended to it. A retry
+    of the same change with the same card reuses the same ``Idempotency-Key``s,
+    while a later change of the row, or a retry with a new card after a
+    decline, does not.
     Raises :class:`ProviderLegRefused` (``payment_method_required``) and lets
     the adapter's `BillingPaymentDeclined` / `BillingProviderError` propagate.
     """
@@ -210,8 +212,14 @@ async def apply_plan_at_provider(
     # Onto (or between) paid plans: the subscription charges a card off
     # session, so one must be on file first. Checked before any write at the
     # provider, so the refusal leaves nothing behind.
-    if not await adapter.ensure_default_payment_method(ids.customer_id):
+    payment_method = await adapter.ensure_default_payment_method(ids.customer_id)
+    if not payment_method:
         raise ProviderLegRefused("payment_method_required")
+    # The card is part of the key. Stripe stores a declined (402) answer
+    # under its key and replays it for 24 h, and a decline changes nothing on
+    # our row — so without this, the retry after the customer replaced the
+    # declined card would replay the decline instead of charging the new one.
+    change_key = f"{change_key}-{payment_method}"
 
     if external_subscription_id is None:
         # A previous attempt may have created the subscription and died before

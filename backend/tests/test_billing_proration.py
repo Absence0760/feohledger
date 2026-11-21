@@ -224,6 +224,8 @@ async def test_stripe_ensure_price_sends_minor_units_recurring():
     # Shared across orgs: one price per plan + amount, found again by this key.
     assert captured["lookup"] == "feohledger_plan_growth_4900_usd"
     assert "lookup_key=feohledger_plan_growth_4900_usd" in captured["body"]
+    # An archived price still holding the key must not make the create fail.
+    assert "transfer_lookup_key=true" in captured["body"]
 
 
 @pytest.mark.asyncio

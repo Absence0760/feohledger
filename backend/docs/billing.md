@@ -403,7 +403,9 @@ first use, and reuses ever after:
 - one Stripe **customer** per org (`settings.billing.stripe_customer_id`);
 - one recurring **price** per plan and amount, found account-wide by its
   `lookup_key` `feohledger_plan_<code>_<cents>_<cur>` so every org shares it
-  (a changed plan price gets a new key and a new price, never a reprice);
+  (a changed plan price gets a new key and a new price, never a reprice; the
+  create sends `transfer_lookup_key=true`, so an archived price still holding
+  the key cannot block it);
 - the **`ai_invoice_overage` Billing Meter** (looked up by event name, `sum`
   aggregation, customer mapped by the `stripe_customer_id` payload key) and one
   per-unit **metered overage price** per paid plan (`lookup_key`
@@ -646,7 +648,11 @@ accepted.
   alongside stays the authoritative status; the invoice edges are the backstop;
 - **the provider's billing window is copied** onto the row from a
   `customer.subscription.*` event (a renewal moves it with no status change —
-  committed, but no audit row, since it is not a lifecycle transition);
+  committed, but no audit row, since it is not a lifecycle transition) — but
+  never backwards: Stripe delivers events out of order, and a late event from an
+  earlier period must not rewind the window the proration and the dunning clock
+  read. (Status has no such ordering guard: event payloads carry no version, and
+  the next `customer.subscription.updated` corrects a reordered one.);
 - **idempotent**: if the target status already equals the current status it's a
   no-op and writes **no** audit row (mirrors `transition_invoice`'s no-op rule);
 - otherwise sets the new status, commits, and writes an **append-only**
@@ -871,16 +877,24 @@ provisioning and before the locked write, outside the row lock:
   in the dashboard), and `invoice_now=true` bills the period's metered overage
   on a final invoice, which canceling without it would drop. The provider
   subscription id is cleared so its `customer.subscription.deleted` webhook
-  cannot cancel the now-free row.
+  cannot cancel the now-free row. The flip side: if the final invoice's charge
+  fails, its `invoice.payment_failed` webhook names a subscription no row holds
+  any more and is dropped — the org is on Free either way, and the unpaid final
+  invoice is collected (or written off) by Stripe's own retries and dashboard,
+  not by our status.
 - **A declined charge changes nothing**: `error_if_incomplete` makes Stripe
   answer 402 and leave the subscription as it was (or create none), and our row
   is not touched. Cards that need 3-D Secure on every charge cannot pass this
   off-session check; the add-card SetupIntent (`usage=off_session`) runs the
   authentication up front, which is what lets the later charges go through.
 - **Idempotency.** Each request carries an `Idempotency-Key` derived from this
-  change of our row (`<row id>-<row updated_at>-<target plan>`): a retry of the
-  same change replays Stripe's original answer, a later change of the same row
-  gets a fresh key. A provider call that succeeded before our commit failed is
+  change of our row and the card it charges (`<row id>-<row updated_at>-<target
+  plan>-<default payment method>`): a retry of the same change with the same
+  card replays Stripe's original answer, a later change of the same row gets a
+  fresh key — and so does a retry after the customer replaced a declined card.
+  Stripe stores a 402 under its key and replays it for 24 h while a decline
+  changes nothing on our row, so without the card in the key the new card would
+  never be tried. A provider call that succeeded before our commit failed is
   healed on the next attempt by adoption (create) or by re-applying the same
   items (amend), and is logged at ERROR meanwhile.
 - **One live change per org at a time.** The provider calls are outside the
@@ -888,7 +902,8 @@ provisioning and before the locked write, outside the row lock:
   expiry, two minutes) serialises them: written under `lock_organization` and
   committed before the first provider call; a second change meanwhile gets
   `plan_change_in_progress`; an expired lease (a request that died) is taken
-  over; the lease is dropped when the change ends either way. The `mock`
+  over (two minutes covers the leg's five provider calls at most, each with a
+  15 s timeout); the lease is dropped when the change ends either way. The `mock`
   path takes no lease — it has no external effect, and the row lock alone
   serialises it as § Concurrency describes. Under the lock a live change also
   refuses if the row moved off the plan the provider change was made from.

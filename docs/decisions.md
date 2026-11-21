@@ -24300,8 +24300,11 @@ alternative it beat:
    so a session-level lock could be taken and released on different
    connections. The `mock` path takes no lease — it has no external effect.
 5. **Idempotency is a key per change plus adoption.** Keys are
-   `<row id>-<row updated_at>-<target plan>`: a retry of one change replays,
-   the next change of the same row does not (a key per org and plan would have
+   `<row id>-<row updated_at>-<target plan>-<default card>`: a retry of one
+   change replays, the next change of the same row does not, and neither does a
+   retry with a new card after a decline (Stripe replays a stored 402 for 24 h,
+   and a decline leaves our row untouched, so a key without the card would
+   refuse the replacement card too) (a key per org and plan would have
    replayed a canceled subscription on Free → Growth → Free → Growth inside 24
    h). Because Stripe's idempotency only lasts 24 h and a crash can land between
    Stripe's create and our commit, the create first looks for a live

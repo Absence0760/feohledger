@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -76,6 +77,9 @@ __all__ = [
 #: (`active`, `trialing`, `past_due`, `unpaid`, `incomplete`, `paused`) still
 #: bills, so `find_live_subscription` treats it as the org's subscription.
 _ENDED_STATUSES = frozenset({"canceled", "incomplete_expired"})
+
+#: A Stripe SetupIntent id — the only shape `adopt_setup_intent` puts in a path.
+_SETUP_INTENT_ID = re.compile(r"seti_[A-Za-z0-9]{1,250}")
 
 
 def _ts(value) -> datetime | None:
@@ -272,6 +276,9 @@ class StripeBillingAdapter(BillingAdapter):
             "product_data[name]": plan_code,
             "metadata[plan_code]": plan_code,
             "lookup_key": lookup_key,
+            # An ARCHIVED price can still hold the key (`_find_price` only
+            # returns active ones); without this the create would 400 forever.
+            "transfer_lookup_key": "true",
         }
         # Frozen prefix — see ensure_customer: renaming an idempotency key
         # already registered with Stripe would duplicate the price on retry.
@@ -486,7 +493,9 @@ class StripeBillingAdapter(BillingAdapter):
         exist, belong to THIS org's customer (an id from another customer is
         refused as not-found, never adopted), and have succeeded."""
         self._require_key()
-        if not customer_id or not setup_intent_id.startswith("seti_"):
+        # The id goes into a URL path: only a well-formed SetupIntent id may,
+        # or `seti_/../customers/…` would send an arbitrary GET with our key.
+        if not customer_id or not _SETUP_INTENT_ID.fullmatch(setup_intent_id):
             raise SetupIntentRejected("not_found")
         async with self._client() as client:
             resp = await client.get(f"/v1/setup_intents/{setup_intent_id}")
@@ -644,6 +653,7 @@ class StripeBillingAdapter(BillingAdapter):
                 "metadata[plan_code]": plan_code,
                 "metadata[meter_event]": AI_INVOICE_OVERAGE_EVENT,
                 "lookup_key": lookup_key,
+                "transfer_lookup_key": "true",
             }
             headers = {"Idempotency-Key": f"feohledger-ai-overage-price-{plan_code}-{minor}-{cur}"}
             resp = await client.post("/v1/prices", data=form, headers=headers)

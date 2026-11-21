@@ -158,6 +158,12 @@ def _sync_period(subscription: Subscription, event: BillingWebhookEvent) -> bool
     start, end = event.current_period_start, event.current_period_end
     if start is None or end is None or end <= start:
         return False
+    stored_end = subscription.current_period_end
+    if stored_end is not None and end < stored_end:
+        # Stripe does not deliver events in order: a late event from an
+        # earlier period must not move the window (which the proration and
+        # the dunning grace clock read) backwards.
+        return False
     if subscription.current_period_start == start and subscription.current_period_end == end:
         return False
     subscription.current_period_start = start

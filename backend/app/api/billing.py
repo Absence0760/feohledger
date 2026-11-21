@@ -448,8 +448,6 @@ async def change_subscription_plan(
         # deployed environment still on `mock` — paid plans are unavailable.
         raise _billing_refusal("billing_not_configured") from exc
     except Exception as exc:  # noqa: BLE001 — any other provider failure is a logged 502
-        if isinstance(exc, HTTPException):
-            raise
         raise _provider_unavailable("change_plan", exc) from exc
 
     return PlanChangeResponse(

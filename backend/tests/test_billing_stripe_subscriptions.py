@@ -70,6 +70,7 @@ class FakeStripe:
         self.subscriptions: dict[str, dict] = {}
         self.setup_intents: dict[str, dict] = {}
         self.prices: dict[str, str] = {}  # lookup_key -> price id
+        self.replies: dict[str, tuple[int, dict]] = {}  # Idempotency-Key -> answer
         self.decline = False
         self._n = 0
 
@@ -119,8 +120,21 @@ class FakeStripe:
             "items": {"data": items},
         }
 
-    def handler(self, request: httpx.Request) -> httpx.Response:  # noqa: C901 — one router
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        """Stripe's idempotency, as the decline-then-retry path depends on it:
+        a request whose `Idempotency-Key` was seen before gets the stored
+        answer replayed — a 402 included — without being executed again."""
         self.requests.append(request)
+        key = request.headers.get("Idempotency-Key")
+        if key and key in self.replies:
+            status, body = self.replies[key]
+            return httpx.Response(status, json=body)
+        response = self._route(request)
+        if key:
+            self.replies[key] = (response.status_code, response.json())
+        return response
+
+    def _route(self, request: httpx.Request) -> httpx.Response:  # noqa: C901 — one router
         path, method = request.url.path, request.method
         if method == "POST" and path == "/v1/customers":
             cid = self._id("cus")
@@ -414,6 +428,8 @@ async def test_setup_intent_adoption_refuses_foreign_and_unfinished(fake_stripe)
         ("seti_missing", "not_found"),
         ("seti_wip", "incomplete"),
         ("pi_not_a_seti", "not_found"),
+        # Never interpolated into a path: this would GET /v1/customers/cus_x.
+        ("seti_/../../customers/cus_x", "not_found"),
     ):
         with pytest.raises(SetupIntentRejected) as exc:
             await adapter.adopt_setup_intent("cus_me", seti)
@@ -747,6 +763,34 @@ async def test_a_declined_upgrade_changes_nothing(realdb, fake_stripe, org_a):
 
 
 @pytest.mark.asyncio
+async def test_after_a_decline_a_new_card_is_charged_not_the_replayed_decline(
+    realdb, fake_stripe, org_a, _audit_engine_on_loop
+):
+    """Stripe replays a stored 402 for the same Idempotency-Key for 24 h, and a
+    decline changes nothing on our row — so the key must change with the card,
+    or the customer who replaced it would be refused again."""
+    free = await _plan(realdb, "free", "0.00", overage=False)
+    await _plan(realdb, "growth", "49.00")
+    sub_id = await _sub(realdb, org_a, free)
+    await _set_billing(realdb, org_a, stripe_customer_id="cus_org")
+    fake_stripe.add_card("cus_org")
+    fake_stripe.decline = True
+    with pytest.raises(BillingPaymentDeclined):
+        await _change(realdb, org_a, "growth")
+
+    # Same card, issuer now approves: still the replayed decline (Stripe's
+    # behaviour, not ours to change) — the remedy the UI offers is a new card.
+    fake_stripe.decline = False
+    with pytest.raises(BillingPaymentDeclined):
+        await _change(realdb, org_a, "growth")
+
+    fake_stripe.add_card("cus_org")  # the customer replaces the card
+    result = await _change(realdb, org_a, "growth")
+    assert result.changed is True
+    assert (await _row(realdb, sub_id)).external_subscription_id in fake_stripe.subscriptions
+
+
+@pytest.mark.asyncio
 async def test_a_subscription_a_dead_attempt_left_is_adopted_not_duplicated(
     realdb, fake_stripe, org_a, _audit_engine_on_loop
 ):
@@ -910,6 +954,20 @@ async def test_subscription_events_sync_the_window_and_canceled_is_terminal(
     )
     result = await _apply(realdb, renewal)
     assert result.applied is True and result.reason == "period_synced"
+    row = await _row(realdb, sub_id)
+    assert (row.current_period_start, row.current_period_end) == (july, aug)
+
+    # A late event from the PREVIOUS period (Stripe delivers out of order)
+    # never moves the window backwards.
+    stale = BillingWebhookEvent(
+        event_id="evt_stale",
+        event_type="customer.subscription.updated",
+        external_subscription_id="sub_win",
+        status="active",
+        current_period_start=datetime(2026, 6, 1, tzinfo=UTC),
+        current_period_end=july,
+    )
+    assert (await _apply(realdb, stale)).applied is False
     row = await _row(realdb, sub_id)
     assert (row.current_period_start, row.current_period_end) == (july, aug)
 
