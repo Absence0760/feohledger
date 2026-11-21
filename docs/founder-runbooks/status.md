@@ -84,10 +84,9 @@ each step.
         decisions §311); open until the toll-free number is registered, the
         phone verified and set in `prod.tfvars.sops`, the stack applied, and a test
         alarm has rung it (`infra/README.md` § Uptime checks and paging)
-  - [ ] Certificate canary applied — built in Terraform (`infra/canary.tf`, PR
-        #738): pages if `api.`'s Let's Encrypt certificate is under 14 days to
-        expiry; open until the workload stack is applied (`infra/README.md`
-        § Certificate canary; `docs/followups.md` § (b))
+  - [x] Certificate canary applied 2026-11-21 (`infra/canary.tf`, PR #738):
+        pages if `api.`'s Let's Encrypt certificate is under 14 days to
+        expiry; first run passed (`infra/README.md` § Certificate canary)
   - [ ] Incident runbook written
 - [ ] **Insurance** — **hard gate before customer #1** for a sole proprietor
       (decisions §252): with no entity, it is the only cover for personal assets
