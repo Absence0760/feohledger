@@ -347,6 +347,7 @@ async def _record_change(
         change_at=now,
     )
 
+    previous_status = subscription.status
     if provider_change is not None and provider_change.action != "none":
         subscription.external_subscription_id = provider_change.external_subscription_id
         synced = provider_change.subscription
@@ -389,6 +390,12 @@ async def _record_change(
     if provider_change is not None:
         details["provider_action"] = provider_change.action
         details["external_subscription_id"] = provider_change.external_subscription_id
+    if subscription.status != previous_status:
+        # The provider's answer moved the lifecycle status too (a past_due row
+        # back to active, say): a status change on a regulated record is on
+        # the trail, in the same row as the change that caused it.
+        details["from_status"] = previous_status
+        details["to_status"] = subscription.status
     await dispatch_auth_audit(
         organization_id=org.id,
         actor_id=actor_id,
