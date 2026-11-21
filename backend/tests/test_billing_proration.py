@@ -205,6 +205,10 @@ async def test_stripe_ensure_price_sends_minor_units_recurring():
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            # The account-wide lookup by key finds nothing yet.
+            captured["lookup"] = request.url.params["lookup_keys[]"]
+            return httpx.Response(200, json={"data": []})
         captured["body"] = request.content.decode()
         captured["idem"] = request.headers.get("Idempotency-Key")
         return httpx.Response(200, json={"id": "price_new"})
@@ -217,6 +221,9 @@ async def test_stripe_ensure_price_sends_minor_units_recurring():
     assert "unit_amount=4900" in captured["body"]  # 49.00 → 4900 cents, exact
     assert "recurring%5Binterval%5D=month" in captured["body"]
     assert captured["idem"] == "ap-price-growth-4900-usd"
+    # Shared across orgs: one price per plan + amount, found again by this key.
+    assert captured["lookup"] == "feohledger_plan_growth_4900_usd"
+    assert "lookup_key=feohledger_plan_growth_4900_usd" in captured["body"]
 
 
 @pytest.mark.asyncio

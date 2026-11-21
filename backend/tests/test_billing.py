@@ -402,6 +402,12 @@ async def test_stripe_list_payment_methods_maps_shape_pii_safe():
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/customers/cus_42":
+            # The customer's default card — the one the list marks is_default.
+            return httpx.Response(
+                200,
+                json={"id": "cus_42", "invoice_settings": {"default_payment_method": "pm_2"}},
+            )
         captured["path"] = request.url.path
         captured["query"] = dict(request.url.params)
         return httpx.Response(
@@ -447,6 +453,8 @@ async def test_stripe_list_payment_methods_maps_shape_pii_safe():
     assert methods[0].exp_month == 12
     assert methods[0].exp_year == 2030
     assert methods[1].brand == "mastercard"
+    # The customer's invoice default is the one marked, and only it.
+    assert [m.is_default for m in methods] == [False, True]
 
     captured.clear()
     assert await adapter.list_payment_methods(None) == []

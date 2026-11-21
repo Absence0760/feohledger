@@ -24,6 +24,7 @@ from app.services.billing_adapters.base import (
     ProviderPaymentMethod,
     ProviderSetupIntent,
     ProviderSubscription,
+    SetupIntentRejected,
     UsageReport,
 )
 from app.services.billing_adapters.dispatcher import register_billing_adapter
@@ -63,6 +64,45 @@ class MockBillingAdapter(BillingAdapter):
             status="active",
             plan_code="",
         )
+
+    # The plan-change lifecycle below is never reached by `change_plan` — the
+    # mock is not a live provider, so a plan change only repoints our row
+    # (and a DEPLOYED environment refuses a paid plan on it outright). They
+    # exist so the interface is total and a direct caller gets an honest,
+    # deterministic answer rather than NotImplementedError.
+
+    async def find_live_subscription(self, customer_id: str) -> ProviderSubscription | None:
+        return None
+
+    async def change_subscription_plan(
+        self,
+        external_subscription_id: str,
+        *,
+        price_id: str,
+        overage_price_id: str | None,
+        plan_code: str,
+        idempotency_key: str,
+    ) -> ProviderSubscription:
+        return ProviderSubscription(
+            external_subscription_id=external_subscription_id, status="active", plan_code=plan_code
+        )
+
+    async def cancel_subscription(self, external_subscription_id: str) -> ProviderSubscription:
+        return ProviderSubscription(
+            external_subscription_id=external_subscription_id, status="canceled", plan_code=""
+        )
+
+    async def ensure_default_payment_method(self, customer_id: str | None) -> str | None:
+        # The mock's one synthetic card (see `list_payment_methods`) is the default.
+        return f"mock_pm_{customer_id}" if customer_id else None
+
+    async def adopt_setup_intent(self, customer_id: str | None, setup_intent_id: str) -> str:
+        """Accept only the synthetic intent `create_setup_intent` hands THIS
+        customer, so the local add-card flow is exercised end to end and a
+        wrong id is refused exactly as the live adapter refuses one."""
+        if not customer_id or setup_intent_id != f"mock_seti_{customer_id}":
+            raise SetupIntentRejected("not_found")
+        return f"mock_pm_{customer_id}"
 
     async def list_invoices(
         self, *, customer_id: str | None, limit: int = 24

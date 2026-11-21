@@ -32,6 +32,8 @@ from app.services.billing_adapters.base import (
     AI_INVOICE_OVERAGE_EVENT,
     BillingAdapter,
     BillingNotConfigured,
+    BillingPaymentDeclined,
+    BillingProviderError,
     BillingWebhookEvent,
     CreateSubscriptionRequest,
     MeterEvent,
@@ -39,6 +41,7 @@ from app.services.billing_adapters.base import (
     ProviderPaymentMethod,
     ProviderSetupIntent,
     ProviderSubscription,
+    SetupIntentRejected,
     UsageReport,
 )
 from app.services.billing_adapters.dispatcher import register_billing_adapter
@@ -62,8 +65,73 @@ def _to_minor_units(amount: Decimal) -> int:
     return int((amount * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-class BillingProviderError(RuntimeError):
-    """Raised when Stripe returns a non-2xx for a configured request."""
+__all__ = [
+    "BillingNotConfigured",
+    "BillingPaymentDeclined",
+    "BillingProviderError",
+    "StripeBillingAdapter",
+]
+
+#: Stripe subscription statuses that are not live any more. Anything else
+#: (`active`, `trialing`, `past_due`, `unpaid`, `incomplete`, `paused`) still
+#: bills, so `find_live_subscription` treats it as the org's subscription.
+_ENDED_STATUSES = frozenset({"canceled", "incomplete_expired"})
+
+
+def _ts(value) -> datetime | None:
+    """A Stripe Unix timestamp → aware UTC datetime (None when absent)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return datetime.fromtimestamp(value, tz=UTC)
+
+
+def _period_of(obj: dict) -> tuple[datetime | None, datetime | None]:
+    """The subscription's current billing window.
+
+    Since API version 2025-03-31 Stripe reports the window per subscription
+    ITEM, not on the subscription; every item of ours shares one cycle (one
+    anchor, monthly prices), so the first item's window is the subscription's.
+    The top-level fields are read as a fallback for older-shaped payloads.
+    """
+    items = ((obj.get("items") or {}).get("data")) or []
+    for item in items:
+        if isinstance(item, dict):
+            start, end = _ts(item.get("current_period_start")), _ts(item.get("current_period_end"))
+            if start and end:
+                return start, end
+    return _ts(obj.get("current_period_start")), _ts(obj.get("current_period_end"))
+
+
+def _subscription_of(payload: dict, *, plan_code: str = "") -> ProviderSubscription:
+    start, end = _period_of(payload)
+    return ProviderSubscription(
+        external_subscription_id=str(payload["id"]),
+        status=_STATUS_MAP.get(payload.get("status", ""), "past_due"),
+        plan_code=plan_code or str((payload.get("metadata") or {}).get("plan_code") or ""),
+        current_period_start=start,
+        current_period_end=end,
+    )
+
+
+def _invoice_subscription_id(invoice: dict) -> str | None:
+    """The subscription an invoice bills. Since API version 2025-03-31 it sits
+    at ``parent.subscription_details.subscription``; the old top-level
+    ``subscription`` is read as a fallback."""
+    parent = invoice.get("parent") or {}
+    details = parent.get("subscription_details") if isinstance(parent, dict) else None
+    sub = (details or {}).get("subscription") if isinstance(details, dict) else None
+    if sub is None:
+        sub = invoice.get("subscription")
+    if isinstance(sub, dict):
+        sub = sub.get("id")
+    return str(sub) if sub else None
+
+
+def _id_of(value) -> str | None:
+    """A Stripe reference that may be a bare id or an expanded object."""
+    if isinstance(value, dict):
+        value = value.get("id")
+    return str(value) if value else None
 
 
 # Map Stripe subscription statuses → our four-state lifecycle. ``incomplete`` /
@@ -117,6 +185,15 @@ class StripeBillingAdapter(BillingAdapter):
         return (self.config or {}).get("stripe_api_base") or _DEFAULT_API_BASE
 
     @property
+    def _api_version(self) -> str:
+        """The pinned ``Stripe-Version`` (``FEOH_BILLING_STRIPE_API_VERSION``).
+
+        Pinned rather than left to the account default so the wire shapes this
+        module parses (period bounds per item, an invoice's subscription under
+        ``parent``) cannot change under it when the account's default moves."""
+        return (self.config or {}).get("stripe_api_version") or ""
+
+    @property
     def _timeout(self) -> float:
         return float((self.config or {}).get("timeout_seconds", 15.0))
 
@@ -133,10 +210,12 @@ class StripeBillingAdapter(BillingAdapter):
         Factored out so unit tests can patch ``StripeBillingAdapter._client``
         with a transport that serves canned responses (no network).
         """
+        headers = {"Stripe-Version": self._api_version} if self._api_version else None
         return httpx.AsyncClient(
             base_url=self._api_base,
             auth=(self._api_key, ""),
             timeout=self._timeout,
+            headers=headers,
         )
 
     async def ensure_customer(
@@ -185,30 +264,54 @@ class StripeBillingAdapter(BillingAdapter):
         self._require_key()
         unit_amount = _to_minor_units(monthly_price)
         cur = currency.lower()
+        lookup_key = f"feohledger_plan_{plan_code}_{unit_amount}_{cur}"
         form = {
             "unit_amount": str(unit_amount),
             "currency": cur,
             "recurring[interval]": "month",
             "product_data[name]": plan_code,
             "metadata[plan_code]": plan_code,
+            "lookup_key": lookup_key,
         }
         # Frozen prefix — see ensure_customer: renaming an idempotency key
         # already registered with Stripe would duplicate the price on retry.
         headers = {"Idempotency-Key": f"ap-price-{plan_code}-{unit_amount}-{cur}"}
         async with self._client() as client:
+            existing = await self._find_price(client, lookup_key)
+            if existing:
+                return existing
             resp = await client.post("/v1/prices", data=form, headers=headers)
         payload = self._json_or_raise(resp, "ensure_price")
         return str(payload["id"])
 
+    async def _find_price(self, client: httpx.AsyncClient, lookup_key: str) -> str | None:
+        """The active price already carrying ``lookup_key``, if any.
+
+        The ``Idempotency-Key`` only dedupes a retry inside Stripe's 24-hour
+        window; the price ids are cached per ORG (`settings.billing`), so
+        without this every org provisioned on a later day minted its own copy
+        of the same plan's product and price. The lookup key is the
+        account-wide name for "this plan at this amount", so every org shares
+        one price per plan (and a price change gets a new key, never a reprice
+        of the old one)."""
+        resp = await client.get(
+            "/v1/prices", params={"lookup_keys[]": lookup_key, "active": "true", "limit": "1"}
+        )
+        for price in self._json_or_raise(resp, "find_price").get("data") or []:
+            if isinstance(price, dict) and price.get("id"):
+                return str(price["id"])
+        return None
+
     async def create_subscription(self, request: CreateSubscriptionRequest) -> ProviderSubscription:
         """Create a subscription at Stripe and normalize the result.
 
-        Expects the provider-side ``customer`` id and ``price`` id to have been
-        resolved upstream and passed via the request's idempotency context; in
-        this wiring they ride in ``config`` (the caller injects the per-org
-        Stripe customer + the plan's Stripe price id). The ``Idempotency-Key``
-        header makes a retried create safe — Stripe returns the original
-        subscription rather than a duplicate.
+        The provider-side ``customer`` and ``price`` ids are resolved upstream
+        (`provisioning.provision_org_billing`) and ride in ``config``; without
+        them this fails closed. ``payment_behavior=error_if_incomplete``: if
+        the first charge fails Stripe answers 402 and creates NOTHING, so a
+        declined card never leaves a half-made subscription behind and the
+        plan change is refused (:class:`BillingPaymentDeclined`). The
+        ``Idempotency-Key`` makes a retried create return the original.
         """
         self._require_key()
         customer = (self.config or {}).get("stripe_customer_id")
@@ -220,6 +323,9 @@ class StripeBillingAdapter(BillingAdapter):
         form: dict[str, str] = {
             "customer": str(customer),
             "items[0][price]": str(price),
+            "payment_behavior": "error_if_incomplete",
+            "metadata[organization_id]": str(request.organization_id),
+            "metadata[plan_code]": request.plan_code,
         }
         # A plan that bills AI-read overage needs its metered price on the
         # subscription too, or Stripe records the meter events and invoices none
@@ -229,28 +335,171 @@ class StripeBillingAdapter(BillingAdapter):
             form["items[1][price]"] = str(overage_price)
         if request.trial_days > 0:
             form["trial_period_days"] = str(request.trial_days)
+        if request.billing_cycle_anchor is not None:
+            # The stretch until the anchor is prorated onto the first invoice
+            # (Stripe's default `create_prorations`, stated so it can't drift).
+            form["billing_cycle_anchor"] = str(int(request.billing_cycle_anchor.timestamp()))
+            form["proration_behavior"] = "create_prorations"
         request_headers = {}
         if request.idempotency_key:
             request_headers["Idempotency-Key"] = request.idempotency_key
         async with self._client() as client:
             resp = await client.post("/v1/subscriptions", data=form, headers=request_headers)
         payload = self._json_or_raise(resp, "create_subscription")
-        return ProviderSubscription(
-            external_subscription_id=str(payload["id"]),
-            status=_STATUS_MAP.get(payload.get("status", ""), "past_due"),
-            plan_code=request.plan_code,
-        )
+        return _subscription_of(payload, plan_code=request.plan_code)
 
     async def get_subscription(self, external_subscription_id: str) -> ProviderSubscription:
         self._require_key()
         async with self._client() as client:
             resp = await client.get(f"/v1/subscriptions/{external_subscription_id}")
         payload = self._json_or_raise(resp, "get_subscription")
-        return ProviderSubscription(
-            external_subscription_id=str(payload["id"]),
-            status=_STATUS_MAP.get(payload.get("status", ""), "past_due"),
-            plan_code="",
+        return _subscription_of(payload)
+
+    async def find_live_subscription(self, customer_id: str) -> ProviderSubscription | None:
+        self._require_key()
+        params = {"customer": str(customer_id), "status": "all", "limit": "20"}
+        async with self._client() as client:
+            resp = await client.get("/v1/subscriptions", params=params)
+        payload = self._json_or_raise(resp, "list_subscriptions")
+        for obj in payload.get("data") or []:
+            if isinstance(obj, dict) and obj.get("status") not in _ENDED_STATUSES:
+                return _subscription_of(obj)
+        return None
+
+    async def change_subscription_plan(
+        self,
+        external_subscription_id: str,
+        *,
+        price_id: str,
+        overage_price_id: str | None,
+        plan_code: str,
+        idempotency_key: str,
+    ) -> ProviderSubscription:
+        """Move the subscription's items onto a new plan's prices.
+
+        The items are told apart by the price's ``recurring.usage_type``: the
+        flat base price is ``licensed``, the AI-read overage price is
+        ``metered``. The base item's price is swapped; the metered item's is
+        swapped, added, or removed to match the new plan. ``always_invoice``
+        bills the prorated difference now (the change "applies immediately",
+        as the plan picker says) and ``error_if_incomplete`` makes Stripe leave
+        the subscription untouched if that charge fails (402 →
+        :class:`BillingPaymentDeclined`).
+        """
+        self._require_key()
+        async with self._client() as client:
+            resp = await client.get(f"/v1/subscriptions/{external_subscription_id}")
+            current = self._json_or_raise(resp, "get_subscription")
+            base_item: str | None = None
+            metered_item: str | None = None
+            for item in (current.get("items") or {}).get("data") or []:
+                if not isinstance(item, dict):
+                    continue
+                recurring = (item.get("price") or {}).get("recurring") or {}
+                if recurring.get("usage_type") == "metered":
+                    metered_item = metered_item or str(item.get("id"))
+                else:
+                    base_item = base_item or str(item.get("id"))
+
+            form: dict[str, str] = {
+                "proration_behavior": "always_invoice",
+                "payment_behavior": "error_if_incomplete",
+                "metadata[plan_code]": plan_code,
+            }
+            index = 0
+            if base_item:
+                form[f"items[{index}][id]"] = base_item
+            form[f"items[{index}][price]"] = str(price_id)
+            index += 1
+            if metered_item and overage_price_id:
+                form[f"items[{index}][id]"] = metered_item
+                form[f"items[{index}][price]"] = str(overage_price_id)
+            elif metered_item:
+                form[f"items[{index}][id]"] = metered_item
+                form[f"items[{index}][deleted]"] = "true"
+            elif overage_price_id:
+                form[f"items[{index}][price]"] = str(overage_price_id)
+            resp = await client.post(
+                f"/v1/subscriptions/{external_subscription_id}",
+                data=form,
+                headers={"Idempotency-Key": idempotency_key},
+            )
+            payload = self._json_or_raise(resp, "update_subscription")
+        return _subscription_of(payload, plan_code=plan_code)
+
+    async def cancel_subscription(self, external_subscription_id: str) -> ProviderSubscription:
+        """Cancel now: ``prorate`` credits the unused part of the period to the
+        customer's Stripe balance, ``invoice_now`` bills un-invoiced metered
+        overage on a final invoice (without it, overage reported this period
+        would never be billed). A second cancel of a canceled subscription is
+        answered with the canceled subscription, not an error."""
+        self._require_key()
+        params = {"invoice_now": "true", "prorate": "true"}
+        async with self._client() as client:
+            resp = await client.delete(
+                f"/v1/subscriptions/{external_subscription_id}", params=params
+            )
+            if 400 <= resp.status_code < 500 and resp.status_code != 402:
+                check = await client.get(f"/v1/subscriptions/{external_subscription_id}")
+                if check.status_code < 400:
+                    existing = self._json_or_raise(check, "get_subscription")
+                    if existing.get("status") in _ENDED_STATUSES:
+                        return _subscription_of(existing)
+            payload = self._json_or_raise(resp, "cancel_subscription")
+        return _subscription_of(payload)
+
+    async def _customer_default_pm(self, client: httpx.AsyncClient, customer_id: str) -> str | None:
+        resp = await client.get(f"/v1/customers/{customer_id}")
+        customer = self._json_or_raise(resp, "get_customer")
+        return _id_of((customer.get("invoice_settings") or {}).get("default_payment_method"))
+
+    async def _set_customer_default_pm(
+        self, client: httpx.AsyncClient, customer_id: str, payment_method_id: str
+    ) -> None:
+        resp = await client.post(
+            f"/v1/customers/{customer_id}",
+            data={"invoice_settings[default_payment_method]": payment_method_id},
         )
+        self._json_or_raise(resp, "set_default_payment_method")
+
+    async def ensure_default_payment_method(self, customer_id: str | None) -> str | None:
+        self._require_key()
+        if not customer_id:
+            return None
+        async with self._client() as client:
+            default = await self._customer_default_pm(client, customer_id)
+            if default:
+                return default
+            resp = await client.get(
+                "/v1/payment_methods",
+                params={"customer": str(customer_id), "type": "card", "limit": "1"},
+            )
+            cards = self._json_or_raise(resp, "list_payment_methods").get("data") or []
+            newest = _id_of(cards[0]) if cards and isinstance(cards[0], dict) else None
+            if not newest:
+                return None
+            await self._set_customer_default_pm(client, customer_id, newest)
+            return newest
+
+    async def adopt_setup_intent(self, customer_id: str | None, setup_intent_id: str) -> str:
+        """Verify the SetupIntent before trusting the card it carries: it must
+        exist, belong to THIS org's customer (an id from another customer is
+        refused as not-found, never adopted), and have succeeded."""
+        self._require_key()
+        if not customer_id or not setup_intent_id.startswith("seti_"):
+            raise SetupIntentRejected("not_found")
+        async with self._client() as client:
+            resp = await client.get(f"/v1/setup_intents/{setup_intent_id}")
+            if resp.status_code == 404:
+                raise SetupIntentRejected("not_found")
+            intent = self._json_or_raise(resp, "get_setup_intent")
+            if _id_of(intent.get("customer")) != str(customer_id):
+                raise SetupIntentRejected("not_found")
+            payment_method = _id_of(intent.get("payment_method"))
+            if intent.get("status") != "succeeded" or not payment_method:
+                raise SetupIntentRejected("incomplete")
+            await self._set_customer_default_pm(client, customer_id, payment_method)
+        return payment_method
 
     async def list_invoices(
         self, *, customer_id: str | None, limit: int = 24
@@ -379,7 +628,11 @@ class StripeBillingAdapter(BillingAdapter):
         self._require_key()
         cur = currency.lower()
         minor = format((unit_price * 100).normalize(), "f")
+        lookup_key = f"feohledger_ai_overage_{plan_code}_{minor}_{cur}"
         async with self._client() as client:
+            existing = await self._find_price(client, lookup_key)
+            if existing:
+                return existing
             meter_id = await self._ensure_overage_meter(client)
             form = {
                 "currency": cur,
@@ -390,6 +643,7 @@ class StripeBillingAdapter(BillingAdapter):
                 "product_data[name]": f"{plan_code} AI-read invoice overage",
                 "metadata[plan_code]": plan_code,
                 "metadata[meter_event]": AI_INVOICE_OVERAGE_EVENT,
+                "lookup_key": lookup_key,
             }
             headers = {"Idempotency-Key": f"feohledger-ai-overage-price-{plan_code}-{minor}-{cur}"}
             resp = await client.post("/v1/prices", data=form, headers=headers)
@@ -459,7 +713,9 @@ class StripeBillingAdapter(BillingAdapter):
         params = {"customer": str(customer_id), "type": "card", "limit": "100"}
         async with self._client() as client:
             resp = await client.get("/v1/payment_methods", params=params)
-        payload = self._json_or_raise(resp, "list_payment_methods")
+            payload = self._json_or_raise(resp, "list_payment_methods")
+            # The card subscription invoices charge, so the list can say which.
+            default = await self._customer_default_pm(client, str(customer_id))
         out: list[ProviderPaymentMethod] = []
         for obj in payload.get("data") or []:
             if not isinstance(obj, dict):
@@ -475,7 +731,7 @@ class StripeBillingAdapter(BillingAdapter):
                     last4=card.get("last4"),
                     exp_month=int(exp_month) if isinstance(exp_month, int) else None,
                     exp_year=int(exp_year) if isinstance(exp_year, int) else None,
-                    is_default=False,
+                    is_default=bool(default) and obj.get("id") == default,
                 )
             )
         return out
@@ -483,6 +739,10 @@ class StripeBillingAdapter(BillingAdapter):
     @staticmethod
     def _json_or_raise(resp: httpx.Response, op: str) -> dict:
         """Parse a Stripe JSON response or raise a PII-free provider error."""
+        if resp.status_code == 402:
+            # A declined charge (card_error). Distinct from an outage: Stripe
+            # made no change, and the remedy is the customer's card.
+            raise BillingPaymentDeclined(f"Stripe {op} declined: HTTP 402")
         if resp.status_code >= 400:
             # PII-free: status code + op only — never echo the body (it can
             # contain customer detail).
@@ -584,12 +844,37 @@ class StripeBillingAdapter(BillingAdapter):
         if not event_id or not event_type:
             return None
         obj = (payload.get("data") or {}).get("object") or {}
-        raw_status = obj.get("status")
+        if not isinstance(obj, dict):
+            return None
+        event_type = str(event_type)
+        if event_type.startswith("customer.subscription."):
+            # The object IS the subscription: its status and window are the
+            # provider's own, so both are carried for the sync.
+            raw_status = obj.get("status")
+            start, end = _period_of(obj)
+            return BillingWebhookEvent(
+                event_id=str(event_id),
+                event_type=event_type,
+                external_subscription_id=_id_of(obj.get("id")),
+                status=_STATUS_MAP.get(raw_status) if raw_status else None,
+                current_period_start=start,
+                current_period_end=end,
+            )
+        if event_type.startswith("invoice."):
+            # The object is an INVOICE: its id and status are the invoice's, not
+            # the subscription's, so neither may be read as a lifecycle status.
+            # The subscription it bills is carried; `apply_billing_event` decides
+            # what the event type means for it.
+            return BillingWebhookEvent(
+                event_id=str(event_id),
+                event_type=event_type,
+                external_subscription_id=_invoice_subscription_id(obj),
+                status=None,
+            )
+        # Any other event (customer.*, payment_method.*, …) has no lifecycle
+        # effect here.
         return BillingWebhookEvent(
-            event_id=str(event_id),
-            event_type=str(event_type),
-            external_subscription_id=obj.get("id"),
-            status=_STATUS_MAP.get(raw_status) if raw_status else None,
+            event_id=str(event_id), event_type=event_type, external_subscription_id=None
         )
 
     async def test_connection(self) -> bool:

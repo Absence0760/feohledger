@@ -27,6 +27,13 @@ billing period:
      ``billing.plan_changed`` audit row (PII-free; old/new plan + proration as an
      exact decimal string).
 
+**With a live provider** (decisions §480) a provider leg runs between 1 and 2,
+also outside the lock, under a per-org lease: it creates, amends or cancels the
+org's Stripe subscription (`provider_sync.apply_plan_at_provider`), and step 5
+records what it did. A paid plan needs a card on file; a declined charge makes
+no change anywhere. In a deployed environment a paid plan with the ``mock``
+provider is refused before anything is written.
+
 **Step 1 must stay ahead of step 2.** `provision_org_billing` commits, and a
 commit inside the locked section RELEASES the row lock mid-transaction: the
 waiting racer's ``FOR UPDATE`` then returned the still-unrepointed row, both
@@ -38,11 +45,13 @@ round-trip out of the locked window.
 
 Money-path boundary
 -------------------
-This NEVER moves money directly. The proration is computed and recorded; the
-actual charge/credit is the provider's job (a live ``stripe_billing`` would issue
-the proration line on the next invoice). The ``mock`` provider no-ops, so locally
-the proration is informational. Idempotency is the "already on this plan" guard
-plus the provider's own idempotency keys in `provision_org_billing`.
+This never moves money itself. With a live provider the charge (or credit) is
+the provider's: its subscription is created / amended / canceled and the
+provider invoices the proration, under ``Idempotency-Key``s derived from this
+change of the row. The proration computed here is recorded as our estimate; the
+``mock`` provider moves nothing, so locally it is informational. Idempotency is
+the "already on this plan" guard, the provider's idempotency keys, and adopting
+a provider subscription a dead attempt left behind (`provider_sync`).
 """
 
 from __future__ import annotations
@@ -55,6 +64,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.billing import Plan, Subscription
 from app.models.organization import Organization
 from app.services.audit_dispatch import dispatch_auth_audit
@@ -62,7 +72,17 @@ from app.services.billing.entitlements import get_active_subscription
 from app.services.billing.period import current_period
 from app.services.billing.plan_catalog import clear_stale_canceled_subscription
 from app.services.billing.proration import ProrationResult, compute_proration
-from app.services.billing.provisioning import provision_org_billing
+from app.services.billing.provider_sync import (
+    ProviderChange,
+    ProviderLegRefused,
+    apply_plan_at_provider,
+    calendar_month,
+    claim_plan_change_lease,
+    is_live_provider,
+    refuse_unbilled_paid_plan,
+    release_plan_change_lease,
+)
+from app.services.billing.provisioning import billing_adapter_for, provision_org_billing
 
 logger = logging.getLogger(__name__)
 
@@ -152,8 +172,11 @@ async def change_plan(
     """Move the org's live subscription to ``new_plan_code``, prorated.
 
     Raises :class:`PlanChangeError` (the API maps to 4xx) when the org has no
-    live subscription or the target plan code is unknown/inactive. A change to
-    the plan the org is already on is a successful **no-op** (``changed=False``).
+    live subscription or the target plan code is unknown/inactive, and
+    :class:`ProviderLegRefused` for a coded refusal the provider leg makes (no
+    card on file, billing not configured in a deployed environment, another
+    change in flight). A change to the plan the org is already on is a
+    successful **no-op** (``changed=False``).
     """
     now = change_at or datetime.now(UTC)
 
@@ -176,9 +199,10 @@ async def change_plan(
     # provisioning had anything to persist, i.e. on the FIRST change to any plan
     # the org has no stored price id for — the common case, not an edge one.
     #
-    # Provisioning here also keeps the provider round-trip (up to two live
-    # Stripe calls) OUT of the locked window, so an inbound billing webhook or
-    # the dunning sweep can't be parked behind it on the same subscription row.
+    # Provisioning here also keeps the provider round-trips OUT of the locked
+    # window, so an inbound billing webhook or the dunning sweep can't be
+    # parked behind them on the same subscription row. The same holds for the
+    # provider leg below (create / amend / cancel the live subscription).
     #
     # The unlocked peek is what preserves "a same-plan retry makes no provider
     # call"; the AUTHORITATIVE no-live-subscription / already-on-plan checks are
@@ -186,7 +210,7 @@ async def change_plan(
     peek = await get_active_subscription(control_db, org.id)
     if peek is None:
         raise PlanChangeError("no_live_subscription")
-    _peek_subscription, peek_plan = peek
+    peek_subscription, peek_plan = peek
     if peek_plan.id == new_plan.id:
         return PlanChangeResult(
             changed=False,
@@ -195,13 +219,81 @@ async def change_plan(
             proration=_zero_proration(peek_plan.monthly_price, new_plan.monthly_price),
             reason="already_on_plan",
         )
+    # Plain values: the provisioning commit below expires every loaded instance.
+    peek_plan_id = peek_plan.id
+    peek_external_id = peek_subscription.external_subscription_id
+    updated_at = peek_subscription.updated_at or peek_subscription.created_at
+    change_key = (
+        f"{peek_subscription.id}-{int(updated_at.timestamp()) if updated_at else 0}-{new_plan.code}"
+    )
+
+    adapter = billing_adapter_for(org)
+    live = is_live_provider(adapter)
+    # A deployed environment never hands out a paid plan the provider cannot
+    # charge for (decisions §480). Before provisioning, so nothing is written.
+    refuse_unbilled_paid_plan(adapter, new_plan, deployed=settings.is_deployed)
 
     # Resolve-or-create the provider customer + the NEW plan's price so the live
     # adapter has what create/update needs. Fails closed (BillingNotConfigured)
     # with the live adapter and no key — before anything is locked or mutated.
-    await provision_org_billing(control_db, org=org, plan=new_plan)
+    ids = await provision_org_billing(control_db, org=org, plan=new_plan)
 
-    # --- Locked read-modify-write: ONE transaction, ONE commit ---------------
+    lease: str | None = None
+    provider_change: ProviderChange | None = None
+    try:
+        if live:
+            # One live change per org at a time: its provider calls happen
+            # outside the row lock, so the lock alone cannot serialise them.
+            lease = await claim_plan_change_lease(control_db, org, now=now)
+            provider_change = await apply_plan_at_provider(
+                adapter,
+                organization_id=org.id,
+                external_subscription_id=peek_external_id,
+                new_plan=new_plan,
+                ids=ids,
+                change_key=change_key,
+                now=now,
+            )
+
+        result = await _record_change(
+            control_db,
+            org=org,
+            new_plan=new_plan,
+            actor_id=actor_id,
+            now=now,
+            provider=adapter.provider_name,
+            provider_change=provider_change,
+            expected_plan_id=peek_plan_id if live else None,
+        )
+    except BaseException:
+        await control_db.rollback()
+        if provider_change is not None and provider_change.action != "none":
+            # The provider already changed and our row did not: the next
+            # attempt adopts the provider's subscription (or re-applies the same
+            # items), but an operator must know the two disagree until then.
+            logger.error(
+                "billing plan change reached the provider (%s) but was not recorded",
+                provider_change.action,
+            )
+        raise
+    finally:
+        if lease is not None:
+            await release_plan_change_lease(control_db, org, lease)
+    return result
+
+
+async def _record_change(
+    control_db: AsyncSession,
+    *,
+    org: Organization,
+    new_plan: Plan,
+    actor_id,
+    now: datetime,
+    provider: str,
+    provider_change: ProviderChange | None,
+    expected_plan_id,
+) -> PlanChangeResult:
+    """The locked read-modify-write: ONE transaction, ONE commit."""
     active = await _get_active_subscription_for_update(control_db, org.id)
     if active is None:
         raise PlanChangeError("no_live_subscription")
@@ -218,6 +310,12 @@ async def change_plan(
             proration=_zero_proration(current_plan.monthly_price, new_plan.monthly_price),
             reason="already_on_plan",
         )
+    if expected_plan_id is not None and current_plan.id != expected_plan_id:
+        # The provider was changed from the peeked plan, and the row has since
+        # moved off it (a writer that took no lease — the seed's repair, an
+        # operator). Recording ours would claim a `from_plan` the provider
+        # change was never made from.
+        raise ProviderLegRefused("plan_change_in_progress")
 
     # Resolve the window the subscription is actually in, and PERSIST it. The
     # old `subscription.current_period_start or now` / `... or now` fallback
@@ -228,17 +326,40 @@ async def change_plan(
     # one rule the summary endpoint and the dunning grace clock read too, so
     # writing the resolved window back here also un-sticks a row those two
     # were reading as NULL. See `services/billing/period.py`.
-    period = current_period(subscription, now=now)
-    subscription.current_period_start = period.start
-    subscription.current_period_end = period.end
+    #
+    # With a live provider the window is the UTC calendar month: every live
+    # subscription is anchored on the 1st, so that is the period the provider
+    # prorates over (decisions §480). The figure is still our day-granular
+    # estimate; the provider's invoice is the charge of record.
+    if provider_change is not None:
+        start, end = calendar_month(now)
+    else:
+        period = current_period(subscription, now=now)
+        start, end = period.start, period.end
+    subscription.current_period_start = start
+    subscription.current_period_end = end
 
     proration = compute_proration(
         old_monthly=current_plan.monthly_price,
         new_monthly=new_plan.monthly_price,
-        period_start=period.start,
-        period_end=period.end,
+        period_start=start,
+        period_end=end,
         change_at=now,
     )
+
+    if provider_change is not None and provider_change.action != "none":
+        subscription.external_subscription_id = provider_change.external_subscription_id
+        synced = provider_change.subscription
+        if provider_change.external_subscription_id is None:
+            # Canceled at the provider: the org is on a free plan we do not
+            # bill, which is simply live.
+            subscription.status = "active"
+        elif synced is not None:
+            subscription.status = synced.status
+            # The provider's window is authoritative once it bills the row.
+            if synced.current_period_start and synced.current_period_end:
+                subscription.current_period_start = synced.current_period_start
+                subscription.current_period_end = synced.current_period_end
 
     # Guard the (org, plan) unique constraint: a leftover *canceled* row for the
     # target plan would collide when we repoint plan_id. Freeing that slot is
@@ -247,29 +368,33 @@ async def change_plan(
     # it as a production IntegrityError.
     await clear_stale_canceled_subscription(control_db, organization_id=org.id, plan_id=new_plan.id)
 
-    # Repoint the subscription. The provider-side amendment (issuing the
-    # proration line) is the live adapter's job on its next invoice cycle; the
-    # mock provider no-ops. We record the intent + amount immutably here.
     previous_plan_code = current_plan.code
     subscription.plan_id = new_plan.id
 
     # Append-only audit (SOX): plan change is a regulated control-plane mutation.
-    # PII-free — org, old/new plan code, proration as an exact decimal STRING.
-    # Dispatched BEFORE the commit (mirrors apply_billing_event) so the change is
-    # never durably persisted without an audit attempt; dispatch_auth_audit is
-    # fail-soft and opens its own tenant session.
+    # PII-free — org, old/new plan code, proration as an exact decimal STRING,
+    # and what the provider was told (its subscription id is an opaque
+    # reference, not customer data). Dispatched BEFORE the commit (mirrors
+    # apply_billing_event) so the change is never durably persisted without an
+    # audit attempt; dispatch_auth_audit is fail-soft and opens its own tenant
+    # session.
+    details = {
+        "from_plan": previous_plan_code,
+        "to_plan": new_plan.code,
+        "proration_amount": str(proration.amount),
+        "unused_days": proration.unused_days,
+        "period_days": proration.period_days,
+        "provider": provider,
+    }
+    if provider_change is not None:
+        details["provider_action"] = provider_change.action
+        details["external_subscription_id"] = provider_change.external_subscription_id
     await dispatch_auth_audit(
         organization_id=org.id,
         actor_id=actor_id,
         action="billing.plan_changed",
         entity_id=subscription.id,
-        details={
-            "from_plan": previous_plan_code,
-            "to_plan": new_plan.code,
-            "proration_amount": str(proration.amount),
-            "unused_days": proration.unused_days,
-            "period_days": proration.period_days,
-        },
+        details=details,
     )
     await control_db.commit()
 

@@ -51,8 +51,13 @@ from app.services.billing.ai_invoice_meter import (
     parse_spend_cap,
     summarize,
 )
+from app.services.billing.provider_sync import ProviderLegRefused
 from app.services.billing_adapters import get_billing_adapter
-from app.services.billing_adapters.base import BillingNotConfigured
+from app.services.billing_adapters.base import (
+    BillingNotConfigured,
+    BillingPaymentDeclined,
+    SetupIntentRejected,
+)
 from app.tenant import get_tenant, get_tenant_db, lock_organization
 
 logger = logging.getLogger(__name__)
@@ -65,6 +70,41 @@ BILLING_PROVIDER_UNAVAILABLE = "billing_provider_unavailable"
 BILLING_PROVIDER_UNAVAILABLE_DETAIL = coded_refusal(
     BILLING_PROVIDER_UNAVAILABLE, "Billing provider is unavailable; please retry."
 )
+
+
+#: Coded refusals of the live plan change and card adoption (decisions §480),
+#: by code: (HTTP status, English fallback). The SPA localizes each by its code
+#: (`frontend/src/lib/api/codedRefusals.ts`) and acts on two of them — it sends
+#: `payment_method_required` and `billing_payment_declined` to the add-card flow.
+BILLING_REFUSALS: dict[str, tuple[int, str]] = {
+    "payment_method_required": (
+        status.HTTP_409_CONFLICT,
+        "Add a card before moving to a paid plan.",
+    ),
+    "billing_payment_declined": (
+        status.HTTP_402_PAYMENT_REQUIRED,
+        "The card on file was declined, so the plan was not changed. "
+        "Update the card and try again.",
+    ),
+    "billing_not_configured": (
+        status.HTTP_409_CONFLICT,
+        "Paid plans are not available yet: billing is not configured.",
+    ),
+    "plan_change_in_progress": (
+        status.HTTP_409_CONFLICT,
+        "Another plan change is in progress. Try again in a minute.",
+    ),
+    "setup_intent_not_found": (status.HTTP_404_NOT_FOUND, "That card setup was not found."),
+    "setup_intent_incomplete": (
+        status.HTTP_409_CONFLICT,
+        "The card has not been confirmed yet.",
+    ),
+}
+
+
+def _billing_refusal(code: str) -> HTTPException:
+    http_status, message = BILLING_REFUSALS[code]
+    return HTTPException(status_code=http_status, detail=coded_refusal(code, message))
 
 
 def _provider_unavailable(op: str, exc: Exception) -> HTTPException:
@@ -397,6 +437,20 @@ async def change_subscription_plan(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Plan change not available."
         ) from exc
+    except ProviderLegRefused as exc:
+        raise _billing_refusal(exc.code) from exc
+    except BillingPaymentDeclined as exc:
+        # Before BillingProviderError (its base): a decline is the customer's
+        # card, not an outage, and the provider made no change.
+        raise _billing_refusal("billing_payment_declined") from exc
+    except BillingNotConfigured as exc:
+        # The live adapter fails closed without its key: the same answer as a
+        # deployed environment still on `mock` — paid plans are unavailable.
+        raise _billing_refusal("billing_not_configured") from exc
+    except Exception as exc:  # noqa: BLE001 — any other provider failure is a logged 502
+        if isinstance(exc, HTTPException):
+            raise
+        raise _provider_unavailable("change_plan", exc) from exc
 
     return PlanChangeResponse(
         changed=result.changed,
@@ -563,6 +617,65 @@ async def list_payment_methods(
         methods = []
     except Exception as exc:  # noqa: BLE001 — any other provider failure is a logged 502
         raise _provider_unavailable("list_payment_methods", exc) from exc
+
+    return PaymentMethodsResponse(
+        provider=provider,
+        payment_methods=[
+            PaymentMethodView(
+                id=pm.external_payment_method_id,
+                brand=pm.brand,
+                last4=pm.last4,
+                exp_month=pm.exp_month,
+                exp_year=pm.exp_year,
+                is_default=pm.is_default,
+            )
+            for pm in methods
+        ],
+    )
+
+
+class DefaultPaymentMethodRequest(BaseModel):
+    # The SetupIntent the browser just confirmed with the provider's JS SDK.
+    setup_intent_id: str = Field(min_length=1, max_length=255)
+
+
+@router.post("/payment-method/default", response_model=PaymentMethodsResponse)
+async def set_default_payment_method(
+    body: DefaultPaymentMethodRequest,
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_CFO)),
+) -> PaymentMethodsResponse:
+    """Adopt the card a confirmed SetupIntent saved as the org's default.
+
+    The browser confirms the card with the provider (no PAN reaches us) and
+    posts the SetupIntent id here. The adapter verifies the intent belongs to
+    THIS org's provider customer and succeeded before making its card the one
+    subscription invoices charge; an unknown or foreign id is a 404, an
+    unfinished one a 409. Answers with the refreshed saved-card list. Writes a
+    PII-free ``billing.payment_method_updated`` audit row (no card data).
+    """
+    provider = _resolve_provider(org)
+    adapter = get_billing_adapter(provider)
+    customer_id = _resolve_customer_id(org)
+    try:
+        await adapter.adopt_setup_intent(customer_id, body.setup_intent_id)
+        methods = await adapter.list_payment_methods(customer_id)
+    except SetupIntentRejected as exc:
+        code = "setup_intent_incomplete" if exc.reason == "incomplete" else "setup_intent_not_found"
+        raise _billing_refusal(code) from exc
+    except BillingNotConfigured as exc:
+        raise _billing_refusal("billing_not_configured") from exc
+    except Exception as exc:  # noqa: BLE001 — any other provider failure is a logged 502
+        raise _provider_unavailable("adopt_setup_intent", exc) from exc
+
+    await dispatch_auth_audit(
+        organization_id=org.id,
+        actor_id=user.id,
+        action="billing.payment_method_updated",
+        entity_id=org.id,
+        entity_type="organization",
+        details={"provider": provider},
+    )
 
     return PaymentMethodsResponse(
         provider=provider,

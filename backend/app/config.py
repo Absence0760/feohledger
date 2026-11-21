@@ -868,6 +868,12 @@ class Settings(BaseSettings):
     # point the adapter at a mock server. The adapter still fails closed without
     # an API key regardless of this value.
     billing_stripe_api_base: str = "https://api.stripe.com"
+    # The Stripe API version every billing request pins (`Stripe-Version`), so
+    # the response shapes the adapter parses (a subscription's billing window
+    # per ITEM, an invoice's subscription under `parent`) cannot change when the
+    # account's default version moves. Bump it deliberately, with the adapter
+    # tests, never implicitly. Empty = the account default (not recommended).
+    billing_stripe_api_version: str = "2026-11-18.endive"
     # Master switch for the INBOUND billing webhook route
     # (`POST /api/billing/webhook/{provider}`). OFF in local dev (no outbound
     # billing integration), flipped ON in deployed envs alongside the live

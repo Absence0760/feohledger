@@ -12,9 +12,9 @@ Money invariant: monthly price + every per-seat / usage component is
 component pricing live in JSONB so adding a tier feature or a metered component
 needs no migration. See ``backend/docs/billing.md``.
 
-FIRST SLICE — real Stripe wiring, dunning, proration, and the customer billing
-UI are later slices. ``Subscription.external_subscription_id`` is the (nullable)
-hook the live provider will populate.
+``Subscription.external_subscription_id`` is the live provider's subscription
+id: set when a plan change creates or adopts it, cleared when a move to a free
+plan cancels it (decisions §480). Always NULL with the ``mock`` provider.
 """
 
 import uuid
@@ -105,6 +105,7 @@ class Subscription(Base, TimestampMixin):
     current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     trial_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Set by the live billing provider (Stripe subscription id) once wired.
-    # Nullable: the mock provider + local dev never populate it.
+    # The live provider's (Stripe) subscription id, set by `change_plan` when
+    # it creates/adopts one and cleared when it cancels one. Nullable: the mock
+    # provider + local dev never populate it.
     external_subscription_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

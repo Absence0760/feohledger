@@ -75,6 +75,11 @@ def resolve_provider(org: Organization) -> str:
     return billing.get("provider") or settings.billing_provider
 
 
+def billing_adapter_for(org: Organization) -> BillingAdapter:
+    """The org's billing adapter, process key/base config injected."""
+    return _adapter_for(org)
+
+
 def _adapter_for(org: Organization, *, extra_config: dict | None = None) -> BillingAdapter:
     """Build the org's billing adapter with the process key/base config injected
     (via the dispatcher) plus any per-call extra (customer/price ids)."""
