@@ -40,4 +40,18 @@ export const variables = defineEnvVars({
 		static: true,
 		schema: (value) => value ?? '',
 	},
+	/**
+	 * Stripe's PUBLISHABLE key (`pk_live_…` / `pk_test_…`) for the billing
+	 * page's card form (Stripe Elements). Publishable by design — it only
+	 * identifies the Stripe account to Stripe.js — but still never hardcoded:
+	 * it comes from the build environment. Unset is legal and is the local
+	 * default: the mock billing provider needs no card form, and a build
+	 * without it facing a real `stripe_billing` backend says card entry is not
+	 * configured instead of loading Stripe.js (`types/billing.ts::cardFormMode`).
+	 */
+	PUBLIC_STRIPE_PUBLISHABLE_KEY: {
+		public: true,
+		static: true,
+		schema: (value) => value ?? '',
+	},
 });

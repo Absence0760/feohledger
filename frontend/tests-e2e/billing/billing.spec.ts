@@ -1,6 +1,14 @@
 import { execFileSync } from 'node:child_process';
 
-import { API_BASE, currentTenantSlug, expect, signInAndWait, TENANT_ROOT_URL, test } from '../fixtures/helpers';
+import {
+	API_BASE,
+	currentTenantSlug,
+	expect,
+	signInAndWait,
+	TENANT_ROOT_URL,
+	test
+} from '../fixtures/helpers';
+import type { Page } from '@playwright/test';
 
 /**
  * /billing — Platform Billing & Metering (read/display surface).
@@ -106,6 +114,55 @@ function restoreLiveSubscriptions(parked: string[]): void {
 			.map((id) => `'${id}'`)
 			.join(',')})`
 	);
+}
+
+/** A `page.route` matcher for one exact API pathname — a loose glob over
+ *  `api/billing` would also answer `vite dev`'s module request for
+ *  `#lib/api/billing.ts` (frontend/CLAUDE.md § A page.route stub). */
+function isApi(pathname: string): (url: URL) => boolean {
+	return (url) => url.pathname === pathname;
+}
+
+function json(body: unknown, status = 200) {
+	return { status, contentType: 'application/json', body: JSON.stringify(body) };
+}
+
+/** A coded refusal body, as `backend/app/api/refusals.py::coded_refusal` sends it. */
+function refusal(code: string, message: string, status: number) {
+	return json({ detail: { code, message, params: {} } }, status);
+}
+
+/** The mock adapter's SetupIntent id shape (`mock_seti_<customer>`). */
+const MOCK_SETUP_INTENT_ID = 'mock_seti_cus_e2e';
+
+const SAVED_CARD_LIST = {
+	provider: 'mock',
+	payment_methods: [
+		{ id: 'mock_pm_e2e', brand: 'visa', last4: '4242', exp_month: 12, exp_year: 2030, is_default: true }
+	]
+};
+
+async function stubMockSetupIntent(page: Page): Promise<void> {
+	await page.route(isApi('/api/billing/payment-method/setup-intent'), (route) =>
+		route.fulfill(
+			json({
+				provider: 'mock',
+				configured: true,
+				client_secret: `${MOCK_SETUP_INTENT_ID}_secret`,
+				setup_intent_id: MOCK_SETUP_INTENT_ID
+			})
+		)
+	);
+}
+
+/** Stub `POST /payment-method/default`, recording each request body. */
+async function stubSetDefault(page: Page): Promise<{ bodies: unknown[] }> {
+	const seen = { bodies: [] as unknown[] };
+	await page.route(isApi('/api/billing/payment-method/default'), (route) => {
+		seen.bodies.push(route.request().postDataJSON());
+		return route.fulfill(json(SAVED_CARD_LIST));
+	});
+	return seen;
 }
 
 test.describe('/billing (admin)', () => {
@@ -402,31 +459,64 @@ test.describe('/billing (admin)', () => {
 		await expect(section.getByText('No payment method on file.')).toBeVisible();
 	});
 
-	test('add-card with a returned client_secret shows the ready / Elements seam', async ({
+	test('mock provider: Save test card makes the mock SetupIntent the default and refreshes the list', async ({
 		page
 	}) => {
-		// A configured provider returns a single-use client_secret; the UI moves to
-		// the "ready" state and surfaces the deployed-only Elements seam (no real
-		// Stripe in the local-first stack, no secret-bearing call from the client).
-		await page.route('**/api/billing/payment-method/setup-intent', async (route) => {
-			await route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify({
-					provider: 'mock',
-					configured: true,
-					client_secret: 'mock_seti_e2e_secret',
-					setup_intent_id: 'mock_seti_e2e'
-				})
-			});
-		});
+		// The local `mock` provider has no card form (and Stripe.js must never
+		// load for it): the panel offers "Save test card", which posts the mock
+		// SetupIntent id to /payment-method/default and renders the refreshed
+		// list that endpoint returns — no second GET needed.
+		await page.route(isApi('/api/billing/payment-methods'), (route) =>
+			route.fulfill(json({ provider: 'mock', payment_methods: [] }))
+		);
+		await stubMockSetupIntent(page);
+		const saved = await stubSetDefault(page);
 
 		await page.goto('/billing');
+		const section = page.getByTestId('billing-payment-methods');
+		await expect(section.getByText('No payment method on file.')).toBeVisible({ timeout: 10_000 });
 
 		await page.getByTestId('billing-add-card').click();
 		const setup = page.getByTestId('billing-card-setup');
-		await expect(setup).toBeVisible({ timeout: 10_000 });
-		await expect(page.getByTestId('billing-card-elements-placeholder')).toBeVisible();
+		await expect(setup.getByRole('heading', { name: 'Add a card' })).toBeFocused();
+		await expect(setup.getByTestId('billing-card-mock')).toContainText('local test billing provider');
+		// No Stripe Element is mounted in mock mode.
+		await expect(page.getByTestId('billing-card-element')).toHaveCount(0);
+
+		await setup.getByTestId('billing-card-save-test').click();
+		await expect(setup).toBeHidden();
+		expect(saved.bodies).toEqual([{ setup_intent_id: MOCK_SETUP_INTENT_ID }]);
+		await expect(section.getByText('Visa ····4242')).toBeVisible();
+		await expect(section.getByText('Default', { exact: true })).toBeVisible();
+		await expect(
+			page.getByText('Card saved. Your subscription is now charged to this card.')
+		).toBeVisible();
+	});
+
+	test('stripe_billing in a build with no publishable key says card entry is not set up', async ({
+		page
+	}) => {
+		// The e2e build sets no PUBLIC_STRIPE_PUBLISHABLE_KEY (the local
+		// default), so a Stripe-backed SetupIntent must not try to load
+		// Stripe.js keyless: it names the operator gap instead.
+		await page.route(isApi('/api/billing/payment-method/setup-intent'), (route) =>
+			route.fulfill(
+				json({
+					provider: 'stripe_billing',
+					configured: true,
+					client_secret: 'seti_e2e_secret_x',
+					setup_intent_id: 'seti_e2e'
+				})
+			)
+		);
+
+		await page.goto('/billing');
+		await page.getByTestId('billing-add-card').click();
+		const setup = page.getByTestId('billing-card-setup');
+		await expect(setup.getByTestId('billing-card-not-configured')).toHaveText(
+			'Card entry is not set up for this deployment yet. Contact our team to add a card.'
+		);
+		await expect(page.getByTestId('billing-card-element')).toHaveCount(0);
 	});
 
 	test('add-card when not configured shows the billing-not-configured state', async ({ page }) => {
@@ -583,6 +673,107 @@ test.describe('/billing (admin)', () => {
 			await expect(noop).toHaveText("You're already on the E2E Current plan — nothing changed.");
 			// No proration panel on the no-op path.
 			await expect(page.getByText('Prorated adjustment')).toHaveCount(0);
+		});
+
+		test('a change refused for no saved card offers Add a card, then retries itself once one is saved', async ({
+			page
+		}) => {
+			// First POST: 409 payment_method_required (the org has no card).
+			// Second POST — the automatic retry after the card is saved — applies.
+			const planCodes: unknown[] = [];
+			await page.route(isApi('/api/billing/change-plan'), (route) => {
+				planCodes.push(route.request().postDataJSON()?.plan_code);
+				if (planCodes.length === 1) {
+					return route.fulfill(
+						refusal(
+							'payment_method_required',
+							'Add a payment method before moving to a paid plan.',
+							409
+						)
+					);
+				}
+				return route.fulfill(
+					json({
+						changed: true,
+						old_plan_code: currentCode,
+						new_plan_code: targetCode,
+						proration: { amount: '41.67', unused_days: 25, period_days: 30 }
+					})
+				);
+			});
+			await stubMockSetupIntent(page);
+			const saved = await stubSetDefault(page);
+
+			await page.getByTestId('billing-change-plan').click();
+			const modal = page.getByRole('dialog', { name: 'Change plan' });
+			await modal.getByRole('radio', { name: 'Select the E2E Target plan' }).check();
+			await page.getByTestId('billing-change-plan-confirm').click();
+
+			const refused = modal.getByTestId('billing-plan-change-error');
+			await expect(refused).toContainText('Add a card before moving to a paid plan.');
+			await refused.getByRole('button', { name: 'Add a card' }).click();
+
+			// The dialog gives way to the card form, which says what saving will do.
+			await expect(modal).toBeHidden();
+			const setup = page.getByTestId('billing-card-setup');
+			await expect(setup.getByRole('heading', { name: 'Add a card' })).toBeFocused();
+			await expect(setup.getByTestId('billing-card-pending-plan')).toHaveText(
+				'Once your card is saved, we will move you to the E2E Target plan.'
+			);
+
+			await setup.getByTestId('billing-card-save-test').click();
+
+			// Saved, then retried for the reader: the dialog reopens on the result.
+			const result = page.getByTestId('billing-plan-change-result');
+			await expect(result.getByText("You're now on the E2E Target plan.")).toBeVisible({
+				timeout: 10_000
+			});
+			expect(saved.bodies).toEqual([{ setup_intent_id: MOCK_SETUP_INTENT_ID }]);
+			expect(planCodes).toEqual([targetCode, targetCode]);
+			await expect(page.getByTestId('billing-payment-methods').getByText('Visa ····4242')).toBeVisible();
+		});
+
+		test('a declined upgrade charge (402 billing_payment_declined) states its own message and offers Update card', async ({
+			page
+		}) => {
+			await page.route(isApi('/api/billing/change-plan'), (route) =>
+				route.fulfill(refusal('billing_payment_declined', 'Your card was declined.', 402))
+			);
+
+			await page.getByTestId('billing-change-plan').click();
+			const modal = page.getByRole('dialog', { name: 'Change plan' });
+			await modal.getByRole('radio', { name: 'Select the E2E Target plan' }).check();
+			await page.getByTestId('billing-change-plan-confirm').click();
+
+			const refused = modal.getByTestId('billing-plan-change-error');
+			// The localized decline sentence — not the server's English, and not
+			// the plan-feature gate's 402 ("…is included in the … plan").
+			await expect(refused.getByText(
+				'Your card was declined, so your plan was not changed. Update your card and try again.',
+				{ exact: true }
+			)).toBeVisible();
+			await expect(refused.getByRole('button', { name: 'Update card' })).toBeVisible();
+			// Nothing changed: the result view never appears.
+			await expect(page.getByTestId('billing-plan-change-result')).toHaveCount(0);
+		});
+
+		test('a refusal with no card fix (plan_change_in_progress) shows only its message', async ({
+			page
+		}) => {
+			await page.route(isApi('/api/billing/change-plan'), (route) =>
+				route.fulfill(refusal('plan_change_in_progress', 'Another plan change is running.', 409))
+			);
+
+			await page.getByTestId('billing-change-plan').click();
+			const modal = page.getByRole('dialog', { name: 'Change plan' });
+			await modal.getByRole('radio', { name: 'Select the E2E Target plan' }).check();
+			await page.getByTestId('billing-change-plan-confirm').click();
+
+			const refused = modal.getByTestId('billing-plan-change-error');
+			await expect(refused).toHaveText(
+				'Another plan change is already in progress. Try again in a moment.'
+			);
+			await expect(refused.getByRole('button')).toHaveCount(0);
 		});
 
 		test('the picker lists the plan catalog from GET /api/billing/plans, cheapest first', async ({

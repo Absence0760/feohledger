@@ -58,6 +58,10 @@ const NOT_AUDIT_ACTIONS = new Set([
 	'vendor.sanctions_match',
 	// Outbound webhook event name (models/webhook.py).
 	'payment.settled',
+	// Stripe billing webhook event types the subscription sweep maps to a
+	// status (services/billing/webhook_processing.py) — Stripe's names, not ours.
+	'invoice.paid',
+	'invoice.payment_failed',
 	// Sage Intacct query field names.
 	'vendor.id',
 	'vendor.name',

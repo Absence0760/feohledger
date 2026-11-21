@@ -288,3 +288,62 @@ export interface BillingPlanChangeResponse {
 	new_plan_code: string;
 	proration: BillingPlanChangeProration;
 }
+
+/** Body of `POST /api/billing/payment-method/default`: the SetupIntent whose
+ *  confirmed card becomes the one the subscription charges. The response is the
+ *  refreshed {@link BillingPaymentMethodsResponse}. */
+export interface BillingSetDefaultPaymentMethodRequest {
+	setup_intent_id: string;
+}
+
+/** The billing adapter code that means "real Stripe" (`billing_adapters/stripe_billing.py`). */
+export const STRIPE_BILLING_PROVIDER = 'stripe_billing';
+
+/** The local-first billing adapter (`billing_adapters/mock_adapter.py`). */
+export const MOCK_BILLING_PROVIDER = 'mock';
+
+/**
+ * Which card form the add-card flow shows for a started SetupIntent:
+ *
+ * - `not_configured` — no SetupIntent (org never provisioned, provider off), or
+ *   an adapter this build has no card form for. Not an error: the page offers
+ *   a contact link.
+ * - `stripe` — real Stripe with a publishable key: mount the Payment Element.
+ * - `stripe_key_missing` — the backend runs Stripe but this build was made
+ *   without `PUBLIC_STRIPE_PUBLISHABLE_KEY`, an operator config gap. Stripe.js
+ *   must not load without a key, so the form cannot render.
+ * - `mock` — the local test provider: no card form, a "save test card" button.
+ */
+export type CardFormMode = 'not_configured' | 'stripe' | 'stripe_key_missing' | 'mock';
+
+export function cardFormMode(
+	setup: Pick<BillingSetupIntentResponse, 'provider' | 'configured' | 'client_secret' | 'setup_intent_id'>,
+	publishableKey: string | null | undefined
+): CardFormMode {
+	if (!setup.configured || !setup.setup_intent_id) return 'not_configured';
+	if (setup.provider === MOCK_BILLING_PROVIDER) return 'mock';
+	if (setup.provider === STRIPE_BILLING_PROVIDER) {
+		// Elements confirms against the client secret; without one there is
+		// nothing to mount, whatever the key.
+		if (!setup.client_secret) return 'not_configured';
+		return publishableKey && publishableKey.trim() ? 'stripe' : 'stripe_key_missing';
+	}
+	return 'not_configured';
+}
+
+/** `POST /api/billing/change-plan` refused because the org has no saved card. */
+export const PAYMENT_METHOD_REQUIRED = 'payment_method_required';
+/** `POST /api/billing/change-plan` refused because the provider declined the upgrade charge. */
+export const BILLING_PAYMENT_DECLINED = 'billing_payment_declined';
+
+/**
+ * What the plan-change dialog offers beside a refusal: `add_card` when the org
+ * has no card yet, `update_card` when the card on file was declined, `null`
+ * for every other refusal (its localized message is the whole answer). Keyed
+ * on the refusal CODE, never on the (localized) message.
+ */
+export function planChangeCardAction(code: string | null | undefined): 'add_card' | 'update_card' | null {
+	if (code === PAYMENT_METHOD_REQUIRED) return 'add_card';
+	if (code === BILLING_PAYMENT_DECLINED) return 'update_card';
+	return null;
+}
