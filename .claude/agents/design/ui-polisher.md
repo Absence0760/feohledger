@@ -136,6 +136,10 @@ this order; the early ones dominate.
 - **No layout shift.** Reserve space for async content; do not let a late-
   arriving badge push the button the user is aiming at (and see Fitts's law —
   a moving target is an unhittable one).
+- **The page width belongs to the shell.** Never cap a page body with its own
+  `max-width` ("one reading column"): tabs that share a tab bar then differ in
+  width. Cap a prose line, never the page. A round-22 polish did this to
+  `/billing`; `src/lib/settingsTabWidth.test.ts` now fails on it.
 - Lead with what the user came for. Chrome, filters, and explanation come after
   the data, not before it.
 
