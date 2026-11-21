@@ -104,9 +104,16 @@ jobs:
         # substitutes an empty string for an unset placeholder and would ship a
         # root-relative image URL without complaint. The trailing slash is
         # stripped so the image path can never become `//og-image.png`.
+        #
+        # PUBLIC_STRIPE_PUBLISHABLE_KEY (optional, not secret: a pk_live_… key
+        # is meant to ship in the browser) mounts the Stripe card form on
+        # /billing. Empty is allowed: the page then says card entry is not
+        # configured, and the API refuses paid plans until billing is live
+        # anyway (backend/docs/billing.md § What the operator configures).
         env:
           PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
           APP_URL: ${{ vars.APP_URL }}
+          PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ vars.STRIPE_PUBLISHABLE_KEY }}
         run: |
           if [ -z "$APP_URL" ]; then
             echo "::error::APP_URL is empty — set it as a repository variable (https://feohledger.com); it becomes PUBLIC_SITE_URL."
