@@ -799,14 +799,14 @@
 </Modal>
 
 <style>
-	/* One reading column. A local cap, not a breakpoint: below 64rem the
-	   column is simply the workspace width, so 390px gets no new rule. */
+	/* The page body fills the shared workspace frame like every other
+	   Settings tab: no width cap of its own (frontend/docs/ui-patterns.md
+	   § Page layout; guarded by src/lib/settingsTabWidth.test.ts). */
 	.billing {
 		display: flex;
 		flex-direction: column;
 		gap: 2rem;
 		width: 100%;
-		max-width: 64rem;
 		min-width: 0;
 	}
 
