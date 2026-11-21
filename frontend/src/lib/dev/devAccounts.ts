@@ -13,6 +13,12 @@
  * acme has one user per role, techflow an admin and a clerk, and each e2e
  * worker tenant (`e2e1`…`e2eN`) has `demo+<role>@<slug>.localhost` for
  * admin / manager / clerk / cfo.
+ *
+ * One family is not from seed.py: an ERP live-verification workspace
+ * (`erptest-<erp>`, issue #654) is provisioned empty with
+ * `scripts/create_tenant.py --slug erptest-<erp> --admin-email
+ * admin@<slug>.localhost --admin-password demo`, so the panel offers that one
+ * admin. A workspace provisioned another way simply has no matching account.
  */
 
 import type { SystemRole } from '#lib/types/admin.ts';
@@ -56,6 +62,9 @@ export function devAccountsFor(slug: string | null): DevAccount[] {
 			password: SEED_PASSWORD,
 			role
 		}));
+	}
+	if (/^erptest-[a-z0-9-]+$/.test(slug)) {
+		return [{ email: `admin@${slug}.localhost`, password: SEED_PASSWORD, role: 'admin' }];
 	}
 	return [];
 }
