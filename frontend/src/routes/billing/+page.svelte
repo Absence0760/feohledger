@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { goto, replaceState } from '$app/navigation';
+	import { tick, untrack } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page as appPage } from '$app/state';
 	import { ApiError } from '#lib/api.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import CardSetupPanel from '#lib/components/billing/CardSetupPanel.svelte';
+	import { takePendingPlan } from '#lib/utils/pendingPlanChange.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
@@ -135,11 +136,24 @@
 		cardFlowOpen = true;
 	}
 
+	// The section's "Add or replace card" button: where focus goes back to
+	// when the card panel closes (WCAG 2.4.3) — unless the plan dialog reopens
+	// for the retry, which takes focus itself.
+	let addCardButton = $state<HTMLButtonElement | undefined>();
+
+	async function returnFocusToAddCard() {
+		// The button is disabled while the panel is open; it is enabled (and
+		// focusable) only once the close has rendered.
+		await tick();
+		addCardButton?.focus();
+	}
+
 	function closeAddCard() {
 		cardFlowOpen = false;
 		// Walking away from the card form abandons the upgrade it was for.
 		pendingPlanCode = null;
 		pendingPlanName = null;
+		returnFocusToAddCard();
 	}
 
 	async function onCardSaved(res: BillingPaymentMethodsResponse) {
@@ -151,6 +165,7 @@
 		pendingPlanCode = null;
 		pendingPlanName = null;
 		if (pending) await retryPlanChange(pending);
+		else await returnFocusToAddCard();
 	}
 
 	/**
@@ -159,24 +174,41 @@
 	 * redirect-based method: Stripe returns to `/billing?setup_intent=…&
 	 * redirect_status=…&setup_intent_client_secret=…`. The query is dropped
 	 * first, so the single-use secret does not linger in the address bar or
-	 * history, and a reload cannot repeat the call.
+	 * history, and a reload cannot repeat the call. (Should the session have
+	 * expired meanwhile, the auth wall's `next` drops the secret too —
+	 * `utils/postLoginRedirect.ts::SECRET_QUERY_PARAMS`.)
+	 *
+	 * Resolves to the plan code a card-refused upgrade stashed for THIS intent
+	 * before leaving (`utils/pendingPlanChange.ts`), once the card is saved —
+	 * the caller retries that change — else `null`.
 	 */
-	async function finishRedirectedSetup(): Promise<void> {
+	async function finishRedirectedSetup(): Promise<string | null> {
 		const { id, status } = untrack(() => {
 			const params = appPage.url.searchParams;
 			return { id: params.get('setup_intent'), status: params.get('redirect_status') };
 		});
-		if (!id) return;
-		untrack(() => replaceState(appPage.url.pathname, {}));
+		if (!id) return null;
+		// A shallow replace: drops the query without a navigation or a history entry.
+		const path = untrack(() => appPage.url.pathname);
+		await goto(path, { state: {}, shallow: true, replace: true });
+		// Read and clear in every outcome, so no later return can pick it up.
+		const pending = takePendingPlan(id);
+		if (status === 'processing') {
+			// Not a failure: the bank has not settled it yet.
+			toast(m('billing.card.redirectProcessing'), 'info');
+			return null;
+		}
 		if (status !== 'succeeded') {
 			toast(m('billing.card.confirmFailed'), 'error');
-			return;
+			return null;
 		}
 		try {
 			await setDefaultBillingPaymentMethod(id);
 			toast(m('billing.card.saved'), 'success');
+			return pending;
 		} catch (e) {
 			toast(errorMessage(e, m('billing.card.saveFailed')), 'error');
+			return null;
 		}
 	}
 
@@ -282,7 +314,11 @@
 			loadInvoices();
 			// A Stripe redirect return is finished before the list loads, so
 			// the list it shows already holds the new default card.
-			finishRedirectedSetup().then(loadPaymentMethods);
+			// A pending upgrade the redirect interrupted is retried after that.
+			finishRedirectedSetup().then(async (pending) => {
+				await loadPaymentMethods();
+				if (pending) await retryPlanChange(pending);
+			});
 		}
 	});
 
@@ -604,6 +640,7 @@
 					class="btn-cancel"
 					onclick={startAddCard}
 					disabled={cardFlowOpen}
+					bind:this={addCardButton}
 					data-testid="billing-add-card"
 				>
 					{m('billing.pm.addReplace')}
@@ -612,7 +649,7 @@
 
 			{#if cardFlowOpen}
 				{#key cardFlowNonce}
-					<CardSetupPanel {pendingPlanName} onsaved={onCardSaved} onclose={closeAddCard} />
+					<CardSetupPanel {pendingPlanName} {pendingPlanCode} onsaved={onCardSaved} onclose={closeAddCard} />
 				{/key}
 			{/if}
 

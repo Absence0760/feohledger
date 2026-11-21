@@ -1095,6 +1095,8 @@ export const messages = {
 	'billing.card.mockIntro': 'Este espacio de trabajo usa el proveedor de facturación de prueba local, así que no se recoge ninguna tarjeta real. Guarde una tarjeta de prueba para continuar.',
 	'billing.card.mockSave': 'Guardar tarjeta de prueba',
 	'billing.card.pendingPlan': 'En cuanto se guarde su tarjeta, le cambiaremos al plan {plan}.',
+	'billing.card.processing': 'Su tarjeta aún se está confirmando. Seleccione «Guardar tarjeta» de nuevo en un momento para terminar.',
+	'billing.card.redirectProcessing': 'Su banco aún está confirmando su tarjeta. Si no aparece aquí en unos minutos, vuelva a añadirla.',
 	'billing.card.save': 'Guardar tarjeta',
 	'billing.card.saveFailed': 'No se pudo guardar su tarjeta.',
 	'billing.card.saved': 'Tarjeta guardada. Su suscripción se cobra ahora en esta tarjeta.',

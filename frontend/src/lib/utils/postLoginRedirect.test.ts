@@ -150,3 +150,41 @@ describe('the SSO stash', () => {
 		expect(takeNextForSso(null)).toBeNull();
 	});
 });
+
+describe('a provider client secret never rides through sign-in', () => {
+	// Stripe returns from a redirect confirmation to
+	// `/billing?setup_intent=…&redirect_status=…&setup_intent_client_secret=…`.
+	// If the session expired meanwhile, the auth wall builds `next` from that
+	// URL; the single-use secret must not be copied into `/login?next=`, the
+	// MFA / change-password hops, or the SSO stash.
+	const returned =
+		'/billing?setup_intent=seti_x&redirect_status=succeeded&setup_intent_client_secret=seti_x_secret_y';
+
+	it('is dropped by the gate, keeping the rest of the destination', () => {
+		expect(safeNextPath(returned)).toBe('/billing?setup_intent=seti_x&redirect_status=succeeded');
+		expect(safeNextPath('/pay?payment_intent=pi_x&payment_intent_client_secret=pi_x_secret#top')).toBe(
+			'/pay?payment_intent=pi_x#top'
+		);
+	});
+
+	it('never reaches the sign-in URL or the SSO stash', () => {
+		const href = withNext('/login', returned);
+		expect(href).not.toContain('client_secret');
+		expect(nextFromParams(new URL(href, 'https://acme.example').searchParams)).toBe(
+			'/billing?setup_intent=seti_x&redirect_status=succeeded'
+		);
+		const storage = memoryStorage();
+		rememberNextForSso(returned, storage);
+		expect(storage.data.get(SSO_NEXT_KEY)).toBe('/billing?setup_intent=seti_x&redirect_status=succeeded');
+		// A stash written by anything else is cleaned on the way out too.
+		expect(takeNextForSso(memoryStorage({ [SSO_NEXT_KEY]: returned }))).not.toContain('client_secret');
+	});
+
+	it('leaves a destination with no secret byte-identical', () => {
+		expect(safeNextPath('/invoices?status=pending&x=1')).toBe('/invoices?status=pending&x=1');
+	});
+
+	it('refuses a bare root once the secret is gone', () => {
+		expect(safeNextPath('/?setup_intent_client_secret=s')).toBeNull();
+	});
+});

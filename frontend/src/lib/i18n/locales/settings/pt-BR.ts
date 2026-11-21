@@ -1095,6 +1095,8 @@ export const messages = {
 	'billing.card.mockIntro': 'Este espaço de trabalho usa o provedor de cobrança de teste local, então nenhum cartão real é coletado. Salve um cartão de teste para continuar.',
 	'billing.card.mockSave': 'Salvar cartão de teste',
 	'billing.card.pendingPlan': 'Assim que seu cartão for salvo, mudaremos você para o plano {plan}.',
+	'billing.card.processing': 'Seu cartão ainda está sendo confirmado. Selecione “Salvar cartão” novamente em instantes para concluir.',
+	'billing.card.redirectProcessing': 'Seu banco ainda está confirmando seu cartão. Se ele não aparecer aqui em alguns minutos, adicione-o novamente.',
 	'billing.card.save': 'Salvar cartão',
 	'billing.card.saveFailed': 'Não foi possível salvar seu cartão.',
 	'billing.card.saved': 'Cartão salvo. Sua assinatura agora é cobrada neste cartão.',

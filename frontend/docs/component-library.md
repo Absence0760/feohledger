@@ -274,7 +274,12 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
   not-configured / key-missing message. Success posts the SetupIntent id to
   `/payment-method/default` and hands the returned list to `onsaved`. The
   `client_secret` and SDK handles live in plain variables, never `$state`, and
-  the Element is destroyed on save, retry and unmount. Testids:
+  the Element is destroyed on save, retry and unmount. A confirmed intent's id
+  is kept, so Save after a failed default-post re-posts it instead of calling
+  `confirmSetup` again; a `processing` intent shows a neutral notice
+  (`billing-card-save-notice`). `pendingPlanCode` is stashed for the intent
+  just before `confirmSetup` (`utils/pendingPlanChange.ts`) so a redirect
+  return can still retry the upgrade. Testids:
   `billing-card-setup` (`data-mode`), `billing-card-mock`,
   `billing-card-save-test`, `billing-card-element`, `billing-card-save`,
   `billing-card-not-configured`, `billing-card-pending-plan`.

@@ -38,6 +38,18 @@ describe('tenantHostRoute', () => {
 		expect(tenantHostRoute({ ...SIGNED_OUT, path: '/' })).toEqual({ kind: 'goto', to: '/login' });
 	});
 
+	it('walls a Stripe redirect return without copying its client secret into next', () => {
+		const action = tenantHostRoute({
+			...SIGNED_OUT,
+			path: '/billing',
+			search: '?setup_intent=seti_x&redirect_status=succeeded&setup_intent_client_secret=seti_x_secret_y'
+		});
+		expect(action).toEqual({
+			kind: 'goto',
+			to: '/login?next=%2Fbilling%3Fsetup_intent%3Dseti_x%26redirect_status%3Dsucceeded'
+		});
+	});
+
 	it('leaves the sign-in steps alone when signed out', () => {
 		expect(tenantHostRoute({ ...SIGNED_OUT, path: '/login' })).toEqual({ kind: 'stay' });
 		expect(tenantHostRoute({ ...SIGNED_OUT, path: '/login/mfa' })).toEqual({ kind: 'stay' });

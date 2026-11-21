@@ -1112,6 +1112,8 @@ export const enSettings = {
 	'billing.card.mockIntro': 'This workspace uses the local test billing provider, so no real card is collected. Save a test card to continue.',
 	'billing.card.mockSave': 'Save test card',
 	'billing.card.pendingPlan': 'Once your card is saved, we will move you to the {plan} plan.',
+	'billing.card.processing': 'Your card is still being confirmed. Select Save card again in a moment to finish.',
+	'billing.card.redirectProcessing': 'Your card is still being confirmed by your bank. If it does not appear here in a few minutes, add it again.',
 	'billing.card.save': 'Save card',
 	'billing.card.saveFailed': 'Could not save your card.',
 	'billing.card.saved': 'Card saved. Your subscription is now charged to this card.',

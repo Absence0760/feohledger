@@ -30,17 +30,22 @@
 	import { currentLocale, m } from '#lib/i18n/store.svelte.ts';
 	import { theme } from '#lib/stores/theme.svelte.ts';
 	import { CONTACT } from '#lib/legal/operator.ts';
+	import { rememberPendingPlan } from '#lib/utils/pendingPlanChange.ts';
 
 	interface Props {
 		/** Display name of the plan a refused upgrade is waiting on, or null for
 		 *  a plain add / replace. Shown so the reader knows saving continues it. */
 		pendingPlanName?: string | null;
+		/** That plan's code — stashed for the SetupIntent right before a Stripe
+		 *  confirmation, so a redirect-based method's return can still retry it
+		 *  (`utils/pendingPlanChange.ts`). */
+		pendingPlanCode?: string | null;
 		/** The card is saved and is now the default; `res` is the refreshed list. */
 		onsaved: (res: BillingPaymentMethodsResponse) => void | Promise<void>;
 		onclose: () => void;
 	}
 
-	let { pendingPlanName = null, onsaved, onclose }: Props = $props();
+	let { pendingPlanName = null, pendingPlanCode = null, onsaved, onclose }: Props = $props();
 
 	type Phase = 'starting' | 'start_error' | CardFormMode;
 	let phase = $state<Phase>('starting');
@@ -48,6 +53,9 @@
 	let elementState = $state<'loading' | 'ready' | 'error'>('loading');
 	let saving = $state(false);
 	let saveError = $state<string | null>(null);
+	// Neutral, not an error: Stripe accepted the card but its SetupIntent is
+	// still `processing`; saving again once it settles completes the flow.
+	let saveNotice = $state<string | null>(null);
 	let container = $state<HTMLDivElement | undefined>();
 	let heading = $state<HTMLHeadingElement | undefined>();
 
@@ -55,13 +63,19 @@
 	// render, and keeping them out of `$state` keeps them out of devtools'
 	// state snapshots.
 	let setupIntentId: string | null = null;
+	// The SetupIntent Stripe already confirmed (succeeded or processing). Once
+	// set, Save never calls `confirmSetup` again — a confirmed intent cannot be
+	// re-confirmed, so a failed `/payment-method/default` would otherwise leave
+	// the reader stuck — it re-posts this id instead.
+	let confirmedIntentId: string | null = null;
 	let clientSecret: string | null = null;
 	let stripe: Stripe | null = null;
 	let elements: StripeElements | null = null;
 	let paymentElement: StripePaymentElement | null = null;
 	let destroyed = false;
 
-	const headingId = `card-setup-heading-${Math.random().toString(36).slice(2, 8)}`;
+	const uid = $props.id();
+	const headingId = `card-setup-heading-${uid}`;
 
 	function teardown() {
 		paymentElement?.destroy();
@@ -74,9 +88,12 @@
 	async function start() {
 		teardown();
 		setupIntentId = null;
+		confirmedIntentId = null;
 		phase = 'starting';
+		elementState = 'loading';
 		startError = null;
 		saveError = null;
+		saveNotice = null;
 		try {
 			const res = await startBillingSetupIntent();
 			if (destroyed) return;
@@ -136,25 +153,44 @@
 		if (!stripe || !elements || saving) return;
 		saving = true;
 		saveError = null;
+		saveNotice = null;
 		try {
-			const result = await stripe.confirmSetup({
-				elements,
-				redirect: 'if_required',
-				// Only a redirect-based method ever uses it; a card (3-D Secure
-				// included) completes in place. The page finishes a redirect on
-				// return (`/billing?setup_intent=…&redirect_status=succeeded`).
-				confirmParams: { return_url: `${window.location.origin}/billing` }
-			});
-			if (result.error) {
-				// Stripe localizes its card and validation messages (the `locale`
-				// above) and documents them as safe to show; anything else gets
-				// our generic sentence rather than an API-level internals string.
-				const shown =
-					result.error.type === 'card_error' || result.error.type === 'validation_error';
-				saveError = (shown && result.error.message) || m('billing.card.confirmFailed');
-				return;
+			if (!confirmedIntentId) {
+				// A redirect-based method leaves this page; the stash lets the
+				// return still finish the plan change the panel promised.
+				rememberPendingPlan(pendingPlanCode, setupIntentId);
+				const result = await stripe.confirmSetup({
+					elements,
+					redirect: 'if_required',
+					// Only a redirect-based method ever uses it; a card (3-D Secure
+					// included) completes in place. The page finishes a redirect on
+					// return (`/billing?setup_intent=…&redirect_status=succeeded`).
+					confirmParams: { return_url: `${window.location.origin}/billing` }
+				});
+				if (result.error) {
+					// Stripe localizes its card and validation messages (the
+					// `locale` above) and documents them as safe to show; anything
+					// else gets our generic sentence rather than API internals.
+					const shown =
+						result.error.type === 'card_error' || result.error.type === 'validation_error';
+					saveError = (shown && result.error.message) || m('billing.card.confirmFailed');
+					return;
+				}
+				const { id, status } = result.setupIntent;
+				if (status === 'processing') {
+					// Accepted, not yet settled: posting it now would 409
+					// `setup_intent_incomplete`. Keep it; the next Save posts it.
+					confirmedIntentId = id;
+					saveNotice = m('billing.card.processing');
+					return;
+				}
+				if (status !== 'succeeded') {
+					saveError = m('billing.card.confirmFailed');
+					return;
+				}
+				confirmedIntentId = id;
 			}
-			await finish(result.setupIntent.id);
+			await finish(confirmedIntentId);
 		} catch (e) {
 			saveError = errorMessage(e, m('billing.card.saveFailed'));
 		} finally {
@@ -266,6 +302,8 @@
 			<p class="muted secure-note">{m('billing.card.secureNote')}</p>
 			{#if saveError}
 				<p class="error" role="alert" data-testid="billing-card-save-error">{saveError}</p>
+			{:else if saveNotice}
+				<p role="status" data-testid="billing-card-save-notice">{saveNotice}</p>
 			{/if}
 			<div class="actions">
 				{#if elementState === 'error'}

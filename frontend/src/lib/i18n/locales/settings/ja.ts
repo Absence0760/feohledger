@@ -1085,6 +1085,8 @@ export const messages = {
 	'billing.card.mockIntro': 'このワークスペースはローカルのテスト用請求プロバイダーを使用しているため、実際のカードは収集されません。続行するにはテストカードを保存してください。',
 	'billing.card.mockSave': 'テストカードを保存',
 	'billing.card.pendingPlan': 'カードが保存されると、{plan} プランに変更します。',
+	'billing.card.processing': 'カードはまだ確認中です。しばらくしてから、もう一度「カードを保存」を選択して完了してください。',
+	'billing.card.redirectProcessing': 'カードはまだ銀行で確認中です。数分経ってもここに表示されない場合は、もう一度追加してください。',
 	'billing.card.save': 'カードを保存',
 	'billing.card.saveFailed': 'カードを保存できませんでした。',
 	'billing.card.saved': 'カードを保存しました。サブスクリプションの料金はこのカードに請求されます。',

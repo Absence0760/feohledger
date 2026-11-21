@@ -1095,6 +1095,8 @@ export const messages = {
 	'billing.card.mockIntro': 'Cet espace de travail utilise le prestataire de facturation de test local : aucune vraie carte n\'est collectée. Enregistrez une carte de test pour continuer.',
 	'billing.card.mockSave': 'Enregistrer une carte de test',
 	'billing.card.pendingPlan': 'Dès que votre carte sera enregistrée, nous vous passerons à la formule {plan}.',
+	'billing.card.processing': 'Votre carte est encore en cours de confirmation. Sélectionnez à nouveau « Enregistrer la carte » dans un instant pour terminer.',
+	'billing.card.redirectProcessing': 'Votre banque confirme encore votre carte. Si elle n’apparaît pas ici d’ici quelques minutes, ajoutez-la à nouveau.',
 	'billing.card.save': 'Enregistrer la carte',
 	'billing.card.saveFailed': 'Impossible d\'enregistrer votre carte.',
 	'billing.card.saved': 'Carte enregistrée. Votre abonnement est désormais prélevé sur cette carte.',

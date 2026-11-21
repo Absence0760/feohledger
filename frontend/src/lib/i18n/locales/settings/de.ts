@@ -1095,6 +1095,8 @@ export const messages = {
 	'billing.card.mockIntro': 'Dieser Arbeitsbereich nutzt den lokalen Test-Abrechnungsanbieter, daher wird keine echte Karte erfasst. Speichern Sie eine Testkarte, um fortzufahren.',
 	'billing.card.mockSave': 'Testkarte speichern',
 	'billing.card.pendingPlan': 'Sobald Ihre Karte gespeichert ist, stellen wir Sie auf den Tarif {plan} um.',
+	'billing.card.processing': 'Ihre Karte wird noch bestätigt. Wählen Sie gleich noch einmal „Karte speichern“, um abzuschließen.',
+	'billing.card.redirectProcessing': 'Ihre Karte wird noch von Ihrer Bank bestätigt. Wenn sie in einigen Minuten nicht hier erscheint, fügen Sie sie erneut hinzu.',
 	'billing.card.save': 'Karte speichern',
 	'billing.card.saveFailed': 'Ihre Karte konnte nicht gespeichert werden.',
 	'billing.card.saved': 'Karte gespeichert. Ihr Abonnement wird jetzt über diese Karte abgerechnet.',

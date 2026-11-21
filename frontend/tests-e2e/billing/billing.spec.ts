@@ -1,4 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
 	API_BASE,
@@ -164,6 +167,33 @@ async function stubSetDefault(page: Page): Promise<{ bodies: unknown[] }> {
 	});
 	return seen;
 }
+
+/**
+ * The publishable key the app under test was built with, read from the same
+ * places vite reads it: the process environment (CI's preview build inherits
+ * the job's), then `frontend/.env*` in vite's precedence for this mode. Used to
+ * state the no-key spec's precondition instead of assuming it.
+ */
+function builtStripePublishableKey(): string {
+	const fromEnv = process.env.PUBLIC_STRIPE_PUBLISHABLE_KEY;
+	if (fromEnv !== undefined) return fromEnv.trim();
+	const frontend = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+	const mode = process.env.FEOH_E2E_USE_PREVIEW === 'true' ? 'production' : 'development';
+	// Highest precedence first, as vite merges them.
+	for (const name of [`.env.${mode}.local`, `.env.${mode}`, '.env.local', '.env']) {
+		const file = join(frontend, name);
+		if (!existsSync(file)) continue;
+		const line = readFileSync(file, 'utf8')
+			.split('\n')
+			.map((l) => l.trim())
+			.find((l) => l.startsWith('PUBLIC_STRIPE_PUBLISHABLE_KEY='));
+		if (line !== undefined) return line.slice('PUBLIC_STRIPE_PUBLISHABLE_KEY='.length).trim();
+	}
+	return '';
+}
+
+/** Where Stripe sends a redirect-based confirmation back to (status appended). */
+const STRIPE_RETURN = '/billing?setup_intent=seti_x&redirect_status=';
 
 test.describe('/billing (admin)', () => {
 	// Sign the worker admin in explicitly (don't rely on the shared per-worker
@@ -486,6 +516,8 @@ test.describe('/billing (admin)', () => {
 		await setup.getByTestId('billing-card-save-test').click();
 		await expect(setup).toBeHidden();
 		expect(saved.bodies).toEqual([{ setup_intent_id: MOCK_SETUP_INTENT_ID }]);
+		// Focus goes back to the button that opened the panel (WCAG 2.4.3).
+		await expect(page.getByTestId('billing-add-card')).toBeFocused();
 		await expect(section.getByText('Visa ····4242')).toBeVisible();
 		await expect(section.getByText('Default', { exact: true })).toBeVisible();
 		await expect(
@@ -496,9 +528,14 @@ test.describe('/billing (admin)', () => {
 	test('stripe_billing in a build with no publishable key says card entry is not set up', async ({
 		page
 	}) => {
-		// The e2e build sets no PUBLIC_STRIPE_PUBLISHABLE_KEY (the local
-		// default), so a Stripe-backed SetupIntent must not try to load
-		// Stripe.js keyless: it names the operator gap instead.
+		// A Stripe-backed SetupIntent in a build with no publishable key must
+		// not try to load Stripe.js keyless: it names the operator gap instead.
+		// The precondition is stated, not assumed — a build WITH a key would
+		// mount real Stripe here, which no e2e run may do.
+		expect(
+			builtStripePublishableKey(),
+			'this spec needs a build without PUBLIC_STRIPE_PUBLISHABLE_KEY (the local and CI default)'
+		).toBe('');
 		await page.route(isApi('/api/billing/payment-method/setup-intent'), (route) =>
 			route.fulfill(
 				json({
@@ -517,6 +554,56 @@ test.describe('/billing (admin)', () => {
 			'Card entry is not set up for this deployment yet. Contact our team to add a card.'
 		);
 		await expect(page.getByTestId('billing-card-element')).toHaveCount(0);
+	});
+
+	test('cancelling the card form returns focus to Add or replace card', async ({ page }) => {
+		await stubMockSetupIntent(page);
+		await page.goto('/billing');
+		await page.getByTestId('billing-add-card').click();
+		const setup = page.getByTestId('billing-card-setup');
+		await setup.getByRole('button', { name: 'Cancel' }).click();
+		await expect(setup).toBeHidden();
+		await expect(page.getByTestId('billing-add-card')).toBeFocused();
+	});
+
+	test('a Stripe redirect return (succeeded) saves the card as default and drops the secret from the URL', async ({
+		page
+	}) => {
+		const saved = await stubSetDefault(page);
+		await page.goto(`${STRIPE_RETURN}succeeded&setup_intent_client_secret=seti_x_secret_y`);
+
+		await expect(
+			page.getByText('Card saved. Your subscription is now charged to this card.')
+		).toBeVisible();
+		expect(saved.bodies).toEqual([{ setup_intent_id: 'seti_x' }]);
+		await expect(page).not.toHaveURL(/setup_intent/);
+		await expect(page).toHaveURL(/\/billing$/);
+	});
+
+	test('a Stripe redirect return that failed posts nothing and says so', async ({ page }) => {
+		const saved = await stubSetDefault(page);
+		await page.goto(`${STRIPE_RETURN}failed&setup_intent_client_secret=seti_x_secret_y`);
+
+		await expect(
+			page.getByText('Your card could not be confirmed. Check the details and try again.')
+		).toBeVisible();
+		await expect(page).not.toHaveURL(/setup_intent/);
+		expect(saved.bodies).toEqual([]);
+	});
+
+	test('a Stripe redirect return still processing is a neutral notice, not a failure', async ({
+		page
+	}) => {
+		const saved = await stubSetDefault(page);
+		await page.goto(`${STRIPE_RETURN}processing&setup_intent_client_secret=seti_x_secret_y`);
+
+		await expect(
+			page.getByText(
+				'Your card is still being confirmed by your bank. If it does not appear here in a few minutes, add it again.'
+			)
+		).toBeVisible();
+		await expect(page).not.toHaveURL(/setup_intent/);
+		expect(saved.bodies).toEqual([]);
 	});
 
 	test('add-card when not configured shows the billing-not-configured state', async ({ page }) => {
@@ -774,6 +861,38 @@ test.describe('/billing (admin)', () => {
 				'Another plan change is already in progress. Try again in a moment.'
 			);
 			await expect(refused.getByRole('button')).toHaveCount(0);
+		});
+
+		test('an upgrade interrupted by a Stripe redirect is retried on the return', async ({ page }) => {
+			// The card panel stashes the refused plan for its SetupIntent right
+			// before confirmSetup; a redirect-based method then leaves the page.
+			// Seed that stash as the panel writes it, and come back as Stripe does.
+			await page.evaluate(
+				([key, value]) => sessionStorage.setItem(key, value),
+				['billing_pending_plan', JSON.stringify({ planCode: targetCode, setupIntentId: 'seti_x' })]
+			);
+			const planCodes: unknown[] = [];
+			await page.route(isApi('/api/billing/change-plan'), (route) => {
+				planCodes.push(route.request().postDataJSON()?.plan_code);
+				return route.fulfill(
+					json({
+						changed: true,
+						old_plan_code: currentCode,
+						new_plan_code: targetCode,
+						proration: { amount: '41.67', unused_days: 25, period_days: 30 }
+					})
+				);
+			});
+			const saved = await stubSetDefault(page);
+
+			await page.goto(`${STRIPE_RETURN}succeeded&setup_intent_client_secret=seti_x_secret_y`);
+
+			const result = page.getByTestId('billing-plan-change-result');
+			await expect(result.getByText("You're now on the E2E Target plan.")).toBeVisible();
+			expect(saved.bodies).toEqual([{ setup_intent_id: 'seti_x' }]);
+			expect(planCodes).toEqual([targetCode]);
+			// Taken, not left for a later return.
+			expect(await page.evaluate(() => sessionStorage.getItem('billing_pending_plan'))).toBeNull();
 		});
 
 		test('the picker lists the plan catalog from GET /api/billing/plans, cheapest first', async ({
