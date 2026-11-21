@@ -675,6 +675,14 @@ webhook never arrives: a subscription that has sat `past_due` longer than
 period end is overdue by default) is flagged `canceled` with an append-only
 `billing.subscription_canceled` audit row.
 
+**A row a live provider bills is the provider's to cancel** (decisions §480).
+Canceling only our row would drop the org to Free while Stripe's retries kept
+charging it. For a `past_due` row with a provider subscription id and a live
+adapter, the sweep asks the provider first (outside the row lock): canceled
+there → the row is canceled now, whatever the grace window (the backstop for a
+lost `customer.subscription.deleted`); anything else → the row is left alone
+for Stripe's own retries and "cancel after retries fail" setting to decide.
+
 **Money-path boundary:** the sweep ONLY changes a `Subscription` status — it
 never charges, refunds, or creates any payment-side row. (A canceled subscription
 reads as Free via `get_entitlements` (decisions §281); that down-grade is a read consequence, not
@@ -881,7 +889,14 @@ provisioning and before the locked write, outside the row lock:
   fails, its `invoice.payment_failed` webhook names a subscription no row holds
   any more and is dropped — the org is on Free either way, and the unpaid final
   invoice is collected (or written off) by Stripe's own retries and dashboard,
-  not by our status.
+  not by our status. The id is **detached before the cancel**, in its own
+  committed write: the webhook's row lookup is `FOR UPDATE`, so a
+  `customer.subscription.deleted` racing the change waits and then no longer
+  matches, and if the cancel fails the row stays on its paid plan — still what
+  Stripe bills — with no id. Leaving a paid plan with no id on the row asks
+  Stripe for the customer's live subscription (`find_live_subscription`) and
+  cancels that, so the retry heals it. More than one live subscription for one
+  customer is logged at ERROR and the newest adopted.
 - **A declined charge changes nothing**: `error_if_incomplete` makes Stripe
   answer 402 and leave the subscription as it was (or create none), and our row
   is not touched. Cards that need 3-D Secure on every charge cannot pass this
@@ -899,17 +914,32 @@ provisioning and before the locked write, outside the row lock:
   items (amend), and is logged at ERROR meanwhile.
 - **One live change per org at a time.** The provider calls are outside the
   row lock, so a **lease** on `settings.billing.plan_change_lease` (token +
-  expiry, two minutes) serialises them: written under `lock_organization` and
+  expiry, ten minutes) serialises them: written under `lock_organization` and
   committed before the first provider call; a second change meanwhile gets
   `plan_change_in_progress`; an expired lease (a request that died) is taken
-  over (two minutes covers the leg's five provider calls at most, each with a
-  15 s timeout); the lease is dropped when the change ends either way. The `mock`
+  over. Ten minutes is sized to the worst case, not the typical one — five
+  provider calls with a 15 s timeout per connect / write / read phase — because
+  a change still running past its lease could race the one that took it over
+  into a second Stripe subscription; and the locked write re-checks that the
+  lease is still ours, so a change that outlived it is refused
+  (`plan_change_in_progress`, logged at ERROR) rather than recorded over the
+  change that owns the org. The lease is dropped when the change ends either
+  way, by org id (a rollback expires the loaded `Organization`). The `mock`
   path takes no lease — it has no external effect, and the row lock alone
   serialises it as § Concurrency describes. Under the lock a live change also
   refuses if the row moved off the plan the provider change was made from.
 - **The window.** With a live provider the proration window is the UTC calendar
   month (every live subscription is anchored on the 1st), and the row then
   carries Stripe's reported window.
+
+- **A row Stripe bills is never moved by `mock`.** If the org's provider
+  resolves to `mock` (a per-org override, a typo) while its row carries a
+  provider subscription id, the change is refused `billing_not_configured`:
+  repointing it would leave Stripe charging for a plan the org has left.
+- **The audit row** carries `provider`, `provider_action`
+  (`created` / `adopted` / `updated` / `canceled` / `none`), the provider
+  subscription id, `proration_is_estimate: true`, and `from_status` /
+  `to_status` when the provider's answer moved the lifecycle status.
 
 ### Paid plans need a live provider in a deployed environment
 

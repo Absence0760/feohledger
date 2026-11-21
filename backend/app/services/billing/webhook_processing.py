@@ -63,11 +63,24 @@ async def apply_billing_event(
         # update) carry no lifecycle effect for us in this slice — drop quietly.
         return WebhookApplyResult(applied=False, reason="no_subscription_reference")
 
+    # Row-locked, and re-checked by Postgres after the wait: a plan change that
+    # holds this row while it detaches the provider id (a cancel to Free)
+    # commits first, and the locked re-read then no longer matches — so the
+    # cancel's own `customer.subscription.deleted` cannot land on the row the
+    # change just made free. An unlocked read matched, and its later UPDATE by
+    # primary key canceled the free row after the change committed.
+    #
+    # A live row is preferred over a canceled one carrying the same id (one the
+    # dunning sweep canceled), and at most one is taken, so a duplicate id
+    # never raises on every redelivery.
     subscription = (
         await control_db.execute(
-            select(Subscription).where(
-                Subscription.external_subscription_id == event.external_subscription_id
-            )
+            select(Subscription)
+            .where(Subscription.external_subscription_id == event.external_subscription_id)
+            .order_by((Subscription.status == "canceled").asc(), Subscription.created_at.desc())
+            .limit(1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     if subscription is None:

@@ -24292,7 +24292,8 @@ alternative it beat:
    locked window so a webhook or the dunning sweep is never parked behind a
    Stripe round trip; the
    provider leg follows the same rule. Two live changes for one org would then
-   interleave their Stripe calls, so a two-minute lease on
+   interleave their Stripe calls, so a ten-minute lease (sized to the slowest
+   change, which the locked write re-checks it still holds) on
    `settings.billing.plan_change_lease`, written under `lock_organization` and
    committed before the first call, refuses the second
    (`plan_change_in_progress`). A Postgres advisory lock was the alternative; an
@@ -24330,6 +24331,18 @@ copied onto the row, and `canceled` is terminal. Every request pins
 `Stripe-Version` (`FEOH_BILLING_STRIPE_API_VERSION`) because those shapes —
 the window per subscription item, the invoice's subscription under `parent` —
 are exactly what changed in Stripe's 2025 versions.
+
+Where Stripe and our row could part ways, the review closed the gaps rather
+than trusting one webhook: the cancel to Free detaches the provider id in its
+own committed write BEFORE the DELETE, and the webhook reads its row
+`FOR UPDATE`, so the cancel's own `customer.subscription.deleted` cannot cancel
+the now-free row; leaving a paid plan whose row lost its id finds the customer's
+live subscription and cancels it; an org whose provider resolves to `mock` while
+its row carries a provider id cannot be moved (Stripe would keep billing); and
+the dunning sweep cancels a live-billed row only once the provider has canceled
+it, since canceling ours alone revoked the plan while Stripe kept charging. One
+gap is left, tracked in `docs/followups.md`: a subscription a crashed change
+created and never recorded is healed only by the org's next plan change.
 
 Left to verify in Stripe test mode, recorded here when seen: whether swapping a
 meter-backed price mid-period with `always_invoice` invoices the usage already

@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -45,16 +46,19 @@ from app.services.billing_adapters.base import (
     CreateSubscriptionRequest,
     ProviderSubscription,
 )
-from app.tenant import lock_organization
 
 logger = logging.getLogger(__name__)
 
 #: ``settings.billing`` key holding an in-flight live plan change's lease.
 LEASE_KEY = "plan_change_lease"
-#: How long a lease holds before another change may take over. Comfortably
-#: longer than the provider calls of one change (five at most, each with a 15 s
-#: client timeout); short enough that a crashed request blocks nobody for long.
-LEASE_TTL = timedelta(minutes=2)
+#: How long a lease holds before another change may take over. It must outlast
+#: the slowest change that is still running — a change past its lease could
+#: race the one that took it over into a SECOND provider subscription — so it
+#: is sized to the worst case, not the typical one: five provider calls, each
+#: with a 15 s timeout per connect / write / read phase (~4 min), plus the
+#: locked write. A request that crashed blocks the org's plan changes for this
+#: long, which is the cheaper failure.
+LEASE_TTL = timedelta(minutes=10)
 
 #: The adapter name that is never a live provider.
 MOCK_PROVIDER = "mock"
@@ -122,7 +126,7 @@ async def claim_plan_change_lease(
     provider call. An expired lease — a request that died mid-change — is
     simply taken over.
     """
-    locked = await lock_organization(control_db, org)
+    locked = await _lock_org(control_db, org.id)
     settings_dict = dict(locked.settings or {})
     billing = dict(settings_dict.get("billing") or {})
     lease = billing.get(LEASE_KEY)
@@ -143,13 +147,36 @@ async def claim_plan_change_lease(
     return token
 
 
-async def release_plan_change_lease(
-    control_db: AsyncSession, org: Organization, token: str
-) -> None:
+async def _lock_org(control_db: AsyncSession, organization_id) -> Organization:
+    """`lock_organization` by id. The callers here run after a rollback, which
+    expires every loaded instance — reading ``org.id`` off one from async code
+    would be a lazy load (``MissingGreenlet``), so they hold the plain id."""
+    return (
+        await control_db.execute(
+            select(Organization)
+            .where(Organization.id == organization_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+
+async def lease_is_ours(control_db: AsyncSession, organization_id, token: str) -> bool:
+    """Whether the org's lease is still ``token`` — read under the org lock.
+
+    `change_plan` checks it inside its locked write: a change whose lease ran
+    out and was taken over must not record what it did at the provider over
+    the change that now owns the org."""
+    locked = await _lock_org(control_db, organization_id)
+    lease = ((locked.settings or {}).get("billing") or {}).get(LEASE_KEY)
+    return isinstance(lease, dict) and lease.get("token") == token
+
+
+async def release_plan_change_lease(control_db: AsyncSession, organization_id, token: str) -> None:
     """Drop the lease if it is still ours. Best-effort: a failure here only
     means the lease runs out on its own after `LEASE_TTL`."""
     try:
-        locked = await lock_organization(control_db, org)
+        locked = await _lock_org(control_db, organization_id)
         settings_dict = dict(locked.settings or {})
         billing = dict(settings_dict.get("billing") or {})
         lease = billing.get(LEASE_KEY)
@@ -203,7 +230,14 @@ async def apply_plan_at_provider(
     """
     if not plan_is_paid(new_plan):
         if external_subscription_id is None:
-            return ProviderChange(action="none", external_subscription_id=None)
+            # Our row names none — but one may still be billing: created by an
+            # attempt that died before recording it, or detached from the row
+            # before a cancel that then failed (`change_plan`). Leaving a paid
+            # tier must stop the charge whichever way the id got lost.
+            live = await adapter.find_live_subscription(ids.customer_id)
+            if live is None:
+                return ProviderChange(action="none", external_subscription_id=None)
+            external_subscription_id = live.external_subscription_id
         canceled = await adapter.cancel_subscription(external_subscription_id)
         return ProviderChange(
             action="canceled", external_subscription_id=None, subscription=canceled

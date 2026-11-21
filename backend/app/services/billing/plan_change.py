@@ -79,6 +79,8 @@ from app.services.billing.provider_sync import (
     calendar_month,
     claim_plan_change_lease,
     is_live_provider,
+    lease_is_ours,
+    plan_is_paid,
     refuse_unbilled_paid_plan,
     release_plan_change_lease,
 )
@@ -179,6 +181,9 @@ async def change_plan(
     successful **no-op** (``changed=False``).
     """
     now = change_at or datetime.now(UTC)
+    # Held as a plain value: a rollback below expires `org`, and reading an
+    # attribute off an expired instance from async code is a lazy load.
+    org_id = org.id
 
     new_plan = (
         await control_db.execute(
@@ -221,6 +226,7 @@ async def change_plan(
         )
     # Plain values: the provisioning commit below expires every loaded instance.
     peek_plan_id = peek_plan.id
+    peek_subscription_id = peek_subscription.id
     peek_external_id = peek_subscription.external_subscription_id
     updated_at = peek_subscription.updated_at or peek_subscription.created_at
     change_key = (
@@ -232,6 +238,12 @@ async def change_plan(
     # A deployed environment never hands out a paid plan the provider cannot
     # charge for (decisions §480). Before provisioning, so nothing is written.
     refuse_unbilled_paid_plan(adapter, new_plan, deployed=settings.is_deployed)
+    if not live and peek_external_id is not None:
+        # The row is billed by a live provider subscription, but this org's
+        # provider now resolves to `mock` (a per-org override, or a typo'd
+        # setting): repointing the row would leave Stripe charging for a plan
+        # the org has left. Nothing here can cancel it, so refuse.
+        raise ProviderLegRefused("billing_not_configured")
 
     # Resolve-or-create the provider customer + the NEW plan's price so the live
     # adapter has what create/update needs. Fails closed (BillingNotConfigured)
@@ -245,9 +257,19 @@ async def change_plan(
             # One live change per org at a time: its provider calls happen
             # outside the row lock, so the lock alone cannot serialise them.
             lease = await claim_plan_change_lease(control_db, org, now=now)
+            if peek_external_id is not None and not plan_is_paid(new_plan):
+                # Reserve before the cancel: detach the provider id from our row
+                # FIRST, so the cancel's own `customer.subscription.deleted`
+                # webhook can never find (and cancel) this row — not while our
+                # write is pending, and not if it then fails. A row left on its
+                # paid plan with no id is healed by the next change, which finds
+                # the provider subscription by customer (`find_live_subscription`).
+                await _detach_provider_subscription(
+                    control_db, peek_subscription_id, peek_external_id
+                )
             provider_change = await apply_plan_at_provider(
                 adapter,
-                organization_id=org.id,
+                organization_id=org_id,
                 external_subscription_id=peek_external_id,
                 new_plan=new_plan,
                 ids=ids,
@@ -257,7 +279,8 @@ async def change_plan(
 
         result = await _record_change(
             control_db,
-            org=org,
+            org_id=org_id,
+            lease=lease,
             new_plan=new_plan,
             actor_id=actor_id,
             now=now,
@@ -278,14 +301,32 @@ async def change_plan(
         raise
     finally:
         if lease is not None:
-            await release_plan_change_lease(control_db, org, lease)
+            await release_plan_change_lease(control_db, org_id, lease)
     return result
+
+
+async def _detach_provider_subscription(
+    control_db: AsyncSession, subscription_id, external_subscription_id: str
+) -> None:
+    """Clear the row's provider id, if it is still ``external_subscription_id``."""
+    row = (
+        await control_db.execute(
+            select(Subscription)
+            .where(Subscription.id == subscription_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if row is not None and row.external_subscription_id == external_subscription_id:
+        row.external_subscription_id = None
+    await control_db.commit()
 
 
 async def _record_change(
     control_db: AsyncSession,
     *,
-    org: Organization,
+    org_id,
+    lease: str | None,
     new_plan: Plan,
     actor_id,
     now: datetime,
@@ -294,7 +335,13 @@ async def _record_change(
     expected_plan_id,
 ) -> PlanChangeResult:
     """The locked read-modify-write: ONE transaction, ONE commit."""
-    active = await _get_active_subscription_for_update(control_db, org.id)
+    if lease is not None and not await lease_is_ours(control_db, org_id, lease):
+        # Our lease ran out and another change took the org over while our
+        # provider calls were still running. Recording ours now would overwrite
+        # the change that owns the org; refuse, and say the provider moved.
+        logger.error("billing plan change outlived its lease; not recorded")
+        raise ProviderLegRefused("plan_change_in_progress")
+    active = await _get_active_subscription_for_update(control_db, org_id)
     if active is None:
         raise PlanChangeError("no_live_subscription")
     subscription, current_plan = active
@@ -367,7 +414,7 @@ async def _record_change(
     # shared with `plan_catalog.ensure_subscription` and the seed's repair —
     # one owner, so a fourth writer inherits the rule instead of rediscovering
     # it as a production IntegrityError.
-    await clear_stale_canceled_subscription(control_db, organization_id=org.id, plan_id=new_plan.id)
+    await clear_stale_canceled_subscription(control_db, organization_id=org_id, plan_id=new_plan.id)
 
     previous_plan_code = current_plan.code
     subscription.plan_id = new_plan.id
@@ -388,6 +435,9 @@ async def _record_change(
         "provider": provider,
     }
     if provider_change is not None:
+        # With a live provider the figure above is our day-granular estimate;
+        # the provider's invoice (second-granular) is the charge of record.
+        details["proration_is_estimate"] = True
         details["provider_action"] = provider_change.action
         details["external_subscription_id"] = provider_change.external_subscription_id
     if subscription.status != previous_status:
@@ -397,7 +447,7 @@ async def _record_change(
         details["from_status"] = previous_status
         details["to_status"] = subscription.status
     await dispatch_auth_audit(
-        organization_id=org.id,
+        organization_id=org_id,
         actor_id=actor_id,
         action="billing.plan_changed",
         entity_id=subscription.id,

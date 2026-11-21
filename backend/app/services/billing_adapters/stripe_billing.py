@@ -368,10 +368,20 @@ class StripeBillingAdapter(BillingAdapter):
         async with self._client() as client:
             resp = await client.get("/v1/subscriptions", params=params)
         payload = self._json_or_raise(resp, "list_subscriptions")
-        for obj in payload.get("data") or []:
-            if isinstance(obj, dict) and obj.get("status") not in _ENDED_STATUSES:
-                return _subscription_of(obj)
-        return None
+        live = [
+            obj
+            for obj in payload.get("data") or []
+            if isinstance(obj, dict) and obj.get("status") not in _ENDED_STATUSES
+        ]
+        if len(live) > 1:
+            # One org is one subscription; two means one is billed for nothing.
+            # Adopt the newest (Stripe lists newest first) and say so loudly —
+            # the other needs an operator, and refusing would block the org.
+            logger.error(
+                "billing: customer has %d live provider subscriptions; adopting the newest",
+                len(live),
+            )
+        return _subscription_of(live[0]) if live else None
 
     async def change_subscription_plan(
         self,

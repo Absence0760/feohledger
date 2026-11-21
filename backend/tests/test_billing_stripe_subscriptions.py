@@ -1033,3 +1033,204 @@ async def test_default_card_endpoint_is_admin_or_cfo_only(realdb, org_a):
             "/api/billing/payment-method/default", json={"setup_intent_id": "seti_1"}
         )
     assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Money-path review: the edges where Stripe and our row can part ways.
+# ---------------------------------------------------------------------------
+
+
+def _live_sub(fake: FakeStripe, sid: str, customer: str = "cus_org", status: str = "active"):
+    fake.subscriptions[sid] = {
+        "id": sid,
+        "status": status,
+        "customer": customer,
+        "metadata": {},
+        "items": [{"id": f"si_{sid}", "price": "price_x"}],
+        "period": (
+            int(datetime(2026, 6, 1, tzinfo=UTC).timestamp()),
+            int(datetime(2026, 7, 1, tzinfo=UTC).timestamp()),
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_leaving_a_paid_plan_cancels_a_subscription_the_row_lost(
+    realdb, fake_stripe, org_a, _audit_engine_on_loop
+):
+    """A row on a paid plan with no provider id (a create that died before
+    recording, or a detach whose cancel failed) still has a Stripe subscription
+    charging it; moving to Free must find it by customer and cancel it."""
+    await _plan(realdb, "free", "0.00", overage=False)
+    growth = await _plan(realdb, "growth", "49.00")
+    sub_id = await _sub(realdb, org_a, growth)  # no external id
+    await _set_billing(realdb, org_a, stripe_customer_id="cus_org")
+    _live_sub(fake_stripe, "sub_lost")
+
+    await _change(realdb, org_a, "free")
+
+    assert fake_stripe.subscriptions["sub_lost"]["status"] == "canceled"
+    (details,) = await _audit_details(realdb, sub_id)
+    assert details["provider_action"] == "canceled"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_cancel_leaves_the_row_paid_and_detached_and_the_retry_heals_it(
+    realdb, fake_stripe, org_a, monkeypatch, _audit_engine_on_loop
+):
+    """The provider id is detached BEFORE the cancel (so the cancel's own
+    `deleted` webhook can never land on the row). If the cancel then fails, the
+    row stays on its paid plan — still what Stripe bills — and the retry finds
+    the subscription by customer."""
+    free = await _plan(realdb, "free", "0.00", overage=False)
+    growth = await _plan(realdb, "growth", "49.00")
+    sub_id = await _sub(realdb, org_a, growth, external_id="sub_keep")
+    await _set_billing(realdb, org_a, stripe_customer_id="cus_org")
+    _live_sub(fake_stripe, "sub_keep")
+
+    real_cancel = StripeBillingAdapter.cancel_subscription
+
+    async def failing_cancel(self, external_subscription_id):
+        from app.services.billing_adapters.base import BillingProviderError
+
+        raise BillingProviderError("Stripe cancel_subscription failed: HTTP 500")
+
+    monkeypatch.setattr(StripeBillingAdapter, "cancel_subscription", failing_cancel)
+    with pytest.raises(Exception):  # noqa: B017 — the provider error propagates as-is
+        await _change(realdb, org_a, "free")
+    row = await _row(realdb, sub_id)
+    assert row.plan_id == growth and row.external_subscription_id is None
+    assert fake_stripe.subscriptions["sub_keep"]["status"] == "active"
+    assert LEASE_KEY not in await _org_billing(realdb, org_a)
+
+    monkeypatch.setattr(StripeBillingAdapter, "cancel_subscription", real_cancel)
+    await _change(realdb, org_a, "free", at=CHANGE_AT + timedelta(minutes=1))
+    assert fake_stripe.subscriptions["sub_keep"]["status"] == "canceled"
+    assert (await _row(realdb, sub_id)).plan_id == free
+
+
+@pytest.mark.asyncio
+async def test_a_mock_override_cannot_repoint_a_row_stripe_still_bills(
+    realdb, fake_stripe, org_a, _audit_engine_on_loop
+):
+    await _plan(realdb, "free", "0.00", overage=False)
+    growth = await _plan(realdb, "growth", "49.00")
+    sub_id = await _sub(realdb, org_a, growth, external_id="sub_billed")
+    await _set_billing(realdb, org_a, stripe_customer_id="cus_org", provider="mock")
+    with pytest.raises(ProviderLegRefused) as exc:
+        await _change(realdb, org_a, "free")
+    assert exc.value.code == "billing_not_configured"
+    assert (await _row(realdb, sub_id)).plan_id == growth
+
+
+@pytest.mark.asyncio
+async def test_a_change_that_outlived_its_lease_is_not_recorded(
+    realdb, fake_stripe, org_a, monkeypatch, _audit_engine_on_loop
+):
+    """If a slow change's lease runs out and another change takes it over, the
+    slow one must not record over the change that now owns the org."""
+    import app.services.billing.plan_change as plan_change_module
+
+    free = await _plan(realdb, "free", "0.00", overage=False)
+    await _plan(realdb, "growth", "49.00")
+    sub_id = await _sub(realdb, org_a, free)
+    await _set_billing(realdb, org_a, stripe_customer_id="cus_org")
+    fake_stripe.add_card("cus_org")
+    real_leg = plan_change_module.apply_plan_at_provider
+
+    async def leg_then_taken_over(*args, **kwargs):
+        change = await real_leg(*args, **kwargs)
+        other = {"token": "someone-else", "expires_at": "2099-01-01T00:00:00+00:00"}
+        await _set_billing(realdb, org_a, plan_change_lease=other)
+        return change
+
+    monkeypatch.setattr(plan_change_module, "apply_plan_at_provider", leg_then_taken_over)
+    with pytest.raises(ProviderLegRefused) as exc:
+        await _change(realdb, org_a, "growth")
+    assert exc.value.code == "plan_change_in_progress"
+    assert (await _row(realdb, sub_id)).plan_id == free
+    # The lease that now owns the org is not ours to drop.
+    assert (await _org_billing(realdb, org_a))[LEASE_KEY]["token"] == "someone-else"
+
+
+@pytest.mark.asyncio
+async def test_the_cancels_own_deleted_webhook_cannot_cancel_the_free_row(
+    realdb, org_a, _audit_engine_on_loop
+):
+    """Two connections: a plan change holds the row and detaches the provider id;
+    the cancel's `customer.subscription.deleted` arrives meanwhile. It waits on
+    the row lock and, after the change commits, no longer matches."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    growth = await _plan(realdb, "growth", "49.00")
+    sub_id = await _sub(realdb, org_a, growth, external_id="sub_echo")
+    holder = realdb.control_sessionmaker()()
+    try:
+        row = (
+            await holder.execute(
+                select(Subscription).where(Subscription.id == sub_id).with_for_update()
+            )
+        ).scalar_one()
+        row.external_subscription_id = None
+        await holder.flush()
+
+        deleted = BillingWebhookEvent(
+            event_id="evt_echo",
+            event_type="customer.subscription.deleted",
+            external_subscription_id="sub_echo",
+            status="canceled",
+        )
+        webhook = asyncio.create_task(_apply(realdb, deleted))
+
+        async def _until_blocked():
+            async with realdb.control_sessionmaker()() as probe:
+                while True:
+                    waiting = (
+                        await probe.execute(
+                            text(
+                                "SELECT count(*) FROM pg_stat_activity "
+                                "WHERE wait_event_type = 'Lock' AND datname = current_database()"
+                            )
+                        )
+                    ).scalar_one()
+                    if waiting:
+                        return
+                    await asyncio.sleep(0.02)
+
+        # The real signal: the webhook's SELECT … FOR UPDATE is waiting on us.
+        await asyncio.wait_for(_until_blocked(), timeout=10)
+        await holder.commit()
+        result = await asyncio.wait_for(webhook, timeout=10)
+    finally:
+        await holder.close()
+
+    assert result.applied is False and result.reason == "unknown_subscription"
+    row = await _row(realdb, sub_id)
+    assert row.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_dunning_leaves_a_live_row_to_the_provider_until_it_cancels(
+    realdb, fake_stripe, org_a, _audit_engine_on_loop
+):
+    from app.services.billing.dunning_sweep import run_dunning_once
+
+    growth = await _plan(realdb, "growth", "49.00")
+    sub_id = await _sub(realdb, org_a, growth, external_id="sub_dun", status="past_due")
+    _live_sub(fake_stripe, "sub_dun", status="past_due")
+    far_future = datetime(2027, 1, 1, tzinfo=UTC)  # well past the grace window
+
+    async with realdb.control_sessionmaker()() as s:
+        result = await run_dunning_once(s, now=far_future)
+    # Stripe is still retrying: canceling our row would drop the features while
+    # Stripe keeps charging for them.
+    assert result.canceled == 0
+    assert (await _row(realdb, sub_id)).status == "past_due"
+
+    fake_stripe.subscriptions["sub_dun"]["status"] = "canceled"  # webhook lost
+    async with realdb.control_sessionmaker()() as s:
+        result = await run_dunning_once(s, now=far_future)
+    assert result.canceled == 1
+    assert (await _row(realdb, sub_id)).status == "canceled"
