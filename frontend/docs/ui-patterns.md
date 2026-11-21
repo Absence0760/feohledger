@@ -45,6 +45,12 @@ is wide enough for grid pages on 1920–2560px monitors without leaving
 half the viewport empty; on a 13″ laptop the natural body width
 constrains it before the cap kicks in.
 
+The same goes for the page body: a route never wraps its body in a
+`max-width` of its own. Tabs that share one tab bar must be the same width,
+or switching tabs moves the page (Subscription once capped itself at 64rem
+beside a full-width Organization). `src/lib/settingsTabWidth.test.ts` checks
+every Settings tab; cap a prose line's length, never the page.
+
 **Data that lands after first paint must not move what is already drawn.**
 A page mounts, draws its shell, and fills in from responses that arrive a
 round trip later. Anything those responses *add above the table* drops the
